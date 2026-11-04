@@ -1343,7 +1343,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     P["dly_on"] = int(P["dly_mix"] > 0)
     P["rev_on"] = int(P["rev_mix"] > 0)
     if CARRY_BUSES:
-        note += map_bus_racks(ph, P)
+        note += map_bus_racks(ph, P, feg if (flt_routes and not bypassed) else None)
     # The performance knobs (Decay macro, Drive, the two shelves) are neutral in every preset, written out
     # so that loading a preset puts them back.
     P.update({"decay": 64, "drive": 0, "lo_shelf": 64, "hi_shelf": 64})
@@ -1359,7 +1359,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
 BUS_KEYS = [k for k in fxmap.fx_defaults() if k != "fx_space"]
 
 
-def map_bus_racks(ph: dict, P: dict) -> list[str]:
+def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
     """The FX bus racks that some source sends to, as the engine's bus pots (state keys "b1." / "b2."): each rack mapped as the main one is (the importer measures its reverb,
     delay and width under the name '<preset>#busN'), its compressor thresholds taken to the engine's level the same way. A send into an empty rack is a plain copy of the source."""
     notes = []
@@ -1390,6 +1390,17 @@ def map_bus_racks(ph: dict, P: dict) -> list[str]:
             for k, key in (("comp_thresh2_out_db", "comp_thresh2"), ("comp_thresh3_out_db", "comp_thresh3")):
                 if k in extra:
                     fx_p[key] = int(round(_clamp((extra[k] + m_db - g_db + 90.0) / 120.0, 0.0, 1.0) * 127))
+        # A Filter FX that the filter envelope moves is the engine's Filter stage in a rack, as in the main one (fxmap.filter_bands leaves it to that stage and
+        # no static EQ band stands in for it): left out here, the EQs behind it, set to lift what it takes away, boost the whole distorted signal (Lead - Other
+        # Side's bus 1: LP 24 -> +18 dB shelf at 15 kHz, +29 dB too much above 10 kHz).
+        dyn = fxmap.dynamic_filter(nodes, {"mods": ph["mods"], "macros": ph["macros"]})
+        if dyn:
+            scratch: dict = {}
+            fnotes = apply_filter2(scratch, dyn, ph, voice_env if voice_env is not None else (-1 if P.get("fxf_on") else None))
+            fx_p.update({k: v for k, v in scratch.items() if k.startswith("fxf_")})
+            if voice_env is None and not P.get("fxf_on"):
+                P.update({k: v for k, v in scratch.items() if k in ("flt_a", "flt_d", "flt_s", "flt_r")})      # no voice filter uses the envelope: the stage takes the Filter FX's
+            notes += [f"FX bus {b}: {n}" for n in fnotes]
         fx_p["eq_on"] = int(any(fx_p.get(f"eq{n}_type", 0) for n in range(1, 5)))
         fx_p["wide_on"] = int(fx_p.get("fx_wide", 0) > 0)
         fx_p["dly_on"] = int(fx_p.get("dly_mix", 0) > 0)

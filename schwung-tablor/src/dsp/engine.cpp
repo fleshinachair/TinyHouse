@@ -440,6 +440,16 @@ void Engine::renderBlock(int16_t *out, int frames)
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
             fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f));
+            /* The buses' racks have the same Filter FX (the "b1.fxf_*" / "b2.fxf_*" keys), moved by the same envelope: Lead - Other Side's bus 1 filters
+             * its distortion and the EQs behind it boost the highs it takes away. */
+            for (int b = 0; b < 2; b++) {
+                const float *bp = busPots[b];
+                const bool bon = bp[TB_P_FXF_ON] >= 0.5f && pots[TB_P_FX_ON] >= 0.5f;
+                if (!bon && !fxBus[b].filterOn()) continue;
+                const float bnote = potFilterNote(bp[TB_P_FXF_FREQ]) + env * potBipolar(bp[TB_P_FXF_ENV]) * filterWidth;
+                const float bres = std::clamp(bp[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
+                fxBus[b].setFilter(bon, (int) bp[TB_P_FXF_TYPE], std::clamp(midiNoteToHz(bnote), 4.0f, 20000.0f), kFilterQ / (1.0f - bres * 0.99f));
+            }
         }
         for (int b = 0; b < 2; b++) {                   /* the buses' racks: their output joins the main path ahead of the main rack (probe: a Filter FX in the main rack filters what a bus returns) */
             if (!busLive[b] && !fxBus[b].active()) continue;

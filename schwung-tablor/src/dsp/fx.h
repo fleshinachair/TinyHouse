@@ -401,6 +401,8 @@ public:
 
     /* The Filter FX: a filter after the distortion, its cutoff set by the engine each block (it follows the filter envelope).
      * type is the voice filter's list (LP/HP/BP/notch, 12 and 24 dB). */
+    bool filterOn() const { return xfOn; }
+
     void setFilter(bool on, int type, float hz, float q)
     {
         if (on) {

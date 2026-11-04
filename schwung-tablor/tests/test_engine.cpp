@@ -671,6 +671,21 @@ static void testFxBuses()
     CHECK(std::fabs((both - direct) - 6.02) < 0.3, "Direct plus a full send to an empty bus is +6 dB (%.2f dB)", both - direct);
     CHECK(std::fabs(onlyBus - direct) < 0.3, "route None with a full send sounds like the Direct route alone (%.2f vs %.2f dB)", onlyBus, direct);
     CHECK(silent < -60.0, "route None with no send is silent (%.1f dB)", silent);
+    /* a bus rack's own Filter FX (b1.fxf_*): off it is transparent, a low-pass at a low cutoff takes the level down, an open one does not */
+    auto filtered = [](bool on, int freq) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_WT1_POST] = 2; e.pots[TB_P_WT1_BUS1] = 127;
+        e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.busPots[0][TB_P_FXF_ON] = on ? 1.0f : 0.0f; e.busPots[0][TB_P_FXF_TYPE] = 1; e.busPots[0][TB_P_FXF_FREQ] = (float) freq; e.busPots[0][TB_P_FXF_ENV] = 64;
+        note(e, 72, 100);
+        auto x = render(e, 200);
+        double a = 0;
+        for (size_t i = x.size() / 2; i < x.size(); i += 2) a += (double) x[i] * x[i];
+        return 10.0 * std::log10(a / (x.size() / 4) + 1e-9);
+    };
+    const double fOff = filtered(false, 20), fLow = filtered(true, 20), fOpen = filtered(true, 127);
+    CHECK(fLow < fOff - 12.0, "a closed bus Filter FX (LP 24) takes a saw's level well down (%.1f dB against %.1f off)", fLow, fOff);
+    CHECK(std::fabs(fOpen - fOff) < 1.0, "an open bus Filter FX leaves the level alone (%.1f dB against %.1f off)", fOpen, fOff);
     /* the tail: note off, then the reverb on the bus keeps ringing */
     Engine e;
     e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_WT1_POST] = 2; e.pots[TB_P_WT1_BUS1] = 127;

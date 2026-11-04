@@ -17,6 +17,7 @@ import test_render_calibration as H
 import fx_fingerprint as FP
 
 SR = H.SR
+TYPE = sys.argv[1] if len(sys.argv) > 1 else "L12"          # the Filter FX model: probe_fxfilter_env.py [L12|MgL24|...]
 NOTE, F0 = 48, 440 * 2 ** ((48 - 69) / 12)
 NH, WIN = 60, 0.06
 TIMES = (0.03, 0.09, 0.15, 0.24, 0.36, 0.54, 0.80, 1.20)
@@ -49,7 +50,7 @@ def main():
     for name, (c, a, d, s, r) in CASES.items():
         t = copy.deepcopy(tree0)
         nd = copy.deepcopy(node)
-        nd["FXFilter"]["plainParams"] = {"kParamFreq": c, "kParamType": "L12", "kParamReso": 10.0}
+        nd["FXFilter"]["plainParams"] = {"kParamFreq": c, "kParamType": TYPE, "kParamReso": 10.0}
         t["FXRack0"]["FX"] = [nd]
         t["Env1"]["plainParams"] = {"kParamAttack": a, "kParamDecay": d, "kParamSustain": s, "kParamRelease": r}
         t["ModSlot0"] = {"destModuleID": 0, "destModuleParamID": 3, "destModuleParamName": "kParamFreq", "destModuleTypeString": "FXFilter",

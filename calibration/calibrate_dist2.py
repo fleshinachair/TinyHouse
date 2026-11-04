@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-ENGINE_MODE = {"default": 0, "kSoftClip": 0, "kTapeSat": 0, "kSineShaper": 3, "kAsym": 1, "kDiode2": 1, "kOverdrive": 2, "kHardClip": 2}
+ENGINE_MODE = {"default": 0, "kSoftClip": 0, "kTapeSat": 0, "kSineShaper": 3, "kAsym": 1, "kDiode2": 1, "kDiode1": 0, "kOverdrive": 2, "kHardClip": 2}
 N, CYC = 1 << 12, 16
 ENGINE_BIAS = 0.003027                                           # the biased curve's fixed input bias in the probe's units (fx.h processDistCal: 0.004 / the probe gain in the engine's)
 FLOOR = 3e-4                                                  # amplitudes below -70 dB are not compared (the probe's own noise floor)

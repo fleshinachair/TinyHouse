@@ -20,7 +20,7 @@ import test_render_calibration as H
 SR = H.SR
 F0 = 130.81
 VOLS = (0.1, 0.25, 0.5, 1.0)
-MODES = [None, "kSoftClip", "kAsym", "kOverdrive", "kHardClip", "kDiode2", "kSineShaper", "kTapeSat"]
+MODES = [None, "kSoftClip", "kAsym", "kOverdrive", "kHardClip", "kDiode2", "kSineShaper", "kTapeSat", "kDiode1"]
 DRIVES = (0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
 
 
@@ -48,6 +48,13 @@ def main():
     s = H.Serum()
     header, base = H.load_preset("Keys - Loop")
     out = {"ref": {}, "rows": [], "levelout": []}
+    # probe_dist_transfer.py kDiode1 ...: measure only the named modes and merge them into the existing file (its other rows and the LevelOut table stay as measured)
+    only = sys.argv[1:]
+    modes = MODES
+    if only:
+        prev = json.loads(Path("calibration/probe_dist_transfer.json").read_text())
+        out = {"ref": prev["ref"], "rows": [r for r in prev["rows"] if r["mode"] not in only], "levelout": prev["levelout"]}
+        modes = [m for m in only]
 
     def tree(vol, node):
         t = H.init_tree(base, table="Analog/Basic Shapes.wav", frames=7)
@@ -66,9 +73,11 @@ def main():
         return [0.0] * 5
 
     for v in VOLS:
-        out["ref"][str(v)] = render(v, None)[0]
-        print("input vol", v, "-> sine peak %.4f" % out["ref"][str(v)], flush=True)
-    for md in MODES:
+        r0 = render(v, None)[0]
+        print("input vol", v, "-> sine peak %.4f%s" % (r0, "" if not only else "  (file's: %.4f)" % out["ref"][str(v)]), flush=True)
+        if not only:
+            out["ref"][str(v)] = r0
+    for md in modes:
         for d in DRIVES:
             for v in VOLS:
                 node = dist_node()
@@ -80,13 +89,12 @@ def main():
                 out["rows"].append({"mode": md or "default", "drive": d, "vol": v, "a_in": out["ref"][str(v)], "amps": a})
             r = [x for x in out["rows"] if x["mode"] == (md or "default") and x["drive"] == d]
             print("%-12s drive %3d  out/in fundamental: %s" % (md or "default", d, " ".join("%+5.1f" % (20 * np.log10(x["amps"][0] / x["a_in"] + 1e-6)) for x in r)), flush=True)
-    for lo in (0.0, 0.25, 0.5, 0.75, 1.0):
-        for wet in (100.0, 50.0):
-            node = dist_node()
-            node["FXDistortion"]["plainParams"] = {"kParamDrive": 50.0, "kParamWet": wet, "kParamLevelOut": lo}
-            a = render(0.25, node)
-            out["levelout"].append({"levelout": lo, "wet": wet, "vol": 0.25, "a_in": out["ref"]["0.25"], "amps": a})
-            print("LevelOut %.2f wet %3.0f: fundamental %+5.1f dB" % (lo, wet, 20 * np.log10(a[0] / out["ref"]["0.25"])), flush=True)
+    for lo, wet in [] if only else [(lo, wet) for lo in (0.0, 0.25, 0.5, 0.75, 1.0) for wet in (100.0, 50.0)]:
+        node = dist_node()
+        node["FXDistortion"]["plainParams"] = {"kParamDrive": 50.0, "kParamWet": wet, "kParamLevelOut": lo}
+        a = render(0.25, node)
+        out["levelout"].append({"levelout": lo, "wet": wet, "vol": 0.25, "a_in": out["ref"]["0.25"], "amps": a})
+        print("LevelOut %.2f wet %3.0f: fundamental %+5.1f dB" % (lo, wet, 20 * np.log10(a[0] / out["ref"]["0.25"])), flush=True)
     Path("calibration/probe_dist_transfer.json").write_text(json.dumps(out, indent=1))
     os._exit(0)
 

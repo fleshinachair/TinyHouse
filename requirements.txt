@@ -1,0 +1,6 @@
+# Versions the work was done with (Python 3.13 on Windows). Serum 2 itself (the VST3 plugin) is needed for the reference renders; it is not a pip package.
+dawdreamer==0.9.0
+numpy==2.5.4
+pillow==13.0.0
+serum2-preset-loader==0.5.2
+soundfile==0.14.0

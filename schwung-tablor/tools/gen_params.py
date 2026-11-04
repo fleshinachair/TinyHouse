@@ -1,0 +1,882 @@
+#!/usr/bin/env python3
+"""Tablor parameter generator — the single source of truth.
+
+Emits, from one table:
+  src/module.json        (< 8 KB — Schwung's loader cap; holds NO chain_params)
+  src/dsp/params.h       (param table + chain_params JSON served via get_param)
+
+Every continuous control is a 0..127 pot (the ER-99 doctrine): the DSP maps
+each pot to its musical range internally; the screen never shows ms or Hz.
+Musical integers (semitones, cents, voices) keep their real ranges.
+
+Run: python3 tools/gen_params.py     (from the repo root)
+"""
+import json, pathlib, re
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+VERSION = "1.11.0-th"
+
+# This fork installs beside stock Tablor rather than over it: a Schwung store
+# update looks modules up by id, so a different id is what keeps it from being
+# replaced. It also gives the fork its own preset folder.
+MODULE_ID = "tinyhouse"
+MODULE_NAME = "TinyHouse"
+
+# ---------------------------------------------------------------- enums
+FILTER_TYPES = ["LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24"]
+# Same rule (this list drives the `waveform` graphic): "Pulse 25"/"Pulse 12"
+# were unrecognised and drew sines. "Pulse" and "Pulse Tr" are both in the set.
+SUB_WAVES    = ["Sine", "Triangle", "Saw", "Square", "Pulse", "Pulse Tr"]
+# Serum's noise slot with no sample written plays pink noise through a 12 dB high-pass near 950 Hz (measured, calibration/probe_noise_default.py); its
+# "HP12 Pink Noise" samples the same near 1.2 kHz. The two Pink HP entries are those.
+NOISE_TYPES  = ["White", "Pink", "Pink HP", "Pink HP 12", "Brown"]
+# Option NAMES are what the host draws a graphic from: Schwung matches them
+# against a known set (viz_draw.mjs) and falls back to a SINE for
+# anything it does not recognise. "Square+" -- our unipolar square -- was not
+# in that set, so it drew a sine, which is a different waveform entirely.
+# "Pulse" is recognised, and a 50% unipolar square has exactly the silhouette
+# of the square glyph it selects. Renaming is safe for saved sounds: presets
+# store the INDEX, and the order here is unchanged.
+ONOFF        = ["Off", "On"]
+RETRIG       = ["Free", "Retrig"]
+VOICE_MODES  = ["Poly", "Mono"]
+GLIDE_MODES  = ["Off", "Glissando", "Portamento"]
+# Order is the engine's EqType; presets store the INDEX.
+EQ_TYPES     = ["Off", "Bell", "Lo Shelf", "Hi Shelf", "Hi Pass", "Lo Pass"]
+DELAY_MODES  = ["Stereo", "Ping-Pong"]
+
+# Wavetable selection is a DYNAMIC ENUM: the options are whatever the scanner
+# finds, served live from get_param("chain_params"). It has to be an enum —
+# the stock UI cannot TURN a filepath/string/canvas param (param_meta.mjs:
+# KIND_OPAQUE, isTurnable), it only opens them on click. An enum turns to the
+# next wavetable, opens a full-screen list on click, and puts the full name in
+# the header. Names come through without their extension.
+WT_ROOT   = "/data/UserData/UserLibrary/Wavetables"
+WT_FILTER = [".wav", ".wt2048", ".wt1024", ".wt512", ".wt256"]
+
+def wtfile(key, short, full):
+    """FILEPATH — the Schwung way: the cell shows the file in brackets, and
+    touch-pot + jog-click opens the real browser (folders, live preview).
+    A knob cannot TURN it (KIND_OPAQUE) and that is accepted: turning was
+    tried as a dynamic enum and the option list had to be rebuilt on the SPI
+    callback, which jammed the param bus."""
+    return dict(key=key, short=short, full=full, type="file", default="")
+
+# ---------------------------------------------------------------- helpers
+def pot(key, short, full, default=64):
+    """0..127 pot; DSP maps to the musical range."""
+    return dict(key=key, short=short, full=full, type="int", min=0, max=127, default=default)
+
+def num(key, short, full, lo, hi, default=0):
+    """A musical integer shown as-is (semitones, cents, voices…)."""
+    return dict(key=key, short=short, full=full, type="int", min=lo, max=hi, default=default)
+
+def enum(key, short, full, options, default=0, **kw):
+    d = dict(key=key, short=short, full=full, type="enum", options=options, default=default)
+    d.update(kw)
+    return d
+
+# ---------------------------------------------------------------- the surface
+# Trimmed 2026-08-16 per Gus: no fine, no retrig anywhere, no sub/noise pan,
+# no filter routing switches. Behaviors hardcode to the old defaults in the DSP.
+#
+# Trimmed again 2026-09-02: the two LFOs and the four mod slots are gone. Four
+# pages of clutter for modulation Schwung already provides -- a slot LFO can
+# target any Tablor parameter from the slot settings, which is where a user
+# reaches for it first. Velocity and key tracking stay: they are envelope
+# controls, not a matrix.
+def osc(n):
+    return dict(
+        table  = wtfile(f"wt{n}_table", f"WT{n}", f"WT{n}"),
+        pos    = pot(f"wt{n}_pos",     f"POS{n}",  f"WT{n} Pos", 0),
+        level  = pot(f"wt{n}_level",   f"LVL{n}",  f"WT{n} Level", 100 if n == 1 else 0),
+        tune   = num(f"wt{n}_tune",    f"TUN{n}",  f"WT{n} Tune", -48, 48, 0),
+        uni    = num(f"wt{n}_uni",     f"UNI{n}",  f"WT{n} Unison", 1, 16, 1),
+        detune = pot(f"wt{n}_detune",  f"DET{n}",  f"WT{n} Detune", 0),
+        spread = pot(f"wt{n}_spread",  f"SPR{n}",  f"WT{n} Spread", 0),
+        pan    = pot(f"wt{n}_pan",     f"PAN{n}",  f"WT{n} Pan", 64),
+        bend   = pot(f"wt{n}_bend",    f"BND{n}",  f"WT{n} Bend", 64),
+        formant= pot(f"wt{n}_formant", f"FRM{n}",  f"WT{n} Formant", 64),
+        sync   = pot(f"wt{n}_sync",    f"SYN{n}",  f"WT{n} Sync", 0),
+    )
+
+# WT3 is deliberately the plain one: a layer, not a third lead. It has no bend
+# or formant, because those two cells would have needed a page of their own
+# and the third oscillator is there to fill a sound out, not to shape it.
+O1, O2, O3 = osc(1), osc(2), osc(3)
+
+FILTER = dict(
+    freq = pot("flt_freq", "FREQ", "Filter Freq", 127),
+    res  = pot("flt_res",  "RES",  "Filter Res", 0),
+    env  = pot("flt_env",  "FENV", "Filter EG Amt", 64),
+    type = enum("flt_type", "TYPE", "Filter Type", FILTER_TYPES, 1),
+    drive = pot("flt_drive", "DRIVE", "Filter Drive", 0),
+    key  = pot("flt_key",  "KEYT", "Key Track", 0),
+    vel  = pot("flt_vel",  "VELT", "Vel Track", 0),
+)
+# Serum's Filter FX when an envelope moves it: a filter in the effects block, right after the distortion, whose cutoff follows the
+# filter envelope (the loudest voice's). No page on the device, the converter sets it.
+FILTER2 = dict(
+    on   = enum("fxf_on",   "F2ON", "FX Filter Enable", ONOFF, 0),
+    type = enum("fxf_type", "F2TY", "FX Filter Type", FILTER_TYPES, 0),
+    freq = pot("fxf_freq",  "F2FQ", "FX Filter Freq", 127),
+    res  = pot("fxf_res",   "F2RS", "FX Filter Res", 0),
+    env  = pot("fxf_env",   "F2EN", "FX Filter EG Amt", 64),
+)
+# Serum's second voice filter: a second filter in every voice with its own type, cutoff, resonance, drive and key tracking; its cutoff follows
+# the filter envelope by its own amount. Each source has a balance between the two filters (0 = filter 1 only, the default; 127 = filter 2 only;
+# the middle is half and half, a straight crossfade as Serum's). Filter 2 runs only when a source reaches it. Set by the converter.
+VFILTER2 = dict(
+    type  = enum("flt2_type",  "V2TY", "Filter 2 Type", FILTER_TYPES, 1),
+    freq  = pot("flt2_freq",   "V2FQ", "Filter 2 Freq", 127),
+    res   = pot("flt2_res",    "V2RS", "Filter 2 Res", 0),
+    env   = pot("flt2_env",    "V2EN", "Filter 2 EG Amt", 64),
+    drive = pot("flt2_drive",  "V2DR", "Filter 2 Drive", 0),
+    key   = pot("flt2_key",    "V2KY", "Filter 2 Key Track", 0),
+)
+# Serum's voice filter Drive is a plain gain, every harmonic by the same amount (+3.3 dB at 10 %, +7.6 at 25, +12.5 at 50; on a loud saw it stops at about
+# +13 dB, on a quiet noise it goes on to +24: calibration/probe_vdrive_gain.py and probe_vdrive_saw.py), with no distortion at ordinary levels. The converter
+# writes it as this gain after each filter (0..24 dB) and leaves the engine's saturating Drive pot at 0.
+VGAIN = dict(
+    g1 = pot("flt_gain",  "FGN",  "Filter Makeup", 0),
+    g2 = pot("flt2_gain", "V2GN", "Filter 2 Makeup", 0),
+)
+BALANCES = dict(
+    wt1 = pot("wt1_bal",   "B1",   "WT1 Filter Balance", 0),
+    wt2 = pot("wt2_bal",   "B2",   "WT2 Filter Balance", 0),
+    wt3 = pot("wt3_bal",   "B3",   "WT3 Filter Balance", 0),
+    sub = pot("sub_bal",   "BSUB", "Sub Filter Balance", 0),
+    noise = pot("noise_bal", "BNZ", "Noise Filter Balance", 0),
+    smp = pot("smp_bal",   "BSMP", "Sample Filter Balance", 0),
+)
+# Where each source goes, as Serum's routing buttons (calibration/probe_bus.py and the rack-0 filter probe): through the voice filter (the default); "Direct" past the
+# filter and into the effects (Serum's Master); "None", to the FX buses only; "Out", past the filter AND the effects, straight to the output (Serum's Direct).
+ROUTE = ["Filter", "Direct", "None", "Out"]
+ROUTES = dict(
+    wt1 = enum("wt1_post",   "R1",  "WT1 Route", ROUTE, 0),
+    wt2 = enum("wt2_post",   "R2",  "WT2 Route", ROUTE, 0),
+    wt3 = enum("wt3_post",   "R3",  "WT3 Route", ROUTE, 0),
+    sub = enum("sub_post",   "RSUB", "Sub Route", ROUTE, 0),
+    noise = enum("noise_post", "RNZ", "Noise Route", ROUTE, 0),
+)
+# Serum's Chorus, Flanger and Phaser, each with its own switch. Rates are 0..20 Hz on a cubic knob, delays 0..30 ms, the filter and the
+# phaser's base frequency 20 Hz..20 kHz; the converter sets them from the preset. A mix of 0 or a switch Off skips the stage.
+MODFX = dict(
+    con   = enum("chor_on",    "CHON",  "Chorus Enable", ONOFF, 0),
+    cmix  = pot("chor_mix",    "CHMX",  "Chorus Mix", 0),
+    crate = pot("chor_rate",   "CHRT",  "Chorus Rate", 37),
+    cd1   = pot("chor_d1",     "CHD1",  "Chorus Delay 1", 21),
+    cd2   = pot("chor_d2",     "CHD2",  "Chorus Delay 2", 22),
+    cdep  = pot("chor_depth",  "CHDP",  "Chorus Depth", 64),
+    cfb   = pot("chor_fb",     "CHFB",  "Chorus Feedback", 0),
+    cfilt = pot("chor_filt",   "CHFL",  "Chorus Filter", 127),
+    cfm   = enum("chor_fmode", "CHFM",  "Chorus Filter Mode", ["LPF", "HPF"], 0),
+    fon   = enum("flan_on",    "FLON",  "Flanger Enable", ONOFF, 0),
+    fmix  = pot("flan_mix",    "FLMX",  "Flanger Mix", 0),
+    frate = pot("flan_rate",   "FLRT",  "Flanger Rate", 37),
+    fdep  = pot("flan_depth",  "FLDP",  "Flanger Depth", 64),
+    ffb   = pot("flan_fb",     "FLFB",  "Flanger Feedback", 0),
+    fph   = pot("flan_phase",  "FLPH",  "Flanger Phase", 0),
+    pon   = enum("phas_on",    "PHON",  "Phaser Enable", ONOFF, 0),
+    pmix  = pot("phas_mix",    "PHMX",  "Phaser Mix", 0),
+    prate = pot("phas_rate",   "PHRT",  "Phaser Rate", 37),
+    pdep  = pot("phas_depth",  "PHDP",  "Phaser Depth", 64),
+    pdep2 = pot("phas_depth2", "PHD2",  "Phaser Depth 2", 0),
+    pfrq  = pot("phas_freq",   "PHFQ",  "Phaser Freq", 50),
+    pfb   = pot("phas_fb",     "PHFB",  "Phaser Feedback", 0),
+    pph   = pot("phas_phase",  "PHPH",  "Phaser Phase", 0),
+    ppol  = num("phas_poles",  "PHPL",  "Phaser Poles", 2, 12, 4),
+)
+# The FX buses: each source's send to Bus 1 and Bus 2 (Serum's FX Bus 1 / 2 levels, written as 127 * (level/100)^3, the gain the send really has). The
+# send is taken after the amp envelope and before the filter. "None" as a source's route leaves it on the buses alone. The buses' own effects are the
+# "b1." and "b2." keys of the state (the same names as the main FX), not params.
+# The two voice filters' outputs are sources too (Serum's routing slots 5 and 6): each goes to the main path (Master), to the buses only (None) or past the effects (Out), and sends
+# to the buses after the filter. Filter 1's output can also go into Filter 2 in series ("Filter").
+BUSES = {}
+FLT_OUT = ["Master", "None", "Out", "Filter"]
+FLTOUT = dict(f1 = enum("flt1_out", "F1O", "Filter 1 Output", FLT_OUT, 0), f2 = enum("flt2_out", "F2O", "Filter 2 Output", FLT_OUT, 0))
+for _k, _n in (("wt1", "WT1"), ("wt2", "WT2"), ("wt3", "WT3"), ("sub", "Sub"), ("noise", "Noise"), ("smp", "Sample"), ("flt1", "Filter 1"), ("flt2", "Filter 2")):
+    for _b in (1, 2):
+        BUSES["%s_%d" % (_k, _b)] = pot("%s_bus%d" % (_k, _b), "%s%d" % (_k[:2].upper() + _k[-1:].upper(), _b), "%s Bus %d" % (_n, _b), 0)
+# Serum's Sample and Multisample oscillators: one sample set (a .tbs file made by sample_export.py), played from the keyboard at its
+# regions' pitch, with its own level, tuning and routing. Set by the converter; no page on the device.
+SAMPLE = dict(
+    set   = wtfile("smp_set", "SMPS", "Sample Set"),
+    level = pot("smp_level", "SMPL", "Sample Level", 0),
+    tune  = num("smp_tune",  "SMPT", "Sample Tune", -48, 48, 0),
+    fine  = num("smp_fine",  "SMPF", "Sample Fine", -100, 100, 0),
+    post  = enum("smp_post", "SMPR", "Sample Route", ROUTE, 0),
+    fixed = enum("smp_fixed", "SMPX", "Sample Pitch", ["Track", "Fixed"], 0),
+)
+SUB = dict(
+    level = pot("sub_level", "SUB",  "Sub Level", 0),
+    wave  = enum("sub_wave", "SUBW", "Sub Wave", SUB_WAVES, 0),
+    tune  = num("sub_tune",  "SUBT", "Sub Tune", -48, 48, -12),
+)
+NOISE = dict(
+    level = pot("noise_level", "NOIS", "Noise Level", 0),
+    type  = enum("noise_type", "NTYP", "Noise Type", NOISE_TYPES, 0),
+    # Serum's noise Color is a pair of 12 dB/octave filters: a low-pass below the middle (corner 460 Hz at 0.2, x4.5 per 0.1) and a high-pass above it (corner 460 Hz at 0.7).
+    # Corners are 20 Hz .. 20 kHz, logarithmic; High Pass 0 and Low Pass 127 are off. (Pink HP and Pink HP 12 are Pink with the high-pass at 950 and 1190 Hz.)
+    hp    = pot("noise_hp", "NHP", "Noise High Pass", 0),
+    lp    = pot("noise_lp", "NLP", "Noise Low Pass", 127),
+)
+VCA = dict(
+    # Defaults are the original's: attack 0.1 s, decay 0.1 s, sustain 80%,
+    # release 0.1 s (PluginProcessor.cpp, both the amp and filter envelopes).
+    # These had been ported as 0 / 100% / 5.7 ms, so a fresh patch had an
+    # instant attack and an abrupt release -- the clicky first impression.
+    a = pot("vca_a", "ATK", "VCA Attack", 51),
+    d = pot("vca_d", "DEC", "VCA Decay", 64),
+    s = pot("vca_s", "SUS", "VCA Sustain", 102),
+    r = pot("vca_r", "REL", "VCA Release", 64),
+    vel = pot("vca_vel", "VVEL", "VCA Velocity", 100),
+)
+FEG = dict(
+    a = pot("flt_a", "FATK", "Flt Attack", 51),
+    d = pot("flt_d", "FDEC", "Flt Decay", 64),
+    s = pot("flt_s", "FSUS", "Flt Sustain", 102),
+    r = pot("flt_r", "FREL", "Flt Release", 64),
+)
+# Two spare envelopes, each routed at one destination.
+#
+# Asked for after the mod matrix went: an envelope sweeping WT Position is how
+# you get a struck timbre -- full at the attack, gentle as it decays, which is
+# what makes a wavetable read as an electric piano. Schwung's slot LFOs cover
+# modulation in general, but an LFO cannot do that: it repeats, and the point
+# of this shape is that it does not.
+#
+# Deliberately not a matrix again: two sources, one destination each, one
+# amount each. That is four cells on a page rather than sixteen, and it is the
+# case people actually reached for.
+MOD_DST = ["None",
+           "WT1 Pos", "WT2 Pos", "WT1 Level", "WT2 Level", "WT1 Tune", "WT2 Tune",
+           "WT1 Bend", "WT2 Bend", "WT1 Formant", "WT2 Formant", "WT1 Pan", "WT2 Pan",
+           "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
+           # Appended, never inserted: presets store the INDEX.
+           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq"]
+
+# Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
+# rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on), and a 16-point shape (one cycle,
+# 0..127 for 0..1, read with linear interpolation; the default is a sine). A route says which LFO drives which of the
+# same destinations the spare envelopes use (MOD_DST), by a bipolar amount (64 = none). `lfo_bip` picks whether an
+# LFO swings 0..1 (Uni: it only pushes the destination one way) or -1..+1 around it.
+import math as _m
+N_LFO, N_ROUTE, N_SHAPE = 4, 8, 16
+LFO_SHAPE_DEFAULT = [round(127 * (0.5 + 0.5 * _m.sin(2 * _m.pi * k / N_SHAPE))) for k in range(N_SHAPE)]
+LFOS = [dict(
+    rate = pot(f"lfo{n}_rate", f"L{n}RT", f"LFO{n} Rate", 60),
+    mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free"], 0),
+    shape = [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)],
+) for n in range(1, N_LFO + 1)]
+LROUTES = [dict(
+    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4"], 0),
+    dst = enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),
+    amt = pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64),
+    # Serum stores the polarity per route (kParamBipolar): Uni adds lfo * amount (the LFO swings 0..1), Bi adds (2 lfo - 1) * amount
+    bip = enum(f"lr{r}_bip", f"R{r}BP", f"LFO Route {r} Polarity", ["Uni", "Bi"], 0),
+) for r in range(1, N_ROUTE + 1)]
+
+def modenv(n):
+    return dict(
+        # The device draws the FULL name, abbreviated to fit -- so the full
+        # name is what has to carry the envelope number. "Env1 Dest" and
+        # "Env2 Dest" both abbreviated to "ENDEST": two cells, one label, and
+        # no way to tell which envelope you were pointing. Short, already-
+        # abbreviated names survive the squeeze intact.
+        a   = pot(f"me{n}_a", f"E{n}ATK", f"EG{n} A", 0),
+        d   = pot(f"me{n}_d", f"E{n}DEC", f"EG{n} D", 64),
+        s   = pot(f"me{n}_s", f"E{n}SUS", f"EG{n} S", 0),
+        r   = pot(f"me{n}_r", f"E{n}REL", f"EG{n} R", 64),
+        # Amount is BIPOLAR (64 = off): the useful direction is often downward
+        # -- position falling back as the note decays -- so it has to invert.
+        dst = enum(f"me{n}_dst", f"E{n}DST", f"EG{n} Dst", MOD_DST, 0),
+        amt = pot(f"me{n}_amt", f"E{n}AMT", f"EG{n} Amt", 64),
+    )
+ME1, ME2 = modenv(1), modenv(2)
+
+# Presets are Schwung's, not ours. Its browser (shadow_ui_presets.mjs) is
+# reached from the slot, works for every module, auditions as you scroll, and
+# stores under /data/UserData/schwung/presets/<module-id>/ from the module's
+# own `state` blob -- which is to say it needed nothing from Tablor but the
+# blob Tablor already answers. Carrying a second preset system beside it was
+# a page, four cells and a file format to keep honest, for less.
+#
+# The DSP still seeds the factory sounds into that store and copies anything
+# a user had saved as .tblr (export_presets_to_schwung in tablor_plugin.cpp).
+
+# Space: the effects a preset cannot reach any other way. A Schwung preset sets this module's
+# parameters only, so a sound that depends on its reverb and EQ has to carry them. Deep house
+# is the sounds and the space between them, so there are few: width, one delay, one reverb and
+# a four-band tone EQ, all off at default. The SPACE macro on the main page scales both mixes.
+FX = dict(
+    space  = pot("fx_space",  "SPACE", "Space",       100),
+    wide   = pot("fx_wide",   "WIDE",  "Width",       0),
+    wrate  = pot("fx_wrate",  "WRAT",  "Width Rate",  40),
+    wdepth = pot("fx_wdepth", "WDEP",  "Width Depth", 64),
+    dmix   = pot("dly_mix",   "DMIX",  "Delay Mix",   0),
+    dtime  = pot("dly_time",  "DTIM",  "Delay Time",  94),
+    dtimer = pot("dly_timer", "DTMR",  "Delay Time R", 94),
+    dfb    = pot("dly_fb",    "DFBK",  "Delay Feedback", 50),
+    dlo    = pot("dly_lo",    "DLO",   "Delay Low Cut", 0),
+    dhi    = pot("dly_hi",    "DHI",   "Delay High Cut", 127),
+    dmode  = enum("dly_mode", "DMOD",  "Delay Mode", DELAY_MODES, 0),
+    # The delay times are those of a 120 BPM beat (the converter writes Serum's tempo-synced steps that way); with Sync On they follow the host tempo (x 120 / BPM).
+    dsync  = enum("dly_sync", "DSYN",  "Delay Sync", ["Off", "On"], 0),
+    # Velocity law (Voice > VCA): Original is the original's curve; Serum is flat at VCA Velocity 0 and linear in the velocity at 127, both anchored at velocity 100.
+    vlaw   = enum("vca_vlaw", "VLAW",  "VCA Velocity Law", ["Original", "Serum"], 0),
+    rmix   = pot("rev_mix",   "RMIX",  "Reverb Mix",  0),
+    rdec   = pot("rev_decay", "RDEC",  "Reverb Decay", 70),
+    rdamp  = pot("rev_damp",  "RDMP",  "Reverb Damp", 110),
+    rlo    = pot("rev_lo",    "RLO",   "Reverb Low Cut", 0),
+    rwid   = pot("rev_width", "RWID",  "Reverb Width", 127),
+    # Per-stage switches. All On by default, so a preset that does not mention them is unchanged. They
+    # sit in their own bank straight after Space so they stay contiguous with the FX pots in the table
+    # (Engine::refreshFx watches one run, TB_P_DLY_MIX..TB_P_REV_ON): keep REV_ON last.
+    fxon   = enum("fx_on",    "FXON",  "FX Enable",   ONOFF, 1),
+    eqon   = enum("eq_on",    "EQON",  "EQ Enable",   ONOFF, 1),
+    wideon = enum("wide_on",  "WDON",  "Width Enable", ONOFF, 1),
+    dlyon  = enum("dly_on",   "DLON",  "Delay Enable", ONOFF, 1),
+    revon  = enum("rev_on",   "RVON",  "Reverb Enable", ONOFF, 1),
+    compon = enum("comp_on",  "CPON",  "Comp Enable", ONOFF, 1),
+)
+
+def eqband(n):
+    return dict(
+        type = enum(f"eq{n}_type", f"E{n}TY", f"EQ{n} Type", EQ_TYPES, 0),
+        freq = pot(f"eq{n}_freq",  f"E{n}FR", f"EQ{n} Freq", 64),
+        gain = pot(f"eq{n}_gain",  f"E{n}GN", f"EQ{n} Gain", 64),
+        q    = pot(f"eq{n}_q",     f"E{n}Q",  f"EQ{n} Q",    64),
+    )
+EQ1, EQ2, EQ3, EQ4 = eqband(1), eqband(2), eqband(3), eqband(4)
+
+GLOBAL = dict(
+    mode   = enum("voice_mode", "MODE", "Voice Mode", VOICE_MODES, 0),
+    voices = num("voices", "VOIC", "Voices", 1, 8, 8),
+    glide  = pot("glide", "GLID", "Glide", 0),
+    gmode  = enum("glide_mode", "GMOD", "Glide Mode", GLIDE_MODES, 0),
+    legato = enum("legato", "LEGA", "Legato", ONOFF, 0),
+    pb     = num("pb_range", "BEND", "PB Range", 0, 24, 2),
+    vol    = pot("volume", "VOL", "Master Gain", 36),         # +18 dB range (Engine kMasterMax): 36 is the old default, 100
+)
+
+# Performance controls that sit on top of every preset. All neutral at their default, and the converter
+# writes the neutral values into each preset so loading one resets them.
+#   decay    moves the filter and amp decay together (64 = as the preset has it; each step is a pot step on both)
+#   drive    soft-clip saturation after the master gain (0 = off)
+#   lo/hi    a low shelf (150 Hz) and a high shelf (5 kHz), +/-12 dB, 64 = flat
+TONE = dict(
+    decay = pot("decay",    "DECY", "Decay",      64),
+    drive = pot("drive",    "DRIV", "Drive",      0),
+    lo    = pot("lo_shelf", "LSHF", "Low Shelf",  64),
+    hi    = pot("hi_shelf", "HSHF", "High Shelf", 64),
+    # Stereo, after the shelves. Width scales the side channel (64 = as is, 0 = mono, 127 = about 2x); Mono Below
+    # keeps everything under that frequency in the middle by high-passing the side channel (0 = off, 1..127 =
+    # 40 Hz to 500 Hz). The converter sets both from a Serum Utils effect; neither has a page on the device.
+    mwid  = pot("mwidth",   "MWID", "Master Width", 64),
+    mono  = pot("monohz",   "MONO", "Mono Below",   0),
+    # Distortion, the first stage of the FX block (before width, delay and reverb, so the tail stays clean the way a
+    # distortion ahead of a reverb leaves it). Drive 0 is off; Mix is the wet part; Mode picks the curve: Soft is a
+    # tanh, Asym adds a bias (even harmonics, the diode/tube/overdrive family), Hard clips. No page on the device:
+    # the converter sets it from a Serum Distortion effect and fits it.
+    ddrive = pot("dist_drive", "DDRV", "Distortion Drive", 0),
+    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine"], 0),
+    dmix   = pot("dist_mix",   "DMIX", "Distortion Mix",   127),
+    # Calibrated distortion (Serum's measured transfer curves; the converter's Serum Distortion translation). On: Drive is the pre-gain G
+    # (-16..+54 dB), Mode adds Sine (3), Wet Gain is the curve's output gain K (-36..+12 dB, 64 = -12), Mix is the wet part s with the dry part
+    # (1 - s^2), and Level is a gain on the sum (-24..+24 dB, 64 = 0). Off is the earlier law (drive 0 off, 1/sqrt(g) scaling, linear mix).
+    dcal   = enum("dist_cal",  "DCAL", "Distortion Calibrated", ["Off", "On"], 0),
+    dout   = pot("dist_out",   "DOUT", "Distortion Wet Gain", 64),
+    dlvl   = pot("dist_level", "DLVL", "Distortion Level",    64),
+    # Compressor, after the distortion (before width, delay and reverb): a stereo-linked peak compressor with a soft knee. Threshold
+    # 0..127 is -90..+30 dB at the stage's input (before the master gain), Ratio 1:1 to 100:1 (exponential), Attack 0.1..100 ms and Release 10..3000 ms (exponential), Makeup 0..24 dB,
+    # Mix the parallel part. Mix 0 is off. No page on the device but the Comp Enable switch: the converter sets it from a Serum Comp.
+    cthr   = pot("comp_thresh", "CTHR", "Comp Threshold", 127),
+    crat   = pot("comp_ratio",  "CRAT", "Comp Ratio",     0),
+    catt   = pot("comp_attack", "CATT", "Comp Attack",    40),
+    crel   = pot("comp_release","CREL", "Comp Release",   60),
+    cmk    = pot("comp_makeup", "CMKP", "Comp Makeup",    0),
+    cmix   = pot("comp_mix",    "CMIX", "Comp Mix",       0),
+    ckn    = pot("comp_knee",   "CKNE", "Comp Knee",      32),      # soft-knee width, 0..48 dB
+    # Multiband mode: three bands (crossovers 120 Hz and 2.4 kHz, Linkwitz-Riley), each with its own threshold (band 1 uses Comp Threshold,
+    # bands 2 and 3 these), a gain of -24..+24 dB (64 = 0), and upward compression below a threshold 11 dB under the band's own, with
+    # slope Below/127 (0 = none, 127 = the signal is pulled up to the floor). Ratio, Attack, Release, Makeup and Mix are shared.
+    cmulti = enum("comp_multi", "CMUL", "Comp Multiband", ["Off", "On"], 0),
+    ct2    = pot("comp_thresh2", "CTH2", "Comp Threshold Mid",  127),
+    ct3    = pot("comp_thresh3", "CTH3", "Comp Threshold High", 127),
+    cg1    = pot("comp_gain1",   "CGN1", "Comp Gain Low",  64),
+    cg2    = pot("comp_gain2",   "CGN2", "Comp Gain Mid",  64),
+    cg3    = pot("comp_gain3",   "CGN3", "Comp Gain High", 64),
+    cbl    = pot("comp_below",   "CBLW", "Comp Below",      0),
+)
+
+# ---------------------------------------------------------------- pages
+def row(*slots):
+    out = list(slots) + [None] * (8 - len(slots))
+    assert len(out) == 8, f"row has {len(slots)} slots"
+    return out
+
+BANKS = [
+    ("Osc", False, [
+        row(O1["table"], O2["table"], O1["pos"], O2["pos"],
+            O1["level"], O2["level"], O1["tune"], O2["tune"]),
+        row(O1["uni"], O1["detune"], O1["spread"], O1["pan"],
+            O2["uni"], O2["detune"], O2["spread"], O2["pan"]),
+        row(O1["bend"], O1["formant"], O2["bend"], O2["formant"],
+            SUB["tune"], O1["sync"], O2["sync"], O3["sync"]),
+        row(O3["table"], O3["pos"], O3["level"], O3["tune"],
+            O3["uni"], O3["detune"], O3["spread"], O3["pan"]),
+    ]),
+    # Stock pages render 2 rows of 4; a viz group must sit contiguously in
+    # one row. freq/res/TYPE first so the filter-curve roles touch.
+    ("Filter", False, [
+        row(FILTER["freq"], FILTER["res"], FILTER["type"],
+            SUB["level"], SUB["wave"], NOISE["level"], NOISE["type"], FILTER["drive"]),
+    ]),
+    # Both envelopes on ONE page: an envelope graphic spans one 4-cell line
+    # and a page has two lines, so VCA (line 1) + Filter (line 2) draw as two
+    # stacked ADSR graphics. Each foursome must own its own line -- split
+    # across lines it degrades to lone ramps.
+    ("Env", False, [
+        row(VCA["a"], VCA["d"], VCA["s"], VCA["r"],
+            FEG["a"], FEG["d"], FEG["s"], FEG["r"]),
+        # the two spare envelopes: each foursome owns its own 4-cell line so
+        # both draw as a curve, the way the amp and filter pair do above
+        row(ME1["a"], ME1["d"], ME1["s"], ME1["r"],
+            ME2["a"], ME2["d"], ME2["s"], ME2["r"]),
+        # Tracking on the top row; the routing on the bottom one, all four
+        # cells together, so each destination sits next to its own amount
+        # instead of the pair being split across the fold.
+        # Top row is the four envelope-DEPTH controls, filter EG amount
+        # included -- it is how far the filter envelope goes, which is the
+        # same question the amounts below answer for EG1 and EG2, and it was
+        # sitting on the filter page next to cutoff where it is not.
+        # Bottom row is the routing, all four cells together, so each
+        # destination sits beside its own amount instead of the pair being
+        # split across the fold.
+        row(VCA["vel"], FILTER["key"], FILTER["vel"], FILTER["env"],
+            ME1["dst"], ME1["amt"], ME2["dst"], ME2["amt"]),
+    ]),
+    # Space is what the sound sits in. Delay on the top line, reverb under it, so the
+    # four cells of each read as one group; everything else about them is one jog away.
+    ("Space", False, [
+        row(FX["dmix"], FX["dtime"], FX["dfb"], FX["dhi"],
+            FX["rmix"], FX["rdec"], FX["rdamp"], FX["rwid"]),
+        row(FX["space"], FX["wide"], FX["wrate"], FX["wdepth"],
+            FX["dtimer"], FX["dmode"], FX["dlo"], FX["rlo"]),
+        row(EQ1["type"], EQ1["freq"], EQ1["gain"], EQ1["q"],
+            EQ2["type"], EQ2["freq"], EQ2["gain"], EQ2["q"]),
+        row(EQ3["type"], EQ3["freq"], EQ3["gain"], EQ3["q"],
+            EQ4["type"], EQ4["freq"], EQ4["gain"], EQ4["q"]),
+    ]),
+    # On/off for each stage of the block, and for the whole block. Off fades the wet signal out
+    # over about 10 ms; the stage keeps running underneath, so switching it back on does not click.
+    ("Switch", False, [
+        row(FX["fxon"], FX["eqon"], FX["wideon"], FX["dlyon"], FX["revon"]),
+    ]),
+    # The three modulated effects: a switch and the mix for each, then the rates and depths. No page of their own on the
+    # device beyond this first row (the Mod FX page); the rest are set by the converter and reachable from the web UI.
+    ("Mod FX", False, [
+        row(MODFX["con"], MODFX["cmix"], MODFX["fon"], MODFX["fmix"], MODFX["pon"], MODFX["pmix"], MODFX["crate"], MODFX["cdep"]),
+        row(MODFX["cd1"], MODFX["cd2"], MODFX["cfb"], MODFX["cfilt"], MODFX["cfm"]),
+        row(MODFX["frate"], MODFX["fdep"], MODFX["ffb"], MODFX["fph"]),
+        row(MODFX["prate"], MODFX["pdep"], MODFX["pdep2"], MODFX["pfrq"], MODFX["pfb"], MODFX["pph"], MODFX["ppol"]),
+    ]),
+    ("Global", True, [
+        row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
+            GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
+    ]),
+    # The three pages the device shows (TinyHouse). The banks above stay in the table, so every parameter
+    # still exists, is saved in a preset's state and is on the web UI; they just have no page on the Move.
+    ("Main", False, [
+        row(FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"]),
+    ]),
+    ("Tone", False, [
+        row(O1["pos"], O2["pos"], VCA["a"], VCA["r"], TONE["drive"], TONE["lo"], TONE["hi"], GLOBAL["vol"]),
+    ]),
+    ("Effects", False, [
+        row(FX["eqon"], FX["wideon"], FX["dlyon"], FX["revon"], FX["dtime"], FX["compon"], FX["rdec"], FX["fxon"]),
+    ]),
+    # No page on the device: the LFOs and their routes, set by the converter.
+    ("LFO", False,
+        # Each LFO's 18 parameters (rate, mode, 16 shape points) and each route's 3 are CONSECUTIVE in the table:
+        # voice.h strides through them. Rows stay in this order for that reason (see the static_asserts there).
+        [r_ for L in LFOS for r_ in (row(L["rate"], L["mode"], *L["shape"][:6]), row(*L["shape"][6:14]), row(*L["shape"][14:]))] +
+        [row(R["src"], R["dst"], R["amt"], R["bip"]) for R in LROUTES]),
+    # No page on the device: set by the converter, reachable from the web UI.
+    ("Stereo", False, [
+        row(TONE["mwid"], TONE["mono"], TONE["ddrive"], TONE["dmode"], TONE["dmix"], TONE["dcal"], TONE["dout"], TONE["dlvl"]),
+        row(TONE["cthr"], TONE["crat"], TONE["catt"], TONE["crel"], TONE["cmk"], TONE["cmix"], TONE["ckn"]),
+        row(TONE["cmulti"], TONE["ct2"], TONE["ct3"], TONE["cg1"], TONE["cg2"], TONE["cg3"], TONE["cbl"]),
+        row(FILTER2["on"], FILTER2["type"], FILTER2["freq"], FILTER2["res"], FILTER2["env"]),
+        row(ROUTES["wt1"], ROUTES["wt2"], ROUTES["wt3"], ROUTES["sub"], ROUTES["noise"]),
+        row(SAMPLE["set"], SAMPLE["level"], SAMPLE["tune"], SAMPLE["fine"], SAMPLE["post"], SAMPLE["fixed"]),
+        row(VFILTER2["type"], VFILTER2["freq"], VFILTER2["res"], VFILTER2["env"], VFILTER2["drive"], VFILTER2["key"], VGAIN["g1"], VGAIN["g2"]),
+        row(BALANCES["wt1"], BALANCES["wt2"], BALANCES["wt3"], BALANCES["sub"], BALANCES["noise"], BALANCES["smp"]),
+        row(NOISE["hp"], NOISE["lp"], FX["dsync"], FX["vlaw"]),
+        row(BUSES["wt1_1"], BUSES["wt1_2"], BUSES["wt2_1"], BUSES["wt2_2"], BUSES["wt3_1"], BUSES["wt3_2"]),
+        row(BUSES["sub_1"], BUSES["sub_2"], BUSES["noise_1"], BUSES["noise_2"], BUSES["smp_1"], BUSES["smp_2"]),
+        row(BUSES["flt1_1"], BUSES["flt1_2"], BUSES["flt2_1"], BUSES["flt2_2"], FLTOUT["f1"], FLTOUT["f2"]),
+    ]),
+]
+
+# Main: the page you land on, and the only one you should need while playing.
+# Deep house is a few sounds and the space between them, so this is the short
+# list of what you ride in a mix: how open the sound is and how much it moves
+# (cutoff, resonance, filter envelope amount and decay), its weight (sub), and
+# how long it hangs in the space (amp decay and release). The last cell is SPACE:
+# how much of the preset's own delay and reverb you hear. WT1 Pos, which held it
+# before the effects were built in, is still the first cell of the OSC page.
+#
+# Row one is the filter and row two is the body, so the knobs read the same way
+# on every sound. These keys keep their home on their own pages as well.
+PERFORM = [FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"]]
+
+# ---------------------------------------------------------------- collect
+def all_params():
+    seen, out = set(), []
+    for _, _, rows in BANKS:
+        for r in rows:
+            for s in r:
+                if s and s["key"] not in seen:
+                    seen.add(s["key"]); out.append(s)
+    return out
+
+# The 8 assignable macros were cut in 1.1.1, with the LFOs and the mod slots
+# before them: two more pages, and a 46-entry target list to scroll, for
+# indirection over knobs that are already one jog away. Schwung's own knob
+# mapping reaches any Tablor parameter from the slot settings and is where a
+# user looks for exactly this.
+PARAMS = all_params()
+
+PARAMS = all_params()
+
+PARAMS = all_params()
+
+# ---------------------------------------------------------------- emit: chain_params
+# Schwung 0.12+ parameter visualisations: DECLARED, not detected (the docs'
+# own advice). Groups must sit contiguously within one 4-cell row — the page
+# layouts above are ordered for exactly that.
+VIZ = {
+    "vca_a": {"group": "amp",  "role": "attack"},
+    "vca_d": {"group": "amp",  "role": "decay"},
+    "vca_s": {"group": "amp",  "role": "sustain"},
+    "vca_r": {"group": "amp",  "role": "release"},
+    "flt_a": {"group": "fenv", "role": "attack"},
+    "flt_d": {"group": "fenv", "role": "decay"},
+    "flt_s": {"group": "fenv", "role": "sustain"},
+    "flt_r": {"group": "fenv", "role": "release"},
+    "me1_a": {"group": "menv1", "role": "attack"},
+    "me1_d": {"group": "menv1", "role": "decay"},
+    "me1_s": {"group": "menv1", "role": "sustain"},
+    "me1_r": {"group": "menv1", "role": "release"},
+    "me2_a": {"group": "menv2", "role": "attack"},
+    "me2_d": {"group": "menv2", "role": "decay"},
+    "me2_s": {"group": "menv2", "role": "sustain"},
+    "me2_r": {"group": "menv2", "role": "release"},
+    "flt_freq": {"group": "flt", "role": "cutoff"},
+    "flt_res":  {"group": "flt", "role": "resonance"},
+    "flt_type": {"group": "flt", "role": "mode"},
+    "sub_wave":  {"kind": "waveform"},
+    "wt1_level": {"kind": "fader"},
+    "wt2_level": {"kind": "fader"},
+    "wt3_level": {"kind": "fader"},
+    "sub_level": {"kind": "fader"},
+    "noise_level": {"kind": "fader"},
+    "volume": {"kind": "fader"},
+    "legato": {"kind": "switch"},
+}
+def chain_param(p):
+    if p["type"] == "file":
+        d = {"key": p["key"], "name": p["full"], "type": "filepath",
+             "root": WT_ROOT, "start_path": WT_ROOT,
+             "filter": WT_FILTER, "live_preview": True, "default": ""}
+    elif p["type"] == "enum":
+        d = {"key": p["key"], "name": p["full"], "type": "enum",
+             "options": p["options"], "default": p["options"][p["default"]]}
+    else:
+        d = {"key": p["key"], "name": p["full"], "type": p["type"],
+             "min": p["min"], "max": p["max"], "default": p["default"]}
+    if p["key"] in VIZ:
+        d["viz"] = VIZ[p["key"]]
+    # access:"write" is what stops the host scrubbing a trigger with a knob.
+    # It was being emitted into the wrong builder, so the host treated SAVE
+    # as an ordinary enum and every detent of a turn fired it -- reported as
+    # one turn of the pot creating 29 preset files.
+    if p.get("behavior") == "trigger":
+        d["access"] = "write"
+    return d
+
+# `preset` is dynamic: its options ARE the preset list, which changes on
+# every save -- so the module publishes it into the contract tail at runtime,
+# exactly like the wavetable enums. A static entry would duplicate the key.
+# The LFO shapes, rates, modes and routes are hidden and only ever set by the converter or a preset load, so the host has
+# no use for them in chain_params (they would double its size); they stay in the param table, the state blob and set_param.
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$)")
+chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"])]
+chain_json = json.dumps(chain, separators=(",", ":"))
+assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"
+
+# ---------------------------------------------------------------- emit: ui_pages.json
+# Data for Tablor's OWN Shadow UI (ui_chain.js) — the 9W9 treatment: jog flips
+# pages, Shift+jog jumps sections, 8 encoders edit the visible page.
+# NOTE: the module must NOT serve ui_hierarchy — the Shadow UI's hierarchy
+# editor takes precedence over ui_chain.js whenever a module offers one.
+PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The root is the preset browser (TinyK's pattern).
+    ("Main",    0, "Main"),
+    ("Tone",    0, "Tone"),
+    ("Effects", 0, "Effects"),
+    ("Mod FX",  0, "Mod FX"),
+]
+
+def page_slot(p):
+    if p is None:
+        return None
+    d = {"k": p["key"], "n": p["short"], "full": p["full"], "t": p["type"]}
+    if p["type"] == "enum":
+        d["options"] = p["options"]
+    elif p["type"] == "int":
+        d["min"], d["max"] = p["min"], p["max"]
+    if p.get("behavior"):
+        d["b"] = p["behavior"]
+    return d
+
+def build_pages():
+    rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
+    pages = []
+    for bank, ri, title in PAGE_MAP:
+        pages.append({
+            "name": title,
+            "sec": bank,
+            "slots": [page_slot(s) for s in rows[(bank, ri)]],
+        })
+    return {"pages": pages}
+
+ui_pages = build_pages()
+
+# ---------------------------------------------------------------- ui_hierarchy
+# Schwung 0.12+: the STOCK hierarchy editor draws knob pages with viz graphics,
+# has a native preset-browser level (list_param/count_param/name_param), a
+# file browser for filepath params, and an on-screen keyboard for `string`
+# params. Tablor no longer ships its own editor — this hierarchy IS the UI.
+def hier_param(p):
+    d = {"key": p["key"], "name": p["full"]}
+    if p["type"] == "file":
+        d.update(type="filepath", root=WT_ROOT, start_path=WT_ROOT,
+                 filter=WT_FILTER, live_preview=True)
+    elif p["type"] == "enum":
+        d.update(type="enum", options=p["options"])
+    else:
+        d.update(type="int", min=p["min"], max=p["max"])
+    return d
+
+def build_hierarchy():
+    rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
+    levels = {}
+
+    # The wavetable pickers are the knobs users reach for first on an OSC page,
+    # and they were the ones that could not move. The note at the top of this
+    # file already says why -- "it HAS to be an enum, the stock UI cannot TURN a
+    # filepath" -- but hier_param() emits filepath, so the intent never reached
+    # the contract. Reported by a tester as "I want to change wavetables with
+    # the pots... right now it's not possible".
+    #
+    # So the KNOB drives an enum (wtN_select), whose options the DSP publishes
+    # at runtime from the scanner.
+    #
+    # NEITHER the pack chooser NOR the filepath browsers appear on the device.
+    #
+    # Both were opaque to a knob, so each claimed a whole cell and the pair of
+    # them pushed extra MAIN pages: one showing two brackets under the stock
+    # "sample" graphic -- a fixed shape that never reads the file
+    # (viz_draw.mjs drawSample), so it said nothing about the loaded table --
+    # and one that was just a three-row list of pack names. Reported as "what
+    # is this shit page, we don't need this on the module".
+    #
+    # Nothing is lost. wtN_select is on a knob, and an enum is divable, so
+    # hold+click opens a scrolling picker over every table: with no pack chosen
+    # the list is "All", and the option cap (128) is comfortably above the
+    # libraries this ships against. wt_pack and the wtN_table keys still exist
+    # and still stream -- the web UI drives both -- they simply have no cell on
+    # the Move.
+    level_ids = []
+    for bank, ri, title in PAGE_MAP:
+        if bank == "Preset":
+            continue                      # the browser lives on root (below)
+        lid = title.lower().replace(" ", "").replace(".", "").replace("-", "")
+        params, knobs = [], []
+        for s in rows[(bank, ri)]:
+            if not s:
+                continue
+            if s["type"] == "file":
+                sel = s["key"].split("_")[0] + "_select"
+                # Turnable first; options come from get_param("chain_params").
+                params.append({"key": sel, "name": s["full"] + " Table", "type": "enum"})
+                knobs.append(sel)
+            else:
+                params.append(hier_param(s))
+                knobs.append(s["key"])
+        if lid == "main":
+            # The bank (a folder of presets) is the 8th knob of the first page; like the wavetable selects, its options come from
+            # get_param("chain_params"), where the DSP lists the folders it found.
+            params.append({"key": "bank", "name": "Bank", "type": "enum"})
+            knobs.append("bank")
+        levels[lid] = {
+            "name": title.title() if title.isupper() else title,
+            "params": params,
+            "knobs": knobs,
+        }
+        level_ids.append((lid, levels[lid]["name"]))
+
+    # ROOT declares the preset browser AND the PERFORM knobs -- the obxd pattern
+    # the planner is built for ("a level is routinely both the Main knob page
+    # and the preset browser"). That yields, in jog order:
+    #
+    #     [Presets] > Main > Osc > Unison > Shape > Osc 3 > Filter > ...
+    #
+    # so you land on the browser, pick a sound, and every jog from Main goes
+    # forward through the SECTIONS. A separate presets level put the browser
+    # *between* Main and the sections instead, which meant one jog off Main
+    # dropped you straight back into the preset list.
+    #
+    # Rename is a params-only `string` entry (opens the stock keyboard; the
+    # DSP renames the preset's file). Save Preset is a knob on Global.
+    # The root is the preset browser, the way TinyK's is: list_param / count_param / name_param make the host
+    # draw a scrolling list of the module's presets (served by the DSP from Schwung's store), and the
+    # levels below it are the pages: Main, Tone, Effects. Same jog order as TinyK: browser, then pages.
+    root_params = [{"level": lid, "label": label} for lid, label in level_ids]
+    levels["root"] = {
+        "name": MODULE_NAME,
+        "label": MODULE_NAME,
+        "list_param": "preset",
+        "count_param": "preset_count",
+        "name_param": "preset_name",
+        "params": root_params,
+        "knobs": [],
+    }
+
+    # (The WT Pack items level lived here. It existed so the host would
+    # re-read the contract after a pack commit -- armContractSettle -- which
+    # only matters if the pack can be changed from the device, and it no
+    # longer can. The web UI sets wt_pack directly.)
+
+    # No list_param: a level that declares one renders as a scrolling browser
+    # INSTEAD of its knobs (page_plan.mjs: "the browser takes priority"), and
+    # this page needs its four cells. PRESET is an enum whose options are the
+    # live preset list, so a turn steps presets and a dive opens the picker.
+    return {"levels": levels}
+
+hierarchy_json = json.dumps(build_hierarchy(), separators=(",", ":"))
+
+# ---------------------------------------------------------------- emit: module.json
+module_json = {
+    "id": MODULE_ID,
+    "name": MODULE_NAME,
+    "abbrev": "TINYH",
+    "version": VERSION,
+    "description": "3-oscillator wavetable synth - 8-voice poly, unison to 16, hard sync, sub, noise, "
+                   "multimode filter, four envelopes (two routable). Serum/Vital/Ableton "
+                   "wavetables via Move Manager.",
+    "author": "athousanddetails; after Wavetable (Roland Rabien / FigBug, BSD-3)",
+    "dsp": "dsp.so",
+    "api_version": 2,
+    "capabilities": {
+        "audio_out": True,
+        "audio_in": False,
+        "midi_in": True,
+        "midi_out": False,
+        "chainable": True,
+        "component_type": "sound_generator",
+    },
+}
+
+# ---------------------------------------------------------------- emit: params.h
+def c_escape(s):
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+lines = [
+    "/* Generated by tools/gen_params.py — DO NOT EDIT.",
+    " * The parameter surface: IDs, ranges, defaults, and the chain_params",
+    " * JSON template (wavetable option lists are spliced in at runtime). */",
+    "#ifndef TABLOR_PARAMS_H",
+    "#define TABLOR_PARAMS_H",
+    "",
+    f'#define TB_VERSION "{VERSION}"',
+    f'#define TB_MODULE_ID "{MODULE_ID}"',
+    f"#define TB_PARAM_COUNT {len(PARAMS)}",
+    "",
+    "typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;",
+    "",
+    "typedef struct {",
+    "    const char *key;",
+    "    tb_param_type_t type;",
+    "    float min, max, def;              /* enums: def is the option index */",
+    "    int n_options;                    /* 0 for non-enums                */",
+    "    const char *const *options;       /* NULL for non-enums             */",
+    "} tb_param_t;",
+    "",
+    "/* TB_PATH params (the wavetable files) store a string, not a float. */",
+    "#define TB_WT_SLOTS 3",
+    "",
+]
+enum_names = []
+for i, p in enumerate(PARAMS):
+    enum_names.append(f"    TB_P_{p['key'].upper()} = {i},")
+lines += ["enum {"] + enum_names + ["};", ""]
+
+# Option string tables (shared where identical)
+opt_tables, opt_index = [], {}
+for p in PARAMS:
+    if p["type"] == "enum" and p["options"] is not None:
+        key = tuple(p["options"])
+        if key not in opt_index:
+            name = f"tb_opts_{len(opt_tables)}"
+            opt_index[key] = name
+            opts = ", ".join(f'"{c_escape(o)}"' for o in p["options"])
+            opt_tables.append(f"static const char *const {name}[] = {{ {opts} }};")
+lines += opt_tables + [""]
+
+rows = []
+for p in PARAMS:
+    if p["type"] == "file":
+        rows.append(f'    {{ "{p["key"]}", TB_PATH, 0, 0, 0, 0, 0 }},')
+    elif p["type"] == "enum":
+        tbl = opt_index[tuple(p["options"])]
+        rows.append(f'    {{ "{p["key"]}", TB_ENUM, 0, {len(p["options"]) - 1}, '
+                    f'{p["default"]}, {len(p["options"])}, {tbl} }},')
+    else:
+        rows.append(f'    {{ "{p["key"]}", TB_INT, {p["min"]}, {p["max"]}, {p["default"]}, 0, 0 }},')
+lines += ["static const tb_param_t tb_params[TB_PARAM_COUNT] = {"] + rows + ["};", ""]
+
+lines += [
+    "/* chain_params: fully static, served verbatim. It MUST stay cheap —",
+    " * get_param runs on the SPI callback. */",
+    f'static const char *tb_chain_params_json =\n    "{c_escape(chain_json)}";',
+    "",
+    "/* ui_hierarchy for the STOCK Shadow UI (Schwung 0.12+): knob pages",
+    " * with declared viz graphics, native preset browser, file browser,",
+    " * on-screen keyboard for renames. Tablor ships no custom editor. */",
+    f'static const char *tb_ui_hierarchy_json =\n    "{c_escape(hierarchy_json)}";',
+    "",
+]
+
+# User-macro wiring: pot index, selector index, and option->param-index map.
+lines += [
+    "#endif /* TABLOR_PARAMS_H */",
+]
+
+# ---------------------------------------------------------------- write
+out_module = ROOT / "src" / "module.json"
+out_header = ROOT / "src" / "dsp" / "params.h"
+
+out_pages = ROOT / "src" / "ui_pages.json"
+
+out_module.write_text(json.dumps(module_json, indent=2) + "\n")
+out_header.write_text("\n".join(lines) + "\n")
+out_pages.write_text(json.dumps(ui_pages, separators=(",", ":")) + "\n")
+
+msize = out_module.stat().st_size
+print(f"params: {len(PARAMS)}")
+print(f"module.json: {msize} bytes  ({'OK' if msize < 8192 else 'OVER 8KB CAP!'})")
+print(f"params.h: {out_header.stat().st_size} bytes  (chain fmt {len(chain_json)} bytes)")
+assert msize < 8192, "module.json exceeds Schwung's 8 KB loader cap"

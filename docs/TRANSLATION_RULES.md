@@ -1,0 +1,264 @@
+# Translation rules: what was measured on Serum, and how it is used
+
+This is the running record of facts measured on Serum 2 (with controlled probe patches, DawDreamer renders and the scripts in `calibration/`) and of the
+rules the converter and engine apply because of them. It is written as dated notes, newest topics last, and is meant to be read before changing a rule.
+File and function names refer to this repo. Where a note says "not carried" or "NOT fixed", that is still open.
+
+## The standing rule
+
+The aim is that every preset is faithful to its Serum settings, so that other Serum packs can be imported and recreated automatically. So: no per-preset
+fits against a loss function (`HYBRID_DRY_FITS = False` in `deephouse2move.py`), and no special-casing a preset by name. Allowed: global unit constants measured
+with controlled Serum probe patches (`calibration/probe_*.py`), and a per-preset loudness (volume) fit plus the limiter-share cap. No preset is exempt:
+`Bass - A Classic` was once kept from a hand-tuned file and is now translated like the rest, as every future import will be.
+
+**Why:** the end goal is a drop-in Serum pack importer; per-preset tuning does not transfer to new packs.
+**How to apply:** fix translation bugs at the rule level and verify with a probe against Serum before touching a preset. Judge changes on many presets, not one:
+the chain report's per-preset loss moves by +-4 between renders of the same state.
+
+## Measured facts and rules
+Facts measured on Serum that are not obvious from the code (all now in `deephouse2move.py`):
+- Modulation source ids: Env1..Env4 = 2..5 (not 1..4), LFO1..10 = 6..15, Macro1..8 = 25..32.
+- LFO curve y is stored down from the top (value = 1 - y); a segment bend c gives travel x**p with p from a measured table.
+- A route moves its destination by amount x modulator value (bipolar: half that, either way): level (in the sqrt/knob domain), cutoff
+  (cutoff-knob units), coarse pitch 128 st per 100 %.
+- Compressor: Serum's Makeup is a linear factor (gain = 20 log10(makeup), 1 is unity), omitted params default to threshold 0.5, ratio 4,
+  attack 90, release 90; its knee widens with threshold depth and an infinite ratio is a limiter (lower threshold, narrow knee). The
+  engine's Comp stage (after distortion) takes its threshold as a pre-master level that the converter sets once from the closed-form volume.
+- Moog-type ladder filters (MgL24, MgL18) show no resonance peak up to 40 %; the converter's old resonance law was far too high.
+- Source routing: RoutingSlot0..4 = osc A, B, C, noise, sub; absent means osc A to filter, the rest bypass; `kRoutingDestDirect` bypasses
+  too. The engine has per-source `*_post` (Direct) params. A pack table with the same file name as a factory one ("Basic Shapes.wav" in
+  Deep House vs Analog/) must lose to the exact path under Serum's Tables folder (`resolve_table`). Sub `kRoundRect` is nearly a sine
+  (harmonics below -33 dB), not a square. Effects after a Split node (branch_nodes) work on one band: not master width/reverb.
+- Filter FX moved by an envelope: the engine's FX Filter stage (`fxf_*`, after the distortion, follows the loudest voice's filter
+  envelope) matches Serum within ~1 harmonic (calibration/probe_fxfilter_env.py). Modulator source 1 is not audible in a render.
+- Filters with a Var knob (LH6) cannot be matched by any engine filter (7.5 dB off); `filter_model_key` looks up "MODEL@var" entries.
+- Chorus/Flanger/Phaser are engine stages now (`ModFx` in fx.h, params `chor_*`, `flan_*`, `phas_*`, device page "Mod FX", converter
+  `fxmap.modfx_params`; the old width fingerprint covers HyperD only). Measured on Serum: wet law as delay/reverb; chorus has 4 voices
+  (2 per side), default Delay 5.0 ms / Delay2 ~5.2, default Filt is a 12 dB/oct LPF near 1 kHz, wet plateau about -3.5 dB; flanger Wet 100
+  about -1.5 dB. NOT measured (guessed, marked in the notes): default Rate/Depth/Freq/Poles, depth-to-ms scale, flanger/phaser sweep
+  ranges. Serum's noise osc can hold a one-shot click sample (short): left out. Macros that drive an effect's Wet are folded in
+  (`fold_macro_wets`), 19 of 70 presets. `fit_level.py` (threaded) is unstable for some presets; `refit.py`-style sequential fit +
+  `cap_limiter` is repeatable.
+- Wavetable position is STEPPED, not blended, for tables whose WAV `clm ` chunk reads "<!>2048 0..." (frame = floor(pos*N); Default Shapes,
+  Basic Shapes, DS Saw and Tri); "2..." tables interpolate. The engine reads the flag (`Wavetable::stepped`); tablor_cli.cpp loads tables
+  exactly like the module (0.9-peak normalise + stepped) so level fits are valid. Modulation source ids: 1 = Mod Wheel (0 in every render).
+- Serum's own window can be captured: `calibration/ui_shot.py "Preset" out.png --click "x,y;x,y,notches" --crop ... --scale ...` (DawDreamer
+  open_editor; pops a window for ~10 s; tabs at window px osc 205,78 mix 275,78 fx 343,78 matrix 410,78). The title shows "Init" but
+  the panels are the preset's. Crops at scale 0.6 are cheap.
+- Sample oscillator (Sample/Multisample, 8 of 70 DH presets): `sample_export.py` turns the SFZ/audio into a .tbs set under
+  out/move/data/UserData/UserLibrary/Samples/<bank>/ (Serum's own sounds: never commit or share; deploy with deploy_samples.sh);
+  engine `sample.h` + params `smp_*`; the osc's Loop Start/End % override the SFZ loops; sample osc warps (HPF etc.), unison, own env
+  release are not modelled. Level vs Serum varies by sample (-7..+3 dB), left at 1.0.
+- FX audit: `calibration/fx_audit.py` (one effect at a time, Serum vs engine, on noise; run it after ANY effect-mapping change; covers Delay,
+  Reverb, Chorus, Flanger, Phaser, EQ(+static Filter FX), HyperD; not yet Distortion, Comp, dynamic Filter FX). Its stereo check compares
+  correlation change only (Serum's noise source has a random L/R level imbalance). Found: delay time is a STEPPED tempo-synced position
+  (edges ~0.032/0.063/0.105/0.185 -> 1/16,1/8,1/4,1/2,1 bar at 120 BPM; OffsetL/R multiply; unwritten = 1/4); delay mix = stored Wet through
+  the smoothstep (the fingerprint echo ratio failed whenever the assumed echo time was wrong); the delay's Freq/BW band-pass acts on the
+  first echo (engine had it on repeats only; fitted DELAY_BW_SCALE 2.0, kDelayOut 1.17). 6 dB/oct Filter FX = fitted hishelf -24 dB.
+  Remaining: reverb pre-delay/tail shapes, Filter FX drive and resonance, 2 delays (Deep In The Water, NOTSOBAD).
+- Other fixes of 2026-11-03: multiband comp upward boost capped at 12 dB (it ran away in silent tails: first note after a pause came out
+  loud); filter cutoff stepped in 4 pieces per block (a one-sample click at note start); measured BEND_POT and FILTER_DRIVE_POT tables
+  (the straight lines were 3x too strong); output dither; compressor thresholds follow the fitted volume (calibration/comp_rescale.py);
+  the deploy must also upload wavetables (deploy_wavetables.sh) or presets name files the Move lacks.
+- Filter FX measured on Serum (calibration/probe_fxfilter_drive.py, probe_fxfilter_types.py [--hp]): an unwritten Reso plays as 0 (not 10);
+  every LP/HP ladder type is that many identical one-pole filters at the STATED cutoff (MgL24/L24 4, MgL18/L18 3, MgL12/L12 2, MgL6/L6/default 1;
+  H24/H18/H12/H6 likewise; DirtyMg/LadderAcid/ZDF_A taken as 3, unmeasured); two poles = a Q 0.5 biquad, an odd pole is fitted by a shelf. Default type
+  with Reso lowers the passband (-2.8 dB at 10, -7.3 at 35, -14 at 100) and puts a peak at the cutoff (table in fxfilter_drive_probe2.json,
+  `fxmap.fx_filter_reso`); Drive is a level-independent gain (+3.2 at 10, +7.7 at 25, +14 at 50, +23.5 at 100). The engine EQ keeps two LPs/HPs in a
+  row (`reduce_bands`). EQ audit 50/61 -> 58/61 with these (the audit now ignores an all-over EQ gain: the loudness is fitted afterwards).
+- Reverb: the audit's tail time is wet-dependent, so it compares the slope rt60 now (all of a preset's reverbs together). The old reverb tail
+  colour read a fixed 0.3-1.3 s window: for short reverbs that is a numerical floor (white), so it read "bright", the bisect hit damp 20 and the engine
+  tail came out ~30 dB too quiet (Rivo, Reiny, Atlantic...). `fxmetrics.tail_window` ends the window where the tail has fallen 35 dB; 23 short-tail
+  fingerprints were re-measured. The chain report's >8k / 3-8k errors are mostly tiny absolute levels (-60..-130 dBFS): do not chase them as audible.
+- Pads with a SECOND voice filter (MIND: filter2_enabled) are far too bright in the engine (1-3 kHz +18 dB): the second filter is not built.
+- SECOND VOICE FILTER (built 2026-11-03, 15 of 70 presets use it): engine `flt2_*` pots + per-source balance `wt1_bal..smp_bal` (0 = Filter 1 only,
+  the default; 127 = Filter 2 only), cutoff destination "Filter 2 Freq" (MD_FLT2_FREQ, ME_DST 23), Filter 2 follows the one filter envelope by its own
+  `flt2_env`. Serum's FilterBalance (percent, 0 = middle, UNWRITTEN = -100 = Filter 1 only): Filter 1 gets (1-t)/2 and Filter 2 (1+t)/2 of the source
+  (calibration/probe_filter2.py). A disabled filter passes its share unfiltered; a source in `kRoutingDestFilter` only. Unsupported F2 models (formant,
+  comb, Diffuser) are left open. Modulation routes carry `dest_id` 0/1 for the two filters. An UNWRITTEN voice-filter Type is a 12 dB/oct low-pass
+  (MgL12-like), not MgL24 as the converter had assumed (11 presets): `DEFAULT_VOICE_FILTER`.
+- NOISE OSCILLATOR (2026-11-04, probe_noise_color.py, noise_survey.py; supersedes the older "unwritten = pink through a 950 Hz high-pass", which was Bass - Gravity's
+  Pink / Color 0.75 left in the probe base's NoiseOsc3): the noise osc has Type (White / Pink / Brown / Geiger, unwritten = a noise flat to 1.6 kHz rising 3-5 dB/oct above)
+  and Color (0.5 neutral). Color is two 12 dB/oct Butterworth filters: below 0.5 a LOW-pass with corner 460 Hz at 0.2 and x4.5 per 0.1; above 0.5 a HIGH-pass, corner
+  460 Hz at 0.7 (0.6: 100 Hz, 0.8: 2 kHz); 0.9+ adds a rising tilt (not carried), 1.0 is silent. Engine: noise_type 0 White (gain x3.05 so it is 4.1 dB over Pink like
+  Serum), 1 Pink, 4 Brown (leaky integrator, corner 90 Hz, 0.6 dB over Pink), 2/3 legacy Pink HP 950/1190; new pots noise_hp (0 off) / noise_lp (127 off), 20 Hz..20 kHz
+  log. Converter: `noise_color_pots`, `NOISE_TYPE_ENGINE`; the unwritten type is carried as White minus 2.2 dB (shape rms 4-8 dB, LF too low). A noise SAMPLE
+  (relativePathToNoiseSample) keeps `noise_type_for`. Self Control Noise 29 -> 19 loss, Can't Find You 11 -> 6, Keys Other Side 18 -> 12. One-shot noise (kParamOneShot) and
+  Geiger are not carried.
+- Voice-filter DRIVE in Serum is a plain gain (+3.3 dB at 10 %, +7.6 at 25, +12.5 at 50; a loud saw tops out near +13, a quiet noise reaches +24), every
+  harmonic by the same dB; the engine's tanh Drive adds less gain and some harmonics. Kept: the engine pot up to its 25 % value (Bass - AVAION's 320 Hz band
+  needs that bit of saturation) plus a gain stage after each filter (`flt_gain`, `flt2_gain`, 0..24 dB; `FILTER_DRIVE_MAKEUP_DB`). Checked end to end
+  against Serum with calibration/check_filter2.py (8 synthetic cases, rms 0.6-3.5 dB on harmonics).
+- The Distortion effect has its own 12 dB state-variable filter (Freq, BW = resonance, LPHP 0 = low-pass .. 100 = high-pass; PrePost 1 = AFTER the
+  distortion, 2 = BEFORE, 0/unwritten off). Carried as an EQ band only when it is after (`fxmap.dist_filter_bands`: Origins, all things break, Movement);
+  a filter before the distortion (AVAION: LP 144 Hz) cannot be an EQ band (the harmonics the overdrive makes sit above it), so it is not carried.
+  Distortion modes/other params still unaudited; Distortion LevelOut (-6 dB unwritten, -15 at 0.3) is not carried (uniform: the loudness fit).
+- The chain report's 3-8k and >8k band errors vary by 10 dB from run to run on the same state (random unison phases, aliasing at -75 dB): inaudible,
+  never act on them; judge by audited effects and the 80 Hz-3 kHz bands.
+- A route's SECOND source (ModSlot `source` = [main, aux]) scales its depth: a macro as aux multiplies it by the macro value (MIND's filter envelope is gated
+  by macro 1 = 0, so Serum's filter stays at its base cutoff while the engine opened it; fixed in `physical`). Aux sources 16-21 (velocity-like) are not carried.
+- Staged 2026-11-03 night (not installed): calibration/g15_final = g39 (all 70 refitted, mean chain loss 15.97, level |err| 0.89 dB; previous staged set in
+  calibration/g15_before_f2), ARM dsp.so md5 24066037809d8edd40f914d37e4289fc (second filter, noise types, filter gain stage). A full refit takes ~25 min
+  when nothing else runs (it takes 100 min with Serum/other jobs competing). Voice-section survey (calibration/voice_survey.py) is unreliable at high
+  frequencies: the dither floor of a quiet engine render and Serum's digital silence read as 50-80 dB differences.
+- g15 set (calibration/g15_final, staged in out/, not installed): mean loss 16.93 vs 17.69 for g14; cycle script calibration/run_g15b.sh
+  (fit_level only refits names removed from level_fits.json; level fits are keyed by params_sig).
+
+- DISTORTION (2026-11-04, `fx.h processDistCal`, params `dist_cal`/`dist_out`/`dist_level`, `fxmap.dist_params`, curves in calibration/dist_curves.json from
+  probe_dist_transfer.py + calibrate_dist2.py, stage audit calibration/stage_audit.py). Serum's Wet is a SMOOTHSTEP s with the dry part (1 - s^2):
+  out = LevelOut_gain * ((1 - s^2) x + s K f(G x)); LevelOut unwritten = 0.5 and its gain is (LevelOut / 0.5)^2 on the SUM (dry too). The curve is level-
+  dependent (the old fit matched harmonics at one input level only): tanh / biased tanh (bias 0.003) / hard clip / sine (SineShaper, a folder) with G and K
+  per mode and drive. Measured at the probe preset's default master, so the engine pots follow G x probe gain (10^(master_default_db/20)); the stage sits
+  BEFORE the engine master gain, so `comp_rescale.rescale` moves dist_drive (+dB) and dist_out (-dB) with the final volume, like the comp thresholds.
+  Modes mapped: default/SoftClip/TapeSat tanh, Asym/Diode2 biased, Overdrive/HardClip hard clip, SineShaper sine. Poor fits remain: Diode2 (5-8 dB), Asym at
+  high drive (4-5), SineShaper (3-8; Rivo). Only the FIRST master Distortion is carried (SWEDISHMF and The Selected have a second).
+- COMP thresholds were measured at the default master; Serum's master comes AFTER the FX, so thresholds in output dB shift by 20 log10(master / default
+  master) (`master_vs_default_db`; Reiny master 1.0 = +11.8 dB). Before this the engine over-compressed every high-master preset (Reiny -11 dB vs Serum +3).
+- `import_pack.finalize_level(m, it, serum, bank)` is the importer's level step. The comp thresholds and distortion gains work BEFORE the master gain, so
+  their reference level is the volume at which the engine's VOICE (fx_on 0) matches Serum's voice-only render (`voice_level_error_db`, clamped +-12 dB), set
+  once with `comp_rescale.rescale`; the loudness fit then moves the volume AFTER them (`fit_volume(follow=False)`). Following the fitted volume instead
+  (what the scratch refit did before) was wrong whenever the full-chain fit deviated from the voice level for other reasons (Other Side: +12 dB because
+  of effects the engine orders differently; its comp then over-compressed by 8.5 dB). Comp stage level error on the audit: 2.85 -> 1.83 dB mean.
+  Chain loss is flat (15.8) because its per-preset noise is +-4; use the stage audits. a sequential refit script that calls finalize_level is the repeatable way to refit.
+- Serum's route aux curve (`kParamAuxCurveData` on the slot) changes what an aux 16/17 does: Tonic Walter's aux-16 route at velocity 100 is the UNSCALED
+  route (60 darker, 127 brighter); a static 100/127 scale made it 25 dB too dark. Aux 16/17 are left at full depth (tried and reverted).
+- Serum's reverb Delay (pre-delay) param has NO effect on the wet timing at wet 100 (hall; 0 / 104 / 300 ms identical); do not add a pre-delay.
+- Aux sources of a route (probe_aux_source.py, plain slot): 16 = velocity and 17 = note number scale the depth by x/127; 18, 19, 24 are closed at rest,
+  20 and 23 constant, 21 and 22 random per note. None carried (see the aux curve note).
+- Renders of the same engine patch vary by ~3 dB in level from run to run (random unison phases): average 3+ renders before drawing a level conclusion.
+- The engine voice level vs Serum's at the closed-form master: median |diff| 3.6 dB, scatter +-8 dB (calibration/voice_level.py); the loudness fit moves
+  the volume by up to +-20 dB from the closed form, mostly because the FX chain (comp, EQ) differs, so absolute stage levels depend on the rescale.
+- Dynamic Filter FX audit (stage_audit.py --kinds Filter) is dominated by noise floors at HF (Serum voice has a flat -45 dB floor); not informative.
+- Ping-pong delay (calibration/probe_pingpong.py): structure matches (L at T, R at 2T, L at 3T, -6 dB per echo at fb 50 %), but NOTSOBAD's narrow band-pass
+  delay (BW 0.75) loses ~3.6 dB per pass in the engine's 1-pole HP+LP vs Serum's ~2.4 (decay rt30 0.37 vs 0.9 s); Sleepless's delay first echo is 5.7 dB
+  too loud (the engine's 6 dB/oct skirt vs Serum's steeper one). Not fixed.
+
+- ROUTE SOURCES (2026-11-04, `physical()`/`map_to_tablor` fold): velocity (16) and note number (17) are x/127 (probe_aux_source.py, probe_note_route.py);
+  taken static at VELOCITY_NOMINAL 100 and middle C, and a note route to the filter cutoff is also carried exactly as key tracking (`keyfold`, slope
+  a/127 x CUTOFF_NOTES per semitone). A BIPOLAR route is the source minus one half (a (x - 0.5)), NOT 2x - 1 (probe_macro_bipolar.py: macro 0/50/100 % gave
+  -0.27/0/+0.22 of the knob at +50 %); the converter had 2x - 1 for macros (twice too deep). Macro-driven detune, filter reso and drive are now folded too.
+  Lead - Ari went 27 -> 16 loss (its velocity route to the cutoff was ignored), Keys - Nyday 18.7 -> 13.5, I'll Be Yours 17 -> 7.
+  Still not folded: Oscillator pan (note routes in Reiny), WTOsc warp (3 macro routes), the Env/Global-dest routes.
+- Staged 2026-11-04 (not installed): calibration/g15_final = g54_final (dist cal, comp master correction + voice-referenced stage levels, velocity/note/bipolar folds,
+  PWM/sync/EvenOdd warps, noise type+colour, random per-note noise pan, delay tempo sync dly_sync); previous staged sets in calibration/g15_before_dist (= g39) and g40..g46_final. ARM dsp.so md5 24066037809d8edd40f914d37e4289fc.
+
+- Warps: kPWM and kSync mapped from probes (probe_pwm.py, probe_sync.py: PWM_BEND_POT, SYNC_POT); kEvenOdd at ~1.0 = the same wave an octave up (HotLap's lead played an
+  octave low); kFM_OSC, kFM_NOISE, kFilterLPF/HPF, kDLM, kDistZeroSquare are not carried (about 8 presets). Sync Var (kParamWarpVar) and tables flagged spectral in the wav
+  clm chunk (AT Spectrum: "11000000") are also not modelled. High-pass voice filters: the H24/H12 cutoff delta was +7 notes too high (probe_hp24_low.py, noise); now ~0.
+- osc_survey.py (each oscillator alone, Serum vs engine) shows the wavetable/unison/tune engine matches within 0-3 dB for nearly every oscillator; remaining voice mismatches
+  are the filter, modulation and the unsupported warps. voice_survey.py: trust 80 Hz-2.5 kHz only (HF is floor-limited).
+
+- DELAY TEMPO SYNC (2026-11-04): Serum's delay times are note steps (62.5 ms .. 2 s at 120 BPM). Engine `dly_sync` On scales dly_time / dly_timer by 120 / host BPM
+  (Schwung's get_bpm, clamped 40..300; refreshFx re-reads it); the converter writes dly_sync=1 whenever a delay is carried. The CLI renders at the default 120 BPM, so
+  every audit and loss number is unchanged by it. Test: tests/test_engine.cpp testDelaySync.
+- The noise oscillator is mono with a RANDOM per-note L/R level imbalance in Serum (corr 1.000, side/mid -13..-29 dB, mean |L-R| 2.3 dB); the engine now draws a pan
+  of +-0.27 per note (`noisePan`). Without it noise-only presets had a side/mid error of 65 dB in the chain loss (Self Control Noise, Keys - Loop).
+- The chain loss's side/mid term (0.25 x |dB error|, no floor) is dominated by cases where BOTH sides are nearly mono (-30 vs -80 dB: oskar med k, InDeep); not audible,
+  do not chase it. The effect audit's delay "first echo" check only runs when an echo is found above -35 dB on the engine side, so some old OKs were unchecked.
+
+- AUX GATES (2026-11-04): a route whose second source is the mod wheel (1) or 18/19/24 (closed at rest) is OFF in a static preset (amount 0); 21/22 (random per note) take
+  half the depth. The converter used to carry the LFO route in full: Bass - The Selected (an LFO gated by the mod wheel into the filter) went 24 -> 11 loss, Keys - Billboard
+  (a vibrato gated by a random aux) 17 -> 10.5. A MAIN-source random route (21/22 straight to table position etc.) folded at its mean did NOT help (Atlantic, Ari worse): left alone.
+
+- Routes into an envelope's SUSTAIN (macro, velocity, note) are folded into the stored sustain (Bass - Let It Go: velocity +73 % into the filter envelope held its filter open;
+  loss 40.7 -> 37.4). Attack / decay / release are log time knobs and are not folded. A route with an envelope or LFO as the aux gate takes half depth (two vibrato routes:
+  Self Control 25.6 -> 21.5). Chain-report loss moves by up to +-5 on presets with HF energy near the floor (Keys - BUNT) for a 3-pot change: judge a change on several presets.
+
+- VELOCITY -> AMPLITUDE (2026-11-04): Serum's loudness is flat in velocity unless a route (source 16 -> Global Voice Amp) puts it there; with the route it is linear
+  (20 log10(vel/127)). The engine's original law (v 25^v 0.04, params vca_vel default 100) made every converted preset follow velocity steeply while Serum's did not
+  (the loudness fits all hid a -6.4 dB at velocity 100). New `vca_vlaw` = Serum: gain 0.4856 x ((1 - s) + s vel/v100), anchored at velocity 100 so every fitted level holds;
+  converter writes vca_vlaw 1 and vca_vel 0 (127 for the four presets with the route: Keys Nyday / Other Side, Lead Sleepless / Space & Time). Test: testVelocityLaw.
+  Filter-envelope velocity (flt_vel) stays 0. Velocity routes to filter/osc are static at velocity 100 (VELOCITY_NOMINAL).
+
+- DELAY FILTER (2026-11-04, probe_delay_filter2.py, third-octave response of 8 Freq/BW pairs): a 1-pole high-pass + 1-pole low-pass (6 dB/oct) with UNITY gain at the centre;
+  corners at Freq x 2^(+-0.8 BW) (DELAY_BW_SCALE 1.6; 2.0 was the older coarse fit). The engine's pair lost R/(1+R) at the centre (2.6 dB per pass at BW 0.75, so narrow
+  echoes died faster than Serum's); fx.h processDelay now applies the make-up (1 + R) / R. Delay audit 32/35 (31 before, 33 at the start of the day, one of whose OKs was an
+  unchecked missing echo). NOTSOBAD (ping-pong, BW 0.75) first echo -16.5 Serum vs -22.7 engine (was -25.0 / none found); its second delay node is still not carried.
+- Another DC fix: the calibrated distortion removes the DC of its whole output (8 Hz one-pole; Bass - Rivo / Gravity / NOTSOBAD had 0.02-0.08 DC at soft velocity).
+
+- REVERB on played notes (calibration/reverb_stage_audit.py, reverb_tail_fit_probe.json; PARTLY FIXED 2026-11-04: wet gain kRevOut 1.50 -> 2.25, tail medians now -0.9 / -2.8 / -2.1 dB re Serum in the three windows instead of -1.9 / -4.5 / -3.7, sustain add +0.2 dB; line length scaling x1.6 / x2.4 did not help; 3.0 centres the tails but makes steady noise 5.5 dB hot; measured with calibration/reverb_engine_only.py; the demo-MIDI level of Other Side / Can't Find You / Let It Go / Self Control did not change, so their quietness is not the reverb): the engine's reverb tail is a median 5 dB under Serum's on real notes
+  (up to -20 on bass / long pads), although the effect audit (noise burst, rt60 slope) says OK. On a wet-100 burst the two envelopes have the SAME late slope but Serum's
+  holds its peak 50-100 ms longer and decays more gently right after it (MIND: Serum -2 -3 -4 -5 dB at 240-400 ms, engine -3 -5 -7 -9; Lynnic and HotLap 4-5 dB), and on a few
+  (Scorpios) it is silent for the first 40 ms: a slower build-up that grows with Size. Matching the tail LEVEL with the decay param would need rt60 of 5-20 s, so the fix is
+  structural (a build-up / pre-delay in processReverb, sized from Size; Serum's own Delay param has no effect on the wet timing). It also explains the audit's "echoes at
+  0.17-0.25 s missing". Bass tails are the worst (-10 dB at 40 Hz even in mid bands OK). Bus-rack FX (13 presets: bus-1 reverbs in Keys - Loop, Gravity, Sleepless, Tonic Walter;
+  EQ / HyperD / Distortion / Utils buses elsewhere) are not carried either: Keys - Loop's whole reverb tail is a bus send (macro -> RoutingSlot FXBus1Level, with a curve in
+  the slot's flex data).
+
+- ROUTING AND FX BUSES (2026-11-04, probe_bus.py, probe_bus_sources.py, scratch probes of the rack-0 Filter): Serum 2 RoutingSlot 0..4 = osc A, B, C, noise, sub; slot 5 = the OUTPUT of
+  Voice Filter 1, slot 6 = of Voice Filter 2 (slot 5 = None silences a source routed through Filter 1). Dest: Filter (through the voice filter), Master (past the voice filter, INTO the main
+  rack: what the converter always called Direct), Direct (past the filter AND the main rack: straight to the output), None (the buses only); on slots 5/6 Master / Direct / None, and
+  "Filter" = Filter 1 into Filter 2 IN SERIES (169 of the 626 factory presets: it was invisible until now). Sends: level%^3 in amplitude, same unit as the main path, taken after the amp
+  envelope and before the filter for a source (velocity-independent), after the filter for a filter output; every source, any dest. A bus rack's output joins the main path AHEAD of the
+  main rack (a Filter FX in rack 0 filters what a bus returns). Unwritten send = 0 (a bus rack with no send is inactive: 8 of the deep house presets' bus racks). A macro route into a send level
+  (RoutingSlot kParamFXBus1Level, dest_id = slot) is folded at the saved macro value. Engine: params `wtN/sub/noise/smp/flt1/flt2_bus1/2` (send = pot/127), routes `*_post` 0 Filter /
+  1 Direct(=Master) / 2 None / 3 Out, `flt1_out` / `flt2_out` (Master/None/Out/Filter), the buses' racks are state keys `b1.<fxkey>` / `b2.<fxkey>` -> Engine::busPots / fxBus[2]; converter
+  `CARRY_BUSES`, `map_bus_racks`, bus racks fingerprinted as '<preset>#bus1'. NOT carried: Utils width in a bus rack, Filter 2 -> Filter 1 serial, a send moved by an LFO / envelope, curves on the
+  send route. Deep house (bus_audit.py): band error vs Serum 9.9 -> 8.3 dB over 22 affected presets (Rollin 13 -> 6, Nu Aspect 2 18 -> 6); factory sample is noisier (samples, distortion).
+- Importer gate (2026-11-04): `import_pack.py` drops a preset whose finished level is > 3 dB or octave bands > 14 dB rms from Serum's (a gate on the result, not a fit); "Factory Picks" = 25 of 37
+  tried (mean 9.2 dB bands). Gotchas: the converter's main flow reads presets back through JSON (dict int keys become strings: use `int(k)`), `fit_level.py` skips names already in level_fits.json
+  (delete the entry to refit) and crashes on names with an apostrophe (file has a curly one). Deep house g16_final adopts the bus conversion only for presets whose chain loss improved. See reports/2026-11-04-buses-and-factory.md.
+- `dist_params` now carries the master Distortion that does the MOST (wet x drive; unwritten drive 25), not the first in the rack; a first node that was off used to end the search.
+  Bass - SWEDISHMF (19 % TapeSat ahead of a 100 % drive-72) and Bass - The Selected (a drive-0 filter ahead of a soft clip) changed. The engine still has one distortion stage.
+
+- Oscillator level residuals (osc_survey.py, 148 oscillators, engine - Serum against the master law): single voices -2.7 dB, stacks +3 dB at 2 voices falling 1.6 dB per doubling to
+  -2 at 16 (`unison_level_db`, switch UNISON_LEVEL_FIT, OFF): applying it to twelve mixed presets made the chain loss worse (14.8 -> 15.3), so it stays off. A plain saw alone is
+  consistently -2.5 dB. Voice-only level (voice_level.py) scatter vs Serum is +-8 dB and is absorbed by the loudness fit.
+
+Banks: a bank is a folder under `/data/UserData/schwung/presets/tinyhouse/`; loose files are the "User" bank; the Bank knob is the
+8th knob of the Main page. Converter flags `--bank`, `--supported-only`; `import_pack.py` imports a folder of Serum presets
+(factory: `...\Xfer\Serum 2 Presets\Presets\Factory`, 626 presets). Deploy with `BANK="Deep House" ./deploy_all.sh`.
+
+## Added 2026-11-04 (evening): LFO bends and the Fine stop, the formant filters, real-playing checks
+
+- **LFO curve bends** (`calibration/probe_lfo_bend.py`, a 4-point curve at 0.5 Hz driving Fine pitch, the value read off the pitch every 0.1 s). `curveVals[i]` bends the segment that STARTS at
+  point i; the last entry has no effect. For a rising segment c > 0.5 eases in (stays low longer: at 0.7 the value at t = 0..0.875 of the segment is .01 .02 .05 .10 .17 .30 .52 .87, not a pure power),
+  c < 0.5 eases out (0.3: .33 .61 .77 .87 .93 .96 .99 1.0); for a falling segment c > 0.5 stays high longer (0.9: ~1.0 until t = .6, then drops), c < 0.5 drops early. This is the convention
+  `lfo_shape_pots` already used; the exponent table (`LFO_BEND_C/LOGP`, measured to c = 0.8) is only a power-law approximation of these shapes.
+- **Serum's Fine knob stops at +-100 cents, and the stop applies to the knob value with the modulation added.** An LFO into Fine at -100 % moves the pitch -200 cents per unit of LFO but the pitch
+  holds at -100 once the LFO passes half its height (Lead - Lynnic's LFO3: -100 cents from about 1.8 s, held until the curve falls back at 3.4 s). The engine's tune route has no stop (route amount 55
+  gives -97.6 cents, 51 gives -204: checked with a constant LFO on one oscillator), so `map_lfos` builds the stop into the LFO's table and ends the route's depth at the clipped swing, for an LFO whose
+  routes are all unipolar Fine routes of one depth (`clipped`). Before this Lynnic swung two semitones. Other destinations are not clipped here; Coarse and Octave have much wider ranges.
+- **Formant voice filters** (`calibration/probe_formant.py`, saw on note 48 through Voice Filter 1; `probe_formant.json`): FormantTWO is three formants (F1, F2, F3) with peaks of about -5, -2.7 and
+  -1.5 dB over a floor near -15 dB (the mean transfer is -15 dB). They move with both Var and Freq. At Freq 0.1277: Var 0 gives 392 / 2093 / 2747 Hz, Var 12.85 392 / 2224 / 3009, Var 50 523 / 2747 / 3532,
+  Var 100 785 / 4317 / 5494. At Freq 0.35: Var 0 523 / 1831 / 2616, Var 100 1047 / 3924 / 5363. At Freq 0.55: Var 0 654 / 1701 / 2485, Var 100 1439 / 3532 / 4971 (the harmonic spacing of 131 Hz limits
+  the resolution). Key tracking moves them with the note. NOT BUILT in the engine: it needs a filter type of three parallel resonators fitted on a noise-driven measurement; a static EQ cannot stand in for it
+  (Lead - Kisaya sends half of every source through Filter 2 = FormantTWO with key tracking on). `voice_filter_pots` flags a formant model as critical for either filter, so `import_pack.py` drops such presets.
+- **Bode** (the frequency shifter) is not the cause of Lynnic's or Kisaya's differences: in both its Wet is 0 unless a macro raises it. Serum itself, with Bode switched off, moves Lynnic by 1.2 against a noise floor of 2.8.
+- **Noise samples**: Lynnic's noise oscillator plays `Organics/S-Sound.wav` (an "S": almost all its energy at 4 to 9 kHz, spectral flatness 0.07) where the engine plays white noise. Shaping the engine's noise
+  to 4 to 10 kHz with `noise_hp` / `noise_lp` changed the match by nothing measurable (loss 6.5 against 6.7): not worth a rule on its own.
+- **Real-playing check** (`calibration/midi_ab.py`, `reports/2026-11-04-demo-midi-ab.md`): the pack's own demo MIDI through Serum and the engine. A held test chord hid several things this shows: level errors of
+  3 to 7 dB on some leads, a spectral centroid up to 2.5x off, and sub-bass the engine has and Serum does not. Use it after any change that could move a preset's sound. `tablor_cli` plays a
+  performance when `TB_EVENTS` names a file of `on_s off_s note velocity` lines.
+
+## Added 2026-11-04 (night): route curves, key tracking checked, four reports from the Move
+
+- **A route has its own curve** (`kParamMainCurveData` on, the points in `flex[0]`; `route_curve` / `curve_value` in `deephouse2move.py`, `fxmap.macro_value`). The route's value is the macro's position
+  put through the curve, and the curve gives `1 - y` like an LFO shape (measured on Keys - Loop: its macro OPEN at 35 % drives the bus-1 send through a curve from 0.726 to 1.0, so the send is 0.82, not
+  0.35; the reverb tail in Serum rose -39 / -33 / -24 dB at macro 0 / 35 / 100, as 1 - y plus the opening filter predicts). Before this the send was `0.35^3` instead of `0.82^3`: a 23 dB shortfall of the
+  whole bus, which in Loop IS the reverb and the stereo width. After it, on the pack's demo MIDI, Keys - Loop's side/mid is within about 4 dB of Serum's below 1 kHz (was 20 dB under), the L/R correlation
+  0.957 against Serum's 0.924 (was 0.999) and the tail 5 dB under (was 25). Only Keys - Loop changes in the Deep House bank (the other presets with curved routes are on the pre-bus conversion).
+- **Key tracking is right** (`calibration/probe_keytrack.py`, MgL24, cutoff 0.45, tracking 1.0): the engine's -12 dB corner equals Serum's from note 42 up and is within one harmonic step (523 against
+  491 Hz at note 24) below. It is not the cause of the low-register differences reported on Lynnic and Gravity.
+- **Tempo-synced LFOs** (found on Lead - Loop, NOT FIXED): an LFO with `kParamTriplets` and no `kParamBeatSync` stored has a Rate of 14.7 that is a beat position, not hertz; `map_lfos` read it as 14.7 Hz
+  and the engine flutters at about 15 Hz where Serum runs a gate at a note value. Needs a probe of Serum's synced LFO (what an unwritten BeatSync means, the division at each Rate, triplets / dotted) and,
+  to follow the Move's tempo, an LFO sync switch in the engine like the delay's `dly_sync`.
+- **Keys - Other Side's second sound** (NOT FIXED): in Serum Filter 2's output goes to FX Bus 1, whose rack is EQ -> SplitMS (with EQs in its branches) -> EQ. The shipped preset has no sends and no bus rack
+  (the earlier conversion was kept because the bus one measured worse), and on the demo MIDI it is about 10 dB under Serum at 4 and 8 kHz. The bus conversion (`flt2_bus1` 127) is worse: 4.6 dB too loud, 20 dB under
+  at 4 to 8 kHz. SplitMS and EQs inside a Split branch are not carried; they are what is missing.
+- **Bass - Gravity** (NOT FIXED): on the demo MIDI the engine is 5 to 7 dB under Serum at 500 to 1300 Hz and 4 to 11 dB over at 2.5 to 5 kHz, a missing low-pass or tilt; the cause is not yet found
+  (its rack: HyperD, EQ x3, Distortion, Comp, Filter, EQ, Reverb; bus 1: Reverb, EQ, EQ).
+- **Lead - Lynnic's bass against hiss** (NOT FIXED): before the EQ the engine's voice has about 7 dB less of 20 to 120 Hz and 3 to 4 dB more of 0.3 to 8 kHz than Serum's; the EQ stage itself agrees (cuts within
+  3 dB). Sample oscillator (white noise through a HPF warp) and noise oscillator were each checked: both add the same amount in the engine as in Serum.
+
+## Added 2026-11-04 (late): note starts and the "declick" report (engine change, NOT yet on the Move)
+
+- **Engine attack floor is now 3 ms** (`potAttackTime` in `param_map.h`; was 0.5 ms). Serum's own note start is never instant: on the Loopsy pack played through Serum, presets with a stored attack of
+  0 to 6 ms still take about 1.5 to 3 ms to reach full level. `tests/test_engine.cpp testNoteOnset` fails on the old floor (the first 8 samples reach 24 % of the peak) and passes on the new (5 %). Attacks
+  longer than about 3 ms are unchanged. Built into the native tests only; the ARM `dsp.so` has not been rebuilt or installed for it.
+- **A note taking over a voice does not cut it** (checked in a scratch test, not kept): with one voice, a note arriving over a releasing voice carries straight through (the sample before and after the join
+  were -4660 and -4564 with a plain table, and the same with the sub oscillator or a low-pass), so voice stealing is not the source of a click. `Engine::noteOn` restarts the envelope and filters, but
+  the audible join is smooth.
+- **Not explained**: on the pack's demo MIDI the presets with quick notes step harder at a note start than Serum does (95th percentile of the largest sample-to-sample jump in the first 10 ms, against the
+  signal's own level): Lead - I'll Be Yours 9.4 against Serum's 2.6, Lead - Nyday 5.9 against 1.7, Lead - Rollin 1.6 against 0.5, Bass - Gravity 5.8 against 3.1. Their attacks are far longer than the floor,
+  so the floor does not explain it. Keys - Loop's demo MIDI is four slow chords and shows no click at all in either render. Needs the exact preset and moment where the click is heard.

@@ -1,0 +1,75 @@
+# Environment and build output
+.venv/
+__pycache__/
+*.pyc
+calibration/*.exe
+calibration/*.pdb
+calibration/*.out
+calibration/refs/
+
+# Proprietary sound content: the pack, and out/, which holds Xfer's factory wavetables
+*.SerumPack
+*.SerumPreset
+out/
+
+# Superseded by the commits in schwung-tablor
+deephouse-engine.patch
+calibration/p4_record/
+calibration/p5_record/
+calibration/p9_record/
+calibration/p10_record/
+calibration/p11_record/
+calibration/p11_final/
+calibration/demo_renders/
+calibration/transcripts/
+calibration/p12_final/
+calibration/p13_record/
+calibration/p13_stage/
+calibration/p13_cand/
+calibration/p13_final/
+calibration/p13_asm/
+calibration/p14_final/
+calibration/p14_record/
+calibration/p15_final/
+calibration/p16_final/
+calibration/p15_mapped/
+calibration/p16_record/
+calibration/f1_base/
+calibration/f2_final/
+calibration/p16_cmp/
+calibration/f3_final/
+calibration/h1_final/
+calibration/h2_final/
+
+# Converted presets, renders and run output: derived from Xfer's and the pack authors' content, and regenerable
+out_*/
+calibration/*/
+calibration/chain_report_*
+calibration/*.png
+calibration/*.done
+calibration/*.pdb
+calibration/*.exe
+Loopsy - DEEP HOUSE - Demo MIDI/
+
+# The engine's own git history, kept aside so the engine source is tracked here (rename back to .git to work against upstream)
+schwung-tablor/.git.upstream/
+calibration/fx_audit_report*
+calibration/*before*
+calibration/autopsy*
+calibration/fx_audit_delay_*
+
+# Editor settings
+.vscode/
+
+# measurements of a pack's own effects: rebuilt by calibration/fx_fingerprint.py and import_pack.py, kept local
+calibration/fx_fingerprint.log
+calibration/fx_fingerprints.json
+calibration/fx_fingerprints_iso.json
+
+# caches and logs of Serum measurements and local paths: rebuilt by the scripts that write them, kept local
+calibration/census_factory.json
+calibration/classify_Factory.json
+calibration/fx_audit_serum.json
+calibration/probe_vfilter_serum.json
+calibration/shipped_scores.log
+calibration/shipped_scores_raw.log

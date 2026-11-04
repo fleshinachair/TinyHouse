@@ -886,6 +886,24 @@ int main(int argc, char **argv)
         const int files = jsonIn(!strcmp(bn, "User") ? store : store + "/" + bn);
         CHECK(atoi(bc) >= 1 && bn[0], "the store has banks (%s of %s)", bn, bc);
         CHECK(count > 0 && count <= files, "the preset page counts the bank \"%s\"'s presets (%d of %d files)", bn, count, files);
+        /* A fresh instance given this state before its scan finishes, as the host does at boot: where does the preset page land? */
+        auto pageAfterRestore = [&](const char *blob, char *bank, char *idx, char *name) {
+            void *i2 = api->create_instance(".", nullptr);
+            if (!i2) return false;
+            api->set_param(i2, "state", blob);
+            char rb[8] = {};
+            struct timespec ts = { 0, 10 * 1000000 };
+            for (int k = 0; k < 1500; k++) {
+                api->get_param(i2, "ready", rb, sizeof rb);
+                if (rb[0] == '1') break;
+                nanosleep(&ts, nullptr);
+            }
+            api->get_param(i2, "bank_name", bank, 128);
+            api->get_param(i2, "preset", idx, 32);
+            api->get_param(i2, "preset_name", name, 256);
+            api->destroy_instance(i2);
+            return true;
+        };
         if (count >= 2) {
             api->set_param(inst, "preset", "1");
             api->get_param(inst, "preset", pb, sizeof pb);
@@ -894,6 +912,11 @@ int main(int argc, char **argv)
             api->set_param(inst, "preset", "0");
             api->get_param(inst, "state", s0, sizeof s0);
             CHECK(atoi(pb) == 1 && nb[0], "preset 1 is named \"%s\"", nb);
+            {
+                char rbank[128] = {}, ridx[32] = {}, rname[256] = {};
+                CHECK(pageAfterRestore(s1, rbank, ridx, rname) && !strcmp(rbank, bn) && atoi(ridx) == 1 && !strcmp(rname, nb),
+                      "a restored state puts the preset page back on its preset (%s / %s \"%s\", wanted %s / 1 \"%s\")", rbank, ridx, rname, bn, nb);
+            }
             CHECK(strcmp(s0, s1) != 0 && !strncmp(s0, "TBLR2;", 6), "choosing a preset loads its sound (preset 0 and 1 differ)");
             api->set_param(inst, "preset", "9999");
             api->get_param(inst, "preset", pb, sizeof pb);
@@ -913,6 +936,11 @@ int main(int argc, char **argv)
             CHECK(strcmp(bn1, bn) != 0 && atoi(bpc) == jsonIn(!strcmp(bn1, "User") ? store : store + "/" + bn1),
                   "bank 1 (\"%s\") lists its own %s presets", bn1, bpc);
             CHECK(atoi(bpi) == 0 && strcmp(sb, s0) != 0, "switching bank starts at its first preset, which plays");
+            {
+                char rbank[128] = {}, ridx[32] = {}, rname[256] = {};
+                CHECK(pageAfterRestore(sb, rbank, ridx, rname) && !strcmp(rbank, bn1) && atoi(ridx) == 0,
+                      "a restored state from another bank puts the page on that bank (%s, wanted %s)", rbank, bn1);
+            }
             api->set_param(inst, "bank", "9999");
             char bl[16] = {};
             api->get_param(inst, "bank", bl, sizeof bl);

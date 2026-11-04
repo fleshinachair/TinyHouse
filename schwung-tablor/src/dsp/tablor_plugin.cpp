@@ -71,6 +71,8 @@ struct tablor_instance {
     std::shared_ptr<const PresetList> store { std::make_shared<PresetList>() };
     std::atomic<int> store_index { 0 };   /* GLOBAL index into store->items */
     std::atomic<int> bank_index { 0 };    /* which bank the preset page lists */
+    /* The "pk" a restored state named (see preset_key), held until the worker has scanned the store and can find it. */
+    std::shared_ptr<const std::string> want_pk;
 
     std::shared_ptr<const PresetList> storeList() const
     { return std::atomic_load(&store); }
@@ -541,6 +543,29 @@ static void scan_store_presets(tablor_instance *inst)
     std::atomic_store(&inst->store, std::shared_ptr<const tablor_instance::PresetList>(next));
 }
 
+/* Which preset the page shows is not part of the sound, so a state restored by the host (a reboot, a reloaded slot) carried the sound
+ * back and left the page on the first preset. The state now names its preset as "pk=<bank>/<name>"; ';' is the state's separator. */
+static std::string preset_key(const tablor_instance::preset &p)
+{
+    std::string k = p.bank + "/" + p.name;
+    std::replace(k.begin(), k.end(), ';', ',');
+    return k;
+}
+
+/* Point the preset page at the preset with this key. False when the store has no such preset (not scanned yet, or since deleted). */
+static bool select_preset_by_key(tablor_instance *inst, const std::string &key)
+{
+    auto ps = inst->storeList();
+    for (size_t b = 0; b < ps->banks.size(); b++)
+        for (int i = ps->bank_first[b]; i < ps->bank_first[b] + ps->bank_n[b]; i++)
+            if (preset_key(ps->items[(size_t) i]) == key) {
+                inst->bank_index = (int) b;
+                inst->store_index = i;
+                return true;
+            }
+    return false;
+}
+
 static void select_preset_by_path(tablor_instance *inst, const std::string &path)
 {
     auto ps = inst->presetList();
@@ -922,6 +947,12 @@ static void build_state_blob(tablor_instance *inst)
      * different waveform on either side of that release. The tag is how a
      * loader can tell which order a blob was saved under. */
     int o = snprintf(inst->state_buf, sizeof inst->state_buf, "TBLR2;");
+    {
+        auto ps = inst->storeList();
+        const int si = inst->store_index.load();
+        if (si >= 0 && si < (int) ps->items.size())
+            o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "pk=%s;", preset_key(ps->items[(size_t) si]).c_str());
+    }
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
         if (tb_params[i].type == TB_PATH) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
@@ -961,7 +992,7 @@ static void reset_to_defaults(tablor_instance *inst)
 /* Version-tagged blob: "TBLR1;…" or "TBLR2;…". Anything without a known
  * tag is from another life — ignore it entirely rather than half-apply
  * it (the ER-99 total-silence lesson). */
-static void apply_state_blob(tablor_instance *inst, const char *val)
+static void apply_state_blob(tablor_instance *inst, const char *val, bool host_restore = false)
 {
     bool v1 = strncmp(val, "TBLR1;", 6) == 0;
     if (!v1 && strncmp(val, "TBLR2;", 6) != 0) return;
@@ -980,6 +1011,13 @@ static void apply_state_blob(tablor_instance *inst, const char *val)
         if (kl < sizeof kbuf && vl < sizeof vbuf) {
             memcpy(kbuf, p, kl); kbuf[kl] = 0;
             memcpy(vbuf, eq + 1, vl); vbuf[vl] = 0;
+            /* Only the host's own restore says which preset the page is on. A preset saved from a slot carries the key of the sound it
+             * was made from, and loading it from the store must not send the page back there. Held first and then tried, so that
+             * whichever of this and the worker's scan comes second finds the other's half. */
+            if (host_restore && !strcmp(kbuf, "pk")) {
+                std::atomic_store(&inst->want_pk, std::make_shared<const std::string>(vbuf));
+                select_preset_by_key(inst, vbuf);
+            }
             const bool onBus = kbuf[0] == 'b' && (kbuf[1] == '1' || kbuf[1] == '2') && kbuf[2] == '.';
             int idx = param_index(onBus ? kbuf + 3 : kbuf);
             if (idx >= 0 && onBus) {
@@ -1018,7 +1056,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (colon) k = colon + 1;
 
     if (!strcmp(k, "state")) {
-        apply_state_blob(inst, val);
+        apply_state_blob(inst, val, true);
         return;
     }
 
@@ -1341,6 +1379,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
          * then restores the slot's own, so on a slow scan (a reboot) the request used to land on top of the restore, and the host saved
          * the first sound back over the slot. */
         {
+            if (auto pk = std::atomic_load(&inst->want_pk)) select_preset_by_key(inst, *pk);
             const int want = inst->pending_preset.exchange(-1);
             auto ps = inst->storeList();
             if (!ps->items.empty() && !ps->banks.empty() && !inst->state_seen.load()) {

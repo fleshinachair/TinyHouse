@@ -117,6 +117,27 @@ int main(int argc, char **argv)
               waited * 10);
     }
 
+    /* The host asks for a preset as the module loads and then restores the slot's own state, both before the worker has scanned the
+     * presets. The restored state has to win, or a reboot puts the first sound back on every slot. */
+    {
+        void *inst3 = api->create_instance(".", nullptr);
+        CHECK(inst3 != nullptr, "an instance boots for the restore-order test");
+        if (inst3) {
+            api->set_param(inst3, "preset", "0");
+            api->set_param(inst3, "state", "TBLR2;vca_r=77;");
+            char rb[8] = {}, v[32] = {};
+            struct timespec ts = { 0, 10 * 1000000 };
+            for (int i = 0; i < 1500; i++) {
+                api->get_param(inst3, "ready", rb, sizeof rb);
+                if (rb[0] == '1') break;
+                nanosleep(&ts, nullptr);
+            }
+            api->get_param(inst3, "vca_r", v, sizeof v);
+            CHECK(!strcmp(v, "77"), "a restored state is not overwritten by the preset asked for at load (vca_r=\"%s\")", v);
+            api->destroy_instance(inst3);
+        }
+    }
+
     static char big[64 * 1024];
     static char saved[64 * 1024];   /* a state blob held across a round-trip */
 

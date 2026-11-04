@@ -1337,11 +1337,13 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
         inst->engine.setTable(2, init0);    /* shared: another Init is ~13 MB */
         /* The host picks the first sound as the module loads, before this list exists, so that request found nothing to load and
          * the module played its Init sound until the preset was chosen again. Load what was asked for (or, if nothing was, the
-         * first sound), now that the list is here. A saved state that landed first wins. */
+         * first sound), now that the list is here. A saved state that landed first wins: the host asks for the first sound at load and
+         * then restores the slot's own, so on a slow scan (a reboot) the request used to land on top of the restore, and the host saved
+         * the first sound back over the slot. */
         {
             const int want = inst->pending_preset.exchange(-1);
             auto ps = inst->storeList();
-            if (!ps->items.empty() && !ps->banks.empty() && (want >= 0 || !inst->state_seen.load())) {
+            if (!ps->items.empty() && !ps->banks.empty() && !inst->state_seen.load()) {
                 const int b = std::min(std::max(inst->bank_index.load(), 0), (int) ps->banks.size() - 1);
                 const int n = ps->bank_n[(size_t) b];
                 if (n > 0) {

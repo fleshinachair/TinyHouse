@@ -211,7 +211,7 @@ def physical(tree: dict, header: dict) -> dict:
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
         pp, cv = _pp(node), (node.get("curveData") or {})
-        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "mode": pp.get("kParamDefaultMode"),
+        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "mode": pp.get("kParamDefaultMode"), "type": pp.get("kParamType"),
                      "x": cv.get("xVals"), "y": cv.get("yVals"), "c": cv.get("curveVals"), "name": node.get("curveDisplayName")})
     # Serum's routing slots 0..4 are osc A, B, C, noise, sub. Measured with a closed filter:
     # only A reaches the filter by default, the others bypass it unless routed there.
@@ -899,7 +899,7 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
     clipped = {}
     for l in chosen:
         mine = [r for r in taken if r[1] == l]
-        if not mine or any(r[5] is None for r in mine) or max(r[6] for r in mine) - min(r[6] for r in mine) > 0.05:
+        if ph["lfos"][l].get("type") in ("RandomSH",) or not mine or any(r[5] is None for r in mine) or max(r[6] for r in mine) - min(r[6] for r in mine) > 0.05:
             continue                                      # a route to something else, or routes of different depth: left linear
         fa = sum(r[6] for r in mine) / len(mine)
         fb = _clamp(sum(r[5] for r in mine) / len(mine), -100.0, 100.0)       # the oscillators' base Fine values differ by a few cents at most
@@ -914,7 +914,13 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         hz = d["rate"] if (d.get("rate") is not None and not d.get("sync")) else LFO_DEFAULT_HZ
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
         P[f"lfo{n}_mode"] = 0 if d.get("mode") in (None, 0, 0.0) else 1
-        for k, v in enumerate(clipped[l][0] if l in clipped else lfo_shape_pots(d)):
+        # a Random S&H LFO has no period, so a sine table puts a tone on its destination that Serum does not have (Lead - Other Side:
+        # its 26 Hz Random S&H into an oscillator's level was a steady tremolo against Serum's flute-like note). Built flat at its mid level instead: a
+        # bipolar route then adds nothing and a unipolar one a steady half-depth offset, the random LFO's average.
+        flat = d.get("type") in ("RandomSH",)
+        if flat:
+            note.append(f"LFO {l + 1} ({d.get('type')}) built as its steady mid level: a sine's tone is not in Serum's note")
+        for k, v in enumerate([64] * 16 if flat else clipped[l][0] if l in clipped else lfo_shape_pots(d)):
             P[f"lfo{n}_s{k}"] = v
     for r, (_, l, d, a, bip, *_) in enumerate(taken, 1):
         if l in clipped:

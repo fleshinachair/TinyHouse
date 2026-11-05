@@ -160,6 +160,9 @@ struct FxSettings {
     float flanMix = 0, flanRate = 0.5f, flanDepth = 0.5f, flanFb = 0, flanPhase = 0;
     float phasMix = 0, phasRate = 0.5f, phasDepth = 0.5f, phasDepth2 = 0, phasFreqHz = 300, phasFb = 0, phasPhase = 0;
     int   phasPoles = 4;
+    /* Serum's HyperD ahead of the distortion: voices (1 is off), detune 0..1 (how far each voice's delay moves), rate 0..1 (how fast), wet 0..1. */
+    int   hydVoices = 1;
+    float hydDetune = 0, hydRate = 0.4f, hydWet = 0;
 };
 
 namespace fxdetail {
@@ -341,6 +344,78 @@ private:
     bool chorRan = false, flanRan = false, phasRan = false;
 };
 
+/* ------------------------------------------------------------------ HyperD ahead of the distortion */
+
+/* Serum's HyperD (Hyper/Dimension) as the first stage of the block, where the distortion that follows clips the moving cloud together (Lead - Other Side and
+ * Lead - Rollin have it in front of a drive-98 distortion; without it the clipped tone is a steady square-like wave where Serum's breathes and has even harmonics).
+ * Each voice is a copy of the signal on a delay line that a smooth random LFO (two incommensurate sines, a different phase per voice and per side) moves, which detunes it
+ * and makes it beat against the dry signal; the voices are summed at 1/sqrt(n) and mixed with the dry signal by Wet. How far a delay moves follows Detune and how fast
+ * follows Rate; the two laws below were fitted to Serum's HyperD alone on a held note (calibration/hyperd_fit.py). */
+class Hyper {
+public:
+    static constexpr int kBuf = 8192;                  /* 186 ms at 44.1 kHz, a power of two */
+    static constexpr int kMaxV = 8;
+
+    explicit Hyper(float sampleRate = 44100.0f) : sr(sampleRate)
+    {
+        for (int c = 0; c < 2; c++) buf[c].assign(kBuf, 0.0f);
+        unsigned s = 12345u;
+        auto rnd = [&s]() { s = s * 1664525u + 1013904223u; return (float) (s >> 8) * (1.0f / 16777216.0f); };
+        for (int v = 0; v < kMaxV; v++) {
+            spd[v] = 0.7f + 0.6f * rnd();
+            for (int c = 0; c < 2; c++) { ph1[c][v] = rnd(); ph2[c][v] = rnd(); }
+        }
+    }
+
+    void set(const FxSettings &s) { st = s; }
+    bool active() const { return (st.hydVoices > 1 && st.hydWet > 0.0f) || cur > 0.0f; }
+
+    void process(float *L, float *R, int n)
+    {
+        const bool on = st.hydVoices > 1 && st.hydWet > 0.0f;
+        const float target = on ? st.hydWet : 0.0f, dg = (target - cur) / (float) n;
+        const int nv = std::min(std::max(st.hydVoices, 1), kMaxV);
+        const float depth = kDepthMs * 0.001f * sr * std::pow(st.hydDetune, kDepthExp);
+        const float rateHz = kRateHz * std::pow(st.hydRate, kRateExp);
+        const float norm = 1.0f / std::sqrt((float) nv);
+        for (int i = 0; i < n; i++) {
+            cur += dg;
+            float *io[2] = { &L[i], &R[i] };
+            for (int c = 0; c < 2; c++) {
+                const float x = *io[c];
+                buf[c][(size_t) wp] = x;
+                float acc = 0.0f;
+                for (int v = 0; v < nv; v++) {
+                    const float lfo = 0.5f * (std::sin(fxdetail::kTwoPi * ph1[c][v]) + std::sin(fxdetail::kTwoPi * ph2[c][v]));
+                    const float d = std::min(1.0f + depth * (1.0f + lfo), (float) (kBuf - 3));
+                    const float rp = (float) wp - d + (float) kBuf;
+                    const int i0 = (int) rp;
+                    const float fr = rp - (float) i0;
+                    const float a = buf[c][(size_t) (i0 & (kBuf - 1))], b = buf[c][(size_t) ((i0 + 1) & (kBuf - 1))];
+                    acc += a + (b - a) * fr;
+                    const float inc = rateHz * spd[v] / sr;
+                    ph1[c][v] += inc; if (ph1[c][v] >= 1.0f) ph1[c][v] -= 1.0f;
+                    ph2[c][v] += inc * 1.618f; if (ph2[c][v] >= 1.0f) ph2[c][v] -= 1.0f;
+                }
+                *io[c] = x * dryGain(cur) + acc * norm * wetGain(cur);
+            }
+            wp = (wp + 1) & (kBuf - 1);
+        }
+        cur = target;
+        if (!on && cur <= 0.0f) { for (int c = 0; c < 2; c++) std::fill(buf[c].begin(), buf[c].end(), 0.0f); }
+    }
+
+private:
+    static constexpr float kDepthMs = 1.0f, kDepthExp = 0.8f, kRateHz = 8.0f, kRateExp = 1.5f;      /* fitted to an isolated Serum HyperD (calibration/hyperd_fit.py): a rough fit */
+    float sr;
+    FxSettings st;
+    std::vector<float> buf[2];
+    int wp = 0;
+    float cur = 0.0f;
+    float spd[kMaxV] = {};
+    float ph1[2][kMaxV] = {}, ph2[2][kMaxV] = {};
+};
+
 class Fx {
 public:
     static constexpr int kLines = 8;
@@ -369,6 +444,7 @@ public:
     {
         st = s;
         mod.set(s);
+        hyper.set(s);
         eqTarget = s.eqEnable ? 1.0f : 0.0f;
         distTarget = s.distCal ? (s.distMix > 0.0f || std::fabs(s.distLevel - 1.0f) > 1e-3f ? 1.0f : 0.0f) : (s.distDrive > 0.0f ? s.distMix : 0.0f);
         compTarget = (s.compRatio > 1.001f || s.compMulti) ? s.compMix : 0.0f;
@@ -395,7 +471,7 @@ public:
         }
         /* A stage still fading out has to keep running, or it would cut off. */
         baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.revMix > 0.0f ||
-                    wideCur > 0.0f || delayWetCur > 0.0f || revWetCur > 0.0f || wideRan || delayRan || revRan || mod.active();
+                    wideCur > 0.0f || delayWetCur > 0.0f || revWetCur > 0.0f || wideRan || delayRan || revRan || mod.active() || hyper.active();
         anyActive = baseActive || xfOn;
     }
 
@@ -422,6 +498,7 @@ public:
 
     void process(float *L, float *R, int n)
     {
+        if (hyper.active()) hyper.process(L, R, n);
         if (distTarget > 0.0f || distCur > 0.0f) processDist(L, R, n);
         if (xfOn) xf.process(L, R, n);
         if (compTarget > 0.0f || compCur > 0.0f) {
@@ -797,6 +874,7 @@ private:
     bool anyActive = false, baseActive = false, xfOn = false;
     Filter xf;
     ModFx mod;
+    Hyper hyper;
 
     StereoBiquad eq[4];
     bool eqOn[4] = { false, false, false, false };

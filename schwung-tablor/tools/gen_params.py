@@ -200,6 +200,16 @@ for _k, _n in (("wt1", "WT1"), ("wt2", "WT2"), ("wt3", "WT3"), ("sub", "Sub"), (
         BUSES["%s_%d" % (_k, _b)] = pot("%s_bus%d" % (_k, _b), "%s%d" % (_k[:2].upper() + _k[-1:].upper(), _b), "%s Bus %d" % (_n, _b), 0)
 # Serum's Sample and Multisample oscillators: one sample set (a .tbs file made by sample_export.py), played from the keyboard at its
 # regions' pitch, with its own level, tuning and routing. Set by the converter; no page on the device.
+# Serum's HyperD (Hyper/Dimension) AHEAD of the distortion: Voices detuned copies of the signal, each on a delay line that a smooth random LFO moves, mixed with the dry
+# signal by Wet. Detune scales how far the delay moves (the pitch deviation grows with it), Rate how fast. The effect block's own Width stage is the HyperD that follows the
+# distortion; this one is for a HyperD in front of it, where the distortion clips the moving cloud together. Wet 0 is off. No page on the device: set by the converter,
+# in the main rack and, as "b1." / "b2." keys, in a bus rack.
+HYD = dict(
+    uni  = num("hyd_uni",  "HYDU", "Hyper Voices", 1, 8, 1),
+    det  = pot("hyd_det",  "HYDD", "Hyper Detune", 0),
+    rate = pot("hyd_rate", "HYDR", "Hyper Rate",   40),
+    wet  = pot("hyd_wet",  "HYDW", "Hyper Wet",    0),
+)
 SAMPLE = dict(
     set   = wtfile("smp_set", "SMPS", "Sample Set"),
     level = pot("smp_level", "SMPL", "Sample Level", 0),
@@ -517,6 +527,7 @@ BANKS = [
         row(BUSES["wt1_1"], BUSES["wt1_2"], BUSES["wt2_1"], BUSES["wt2_2"], BUSES["wt3_1"], BUSES["wt3_2"]),
         row(BUSES["sub_1"], BUSES["sub_2"], BUSES["noise_1"], BUSES["noise_2"], BUSES["smp_1"], BUSES["smp_2"]),
         row(BUSES["flt1_1"], BUSES["flt1_2"], BUSES["flt2_1"], BUSES["flt2_2"], FLTOUT["f1"], FLTOUT["f2"]),
+        row(HYD["uni"], HYD["det"], HYD["rate"], HYD["wet"]),
     ]),
 ]
 

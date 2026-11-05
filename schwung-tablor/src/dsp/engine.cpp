@@ -250,6 +250,10 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.eqEnable = all && pots[TB_P_EQ_ON] >= 1.0f;
     s.distDrive = all ? pot01(pots[TB_P_DIST_DRIVE]) : 0.0f;
     s.distMix = pot01(pots[TB_P_DIST_MIX]);
+    s.hydVoices = all ? std::clamp((int) pots[TB_P_HYD_UNI], 1, 8) : 1;
+    s.hydDetune = pot01(pots[TB_P_HYD_DET]);
+    s.hydRate = pot01(pots[TB_P_HYD_RATE]);
+    s.hydWet = all ? pot01(pots[TB_P_HYD_WET]) : 0.0f;
     s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 3);
     s.distCal = pots[TB_P_DIST_CAL] >= 1.0f;
     if (s.distCal) {
@@ -335,12 +339,13 @@ void Engine::refreshFx()
     const float tempoNow = pots[TB_P_DLY_SYNC] >= 1.0f ? hostBpm : 0.0f;
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
-        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0) return;
+        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0) return;
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
     std::memcpy(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen);
     compOnSeen = pots[TB_P_COMP_ON];
     std::memcpy(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen);
+    std::memcpy(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen);
     fxSeenValid = true;
     fx.set(fxSettings(pots));
 }

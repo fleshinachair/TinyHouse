@@ -91,6 +91,7 @@ private:
     float compOnSeen = -1.0f;
     uint32_t ditherState = 2463534242u;                                /* the output dither's generator */
     float modSeen[TB_P_PHAS_POLES - TB_P_CHOR_ON + 1] = {};           /* the chorus, flanger and phaser pots are contiguous */
+    float hydSeen[TB_P_HYD_WET - TB_P_HYD_UNI + 1] = {};              /* the HyperD pots are contiguous */
     bool  fxSeenValid = false;
     std::vector<Voice> voices;
     std::shared_ptr<Wavetable> table[kOscs];

@@ -953,6 +953,27 @@ def fingerprint_for(name: str) -> dict | None:
     return _fingerprints.get(norm_name(name))
 
 
+def hyperd_params(nodes: list[dict]) -> tuple[dict, list[str]]:
+    """A HyperD in front of a hard-driven Distortion is the engine's Hyper stage (it runs ahead of the distortion, which then clips the moving voices together: the steady
+    square-like tone the plain chain gives, 12 dB too bright and flat in level, becomes Serum's breathing one). Serum's own values carry across: voices, Detune, Rate and Wet
+    in percent become the 0..127 pots. Only when the HyperD has real voices, detune and wet and the distortion behind it is driven hard (a HyperD that only widens the sound
+    stays the Width stage's job); a value the file leaves at its default is not guessed at."""
+    for i, n in enumerate(nodes):
+        if kind_of(n) != "HyperD" or not enabled(n):
+            continue
+        pp = plain(n)
+        uni, wet, det, rate = (pp.get(k) for k in ("kParamUnison", "kParamWet", "kParamDetune", "kParamRate"))
+        if None in (uni, wet, det, rate) or uni < 1.5 or wet < 10.0 or det <= 0.0:
+            continue
+        hard = [m for m in nodes[i + 1:] if kind_of(m) == "Distortion" and enabled(m) and str(plain(m).get("kParamMode")) != "kDownsample"
+                and plain(m).get("kParamWet", 100.0) >= 50.0 and plain(m).get("kParamDrive", DIST_DEFAULT_DRIVE) >= 50.0]
+        if not hard:
+            continue
+        P = {"hyd_uni": int(min(round(uni), 8)), "hyd_det": int(round(min(det, 100.0) * 1.27)), "hyd_rate": int(round(min(rate, 100.0) * 1.27)), "hyd_wet": int(round(min(wet, 100.0) * 1.27))}
+        return P, [f"HyperD ({uni:.0f} voices, detune {det:.0f} %, rate {rate:.0f} %, wet {wet:.0f} %) ahead of a hard distortion carried as the Hyper stage"]
+    return {}, []
+
+
 def fx_defaults() -> dict:
     P = {"fx_space": 100}
     P.update(map_eq([])[0])
@@ -963,7 +984,8 @@ def fx_defaults() -> dict:
               "chor_on": 0, "chor_mix": 0, "chor_rate": 37, "chor_d1": 21, "chor_d2": 22, "chor_depth": 64, "chor_fb": 0, "chor_filt": 127, "chor_fmode": 0,
               "flan_on": 0, "flan_mix": 0, "flan_rate": 37, "flan_depth": 64, "flan_fb": 0, "flan_phase": 0,
               "phas_on": 0, "phas_mix": 0, "phas_rate": 37, "phas_depth": 64, "phas_depth2": 0, "phas_freq": 50, "phas_fb": 0, "phas_phase": 0, "phas_poles": 4,
-              "fxf_on": 0, "fxf_type": 0, "fxf_freq": 127, "fxf_res": 0, "fxf_env": 64})
+              "fxf_on": 0, "fxf_type": 0, "fxf_freq": 127, "fxf_res": 0, "fxf_env": 64,
+              "hyd_uni": 1, "hyd_det": 0, "hyd_rate": 40, "hyd_wet": 0})
     return P
 
 
@@ -1010,6 +1032,8 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     P.update(dp); notes += [x for x in dn if x.startswith("Distortion carried")]
     if any(not x.startswith("Distortion carried") for x in dn):
         notes.append("Distortion not carried: " + "; ".join(x for x in dn if not x.startswith("Distortion carried")))
+    hy, hn = hyperd_params(nodes)
+    P.update(hy); notes += hn
     cp, cn = comp_params(nodes)
     P.update(cp); notes += [x for x in cn if x.startswith("Comp carried")]
     if any(not x.startswith("Comp carried") for x in cn):

@@ -19,7 +19,7 @@ Bass - BUNT, Lead - Sleepless, Keys - Catching Flies, Lead - I'll Be Yours, Keys
 ## Known gap, cause not found
 
 - **Lead - Let It Go, Lead - Rollin, Lead - Space & Time**: spectral centroid 1.5 to 2.5 times Serum's on the pack's own MIDI (`reports/2026-11-04-demo-midi-ab.md`).
-- **Sub-bass 15 to 28 dB too strong at 31 / 62 Hz** on Lead - Let It Go, Lead - Loop, Lead - Rollin, Lead - Self Control. Let It Go and Self Control were routes saved with `kParamOut` (an output scale in percent) that the converter ignored: fixed (`calibration/probe_route_out.py`; Let It Go 40-80 Hz -19 -> -84 dB re body against Serum's -57, band rms 22.5 -> 12.8). Loop and Rollin are not that cause.
+- **Sub-bass 15 to 28 dB too strong at 31 / 62 Hz** on Lead - Let It Go, Lead - Loop, Lead - Rollin, Lead - Self Control. Let It Go and Self Control were routes saved with `kParamOut` (an output scale in percent) that the converter ignored: fixed (`calibration/probe_route_out.py`; Let It Go 40-80 Hz -19 -> -84 dB re body against Serum's -57, band rms 22.5 -> 12.8). Loop and Rollin are not that cause (both now within 4-10 dB). What is left of Self Control's sub-bass is the reverb: its Freq (a low cut in Hz, steeper than the engine's one-pole `rev_lo`, never mapped) matters, but a three-pole `rev_lo` was neutral across the pack (`calibration/probe_reverb_lowcut.py`), so it was not adopted.
 - **Quieter than Serum by 3 dB or more**: Lead - Other Side (-6.9, see item 1), Lead - Can't Find You, Lead - Let It Go, Lead - Self Control. Not the reverb.
 - **Bass - Gravity** "deeper on Serum": the engine is 5 to 7 dB under at 0.5 to 1.3 kHz and 4 to 11 dB over at 2.5 to 5 kHz; no cause found.
 - **Lead - Lynnic** voice-section balance (hiss against horn).

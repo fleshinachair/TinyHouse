@@ -176,7 +176,11 @@ def physical(tree: dict, header: dict) -> dict:
         if "source" in s and s.get("destModuleTypeString"):
             mods.append({"source": s["source"][0], "aux": s["source"][1] if len(s["source"]) > 1 else 0, "dest_type": s["destModuleTypeString"],
                          "dest_id": s.get("destModuleID"), "dest_param": s.get("destModuleParamName"),
-                         "amount_pct": _pp(s).get("kParamAmount", 0.0),
+                         # kParamOut, when saved, is the route's output scale in percent (default 100): depth = amount x Out / 100 on every destination
+                         # (calibration/probe_route_out.py: coarse pitch swing 11 st at 10 % with no Out, 0.1 st at Out 1, 2.1 st at Out 20; a filter route's
+                         # centroid swing 63 / 30 / 6 Hz at Out none / 50 / 10). Lead - Let It Go's sine into pitch at Out 0.86 does nothing in Serum. Not for a velocity or note-number aux (16, 17): Lead - Can't Find You's
+                         # Out 38-46 routes render the same in Serum with or without it, and the scale made the engine's match worse).
+                         "amount_pct": _pp(s).get("kParamAmount", 0.0) * (1.0 if (s["source"][1:] or [0])[0] in (16, 17) else _pp(s).get("kParamOut", 100.0) / 100.0),
                          "bipolar": bool(_pp(s).get("kParamBipolar", 0.0)),
                          "curve": route_curve(s)})
     macros = [_pp(tree.get(f"Macro{i}", {})).get("kParamValue", 0.0) for i in range(8)]

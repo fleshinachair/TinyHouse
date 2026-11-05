@@ -262,3 +262,5 @@ Banks: a bank is a folder under `/data/UserData/schwung/presets/tinyhouse/`; loo
 - **Not explained**: on the pack's demo MIDI the presets with quick notes step harder at a note start than Serum does (95th percentile of the largest sample-to-sample jump in the first 10 ms, against the
   signal's own level): Lead - I'll Be Yours 9.4 against Serum's 2.6, Lead - Nyday 5.9 against 1.7, Lead - Rollin 1.6 against 0.5, Bass - Gravity 5.8 against 3.1. Their attacks are far longer than the floor,
   so the floor does not explain it. Keys - Loop's demo MIDI is four slow chords and shows no click at all in either render. Needs the exact preset and moment where the click is heard.
+
+- A route's `kParamOut` (saved on 40 of the pack's 951 slots) is its output scale in percent, default 100: depth = amount x Out / 100 on every destination (probe_route_out.py: coarse pitch swing 11 st at 10 % with no Out, 2.1 st at Out 20, 0.1 st at Out 1; filter cutoff centroid swing 63 / 30 / 6 Hz at none / 50 / 10). Not applied to velocity / note-number aux routes (Serum renders those the same either way).

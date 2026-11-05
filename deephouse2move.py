@@ -1213,7 +1213,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     f2 = ph["filter2"]
     reaches2 = {}
     if f2["enabled"] and not bypassed:
-        bal = ph["balance"]
+        bal = {int(k): v for k, v in ph["balance"].items()}       # (the preset has been through JSON: keys are strings; an int lookup found none and sent every source to Filter 1)
         pot_bal = lambda src: round(_clamp((bal.get(src, -1.0) + 1.0) * 63.5, 0, 127)) if routed.get(src) else 0
         for oid, slot in slot_of.items():
             P[f"wt{slot}_bal"] = pot_bal(oid)

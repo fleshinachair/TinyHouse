@@ -460,6 +460,17 @@ void Engine::renderBlock(int16_t *out, int frames)
             refreshBus(b);
             if (fxBus[b].active())
                 fxBus[b].process(busBuf[2 * b], busBuf[2 * b + 1], n);
+            /* The rack's Utils width: the side signal of what the bus returns, scaled (Serum's Utils node sits inside the rack; Lead - Rollin's bus 1 narrows to 23 %). */
+            const float bwT = busPots[b][TB_P_MWIDTH] / 64.0f;
+            if (bwT != 1.0f || busWidthCur[b] != 1.0f) {
+                float *bl = busBuf[2 * b], *br = busBuf[2 * b + 1];
+                for (int i = 0; i < n; i++) {
+                    busWidthCur[b] += (bwT - busWidthCur[b]) * 0.002f;
+                    if (std::fabs(bwT - busWidthCur[b]) < 1e-5f) busWidthCur[b] = bwT;
+                    const float m = 0.5f * (bl[i] + br[i]), sd = 0.5f * (bl[i] - br[i]) * busWidthCur[b];
+                    bl[i] = m + sd; br[i] = m - sd;
+                }
+            }
             for (int i = 0; i < n; i++) { L[i] += busBuf[2 * b][i]; R[i] += busBuf[2 * b + 1][i]; }
         }
         if (fx.active())

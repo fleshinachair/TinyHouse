@@ -1415,13 +1415,15 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
         fx_p["wide_on"] = int(fx_p.get("fx_wide", 0) > 0)
         fx_p["dly_on"] = int(fx_p.get("dly_mix", 0) > 0)
         fx_p["rev_on"] = int(fx_p.get("rev_mix", 0) > 0)
-        for k in BUS_KEYS + ["eq_on", "wide_on", "dly_on", "rev_on"]:
+        for k in BUS_KEYS + ["eq_on", "wide_on", "dly_on", "rev_on", "mwidth"]:
             if k in fx_p:
                 P[f"b{b}.{k}"] = fx_p[k]
         notes.append(f"FX bus {b} carried: {', '.join(k.split('_')[0] for k in live)} sent")
         notes += [f"FX bus {b}: {n}" for n in fx_notes if not n.startswith("Utils carried")]
-        if fx_p.get("mwidth", 64) != 64 or fx_p.get("monohz", 0):
-            notes.append(f"FX bus {b}: Utils width / mono in a bus rack not carried (the engine's master width is for the whole mix)")
+        if fx_p.get("mwidth", 64) != 64:
+            notes.append(f"FX bus {b}: Utils carried as the rack's own width {fx_p['mwidth'] / 64 * 100:.0f} %")
+        if fx_p.get("monohz", 0):
+            notes.append(f"FX bus {b}: Utils mono-below in a bus rack not carried (the engine's mono filter is for the whole mix)")
     return notes
 
 

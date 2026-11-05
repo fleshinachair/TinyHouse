@@ -69,6 +69,7 @@ private:
     void refreshStereo();
     StereoBiquad sideHp;
     float widthCur = 1.0f, monoSeen = -1.0f;
+    float busWidthCur[2] = {1.0f, 1.0f};              /* a bus rack's own Utils width (the "bN.mwidth" key), smoothed */
     bool  monoActive = false;
 
     /* One block's hold on the tables: the only thing keeping them alive. */

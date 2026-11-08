@@ -45,6 +45,11 @@ Facts measured on Serum that are not obvious from the code (all now in `deephous
   converted bank. Measured on all 70: mean band loss 12.955 -> 12.636, presets under 14 dB 42 -> 44; 17 volumes change, Can't Find You 19.4 -> 6.4,
   Keys - BUNT 19.8 -> 7.8, Nu Aspect 2 11.6 -> 9.3; Lead - Self Control 14.3 -> 16.8 and Keys - Why U So 6.5 -> 7.9 get worse (the lower level drifts from Serum's).
   A knee of 0.98 in the engine was worse than the cap.
+- Noise slot holding a sample (2026-11-08): Serum plays it at its own octave spectrum, 11.6 dB under the sample's rms at volume 0.75 (White at 0.75 is -22.4 dB),
+  `calibration/probe_noise_sample.py`, 7 factory samples, bands within 1 dB. The converter used to read the sample name from the wrong node, so every such slot became
+  white noise (Bass - Reiny: an envelope drove it to a +20 dB high-frequency floor). Now `sample_export.noise_standin` fits an engine noise (type, hp, lp, level) to the
+  sample's octave levels. Measured on the 20 presets with such a slot: sum of band loss -7.1 (Reiny 18.7 -> 13.2, Hans Deeper 22.5 -> 17.3, 13 vs 12 under 14 dB),
+  most others within +-1; 70-preset mean about -0.10. Narrow tonal samples (an organ, a balafon) are only roughly matched by a noise.
 - Wavetable position is STEPPED, not blended, for tables whose WAV `clm ` chunk reads "<!>2048 0..." (frame = floor(pos*N); Default Shapes,
   Basic Shapes, DS Saw and Tri); "2..." tables interpolate. The engine reads the flag (`Wavetable::stepped`); tablor_cli.cpp loads tables
   exactly like the module (0.9-peak normalise + stepped) so level fits are valid. Modulation source ids: 1 = Mod Wheel (0 in every render).

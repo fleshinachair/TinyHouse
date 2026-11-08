@@ -186,3 +186,59 @@ def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
         if made is None:
             return None
     return dest, info
+
+
+# Serum's noise slot playing a sample plays it at its own spectrum, 11.6 dB under the sample's rms at oscillator volume 0.75, while Serum's White noise at that
+# volume is -22.4 dB (calibration/probe_noise_sample.py: AC hum1/2, J 60, J106, H-Breath, AlphaNz, MicrKrg Noise, every octave band within 1 dB, level within 0.3 dB).
+# The engine has no sample to play there, so a noise shaped to the sample's octave spectrum stands in: its Type's slope (White +3 dB/octave, Pink flat, Brown -3,
+# equal at the 1-2 kHz octave) through the engine's 12 dB/octave high-pass and low-pass, fitted to the sample's octave levels (every octave within 40 dB of the loudest alike).
+NOISE_PLAYBACK_DB, NOISE_WHITE_DB = -11.6, -22.4
+_OCT_LO = [62.5 * 2 ** i for i in range(9)]               # octaves 62 Hz .. 16 kHz
+_standin: dict = {}
+
+
+def _noise_pot_hz(p: float) -> float:
+    return 20.0 * 1000.0 ** (p / 127.0)
+
+
+def noise_standin(rel: str):
+    """(engine noise type, hp pot, lp pot, level gain in dB over White at the same oscillator volume) for a noise slot's sample, or None if the file is missing."""
+    if rel in _standin:
+        return _standin[rel]
+    fp = find_sample(rel)
+    res = None
+    if fp:
+        x, sr = sf.read(str(fp))
+        x = x if x.ndim == 1 else x.mean(1)
+        n = min(len(x), 1 << 18)
+        seg = x[:n]
+        spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg)))) ** 2
+        f = np.fft.rfftfreq(len(seg), 1.0 / sr)
+        tot = spec.sum() + 1e-30
+        frac = np.array([spec[(f >= lo) & (f < 2 * lo)].sum() for lo in _OCT_LO]) / tot
+        rms_db = 10 * np.log10(float((x ** 2).mean()) + 1e-30)
+        target = (rms_db + NOISE_PLAYBACK_DB) + 10 * np.log10(frac + 1e-12)          # absolute octave levels as Serum plays them
+        w = (frac > frac.max() * 1e-4).astype(float)           # every octave within 40 dB of the loudest counts alike, as the band profile counts them
+        w /= w.sum()
+        centre = np.array(_OCT_LO) * 1.414
+        white = NOISE_WHITE_DB + 10 * np.log10(np.array(_OCT_LO) / (sr / 2.0))
+        at1k = white[4]
+        best = None
+        for ty, slope in ((0, 3.0), (1, 0.0), (4, -3.0)):
+            base = at1k + slope * (np.log2(centre / 1414.0))
+            for lp in range(30, 128, 2):
+                for hp in [0] + list(range(10, 100, 6)):
+                    if hp and _noise_pot_hz(hp) >= _noise_pot_hz(lp) / 3:
+                        continue
+                    m = base - 10 * np.log10(1 + (centre / _noise_pot_hz(lp)) ** 4)
+                    if hp:
+                        m = m - 10 * np.log10(1 + (_noise_pot_hz(hp) / centre) ** 4)
+                    e = target - m
+                    g = float((w * e).sum())
+                    loss = float((w * (e - g) ** 2).sum())
+                    if best is None or loss < best[0]:
+                        best = (loss, ty, hp, lp, g)
+        _, ty, hp, lp, g = best
+        res = (ty, hp, lp, g)
+    _standin[rel] = res
+    return res

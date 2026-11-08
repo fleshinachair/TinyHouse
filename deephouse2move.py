@@ -315,7 +315,7 @@ def physical(tree: dict, header: dict) -> dict:
         "noise": {"enabled": bool(_pp(noise_node).get("kParamEnable", 0)) and not _noise_click(noise_node),
                   "click": bool(_pp(noise_node).get("kParamEnable", 0)) and _noise_click(noise_node),
                   "sample": SE.noise_sample(tree),
-                  "sample_name": noise_node.get("relativePathToNoiseSample"),
+                  "sample_name": (noise_node.get("NoiseOsc3") or {}).get("relativePathToNoiseSample") if isinstance(noise_node.get("NoiseOsc3"), dict) else noise_node.get("relativePathToNoiseSample"),
                   "type": (_pp(noise_node.get("NoiseOsc3", {})) or {}).get("kParamNoiseType") if isinstance(noise_node.get("NoiseOsc3"), dict) else None,
                   "color": (_pp(noise_node.get("NoiseOsc3", {})) or {}).get("kParamColor") if isinstance(noise_node.get("NoiseOsc3"), dict) else None,
                   "level": _pp(noise_node).get("kParamVolume", DEFAULTS["osc_level"])},
@@ -1190,6 +1190,12 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P["noise_level"] = pot_level(level_of(3, nz["level"]))
         P["noise_type"], kind = noise_type_for(nz.get("sample_name"))
         if kind:
+            standin = SE.noise_standin(nz["sample_name"])
+            if standin:
+                # not noise: a noise with the sample's own octave spectrum and level stands in (sample_export.noise_standin)
+                P["noise_type"], P["noise_hp"], P["noise_lp"] = standin[0], standin[1], standin[2]
+                P["noise_level"] = pot_level(level_of(3, nz["level"]) * 10 ** (standin[3] / 20))
+                kind = f"noise osc plays '{nz['sample_name'].rsplit('/', 1)[-1]}' in Serum, which is not noise; a noise with that sample's octave spectrum stands in"
             note.append(kind)
         if not nz.get("sample_name"):
             # the noise oscillator itself: its Type is the spectrum and its Color two 12 dB/octave filters (NOISE_COLOR above)

@@ -10,17 +10,6 @@
   "limiter_loss_db": 2.576965915324081e-05,
   "kept": true
  },
- "Bass - Black Out": {
-  "sig": "4bc2596201928d596be95af3887b41c6",
-  "volume": 44,
-  "start_volume": 35,
-  "start_rms_db": -11.05631485738831,
-  "rms_db": -7.039940490173482,
-  "serum_rms_db": -7.435136044418215,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.389189543575025,
-  "kept": true
- },
  "Bass - AVAION": {
   "sig": "e28bdede3e73eb68a1911012d7bfc74f",
   "volume": 45,
@@ -164,17 +153,6 @@
   "limiter_loss_db": -0.11476183044163157,
   "kept": true
  },
- "Keys - Atlantic": {
-  "sig": "44052d9d7941e9508b26b7e6a4a344a2",
-  "volume": 65,
-  "start_volume": 46,
-  "start_rms_db": -18.77118825476283,
-  "rms_db": -12.703077104047921,
-  "serum_rms_db": -13.008012128426415,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.007543348589237553,
-  "kept": true
- },
  "Keys - Billboard": {
   "sig": "7a0ad5f19fdc7ece3bec032ea19c0047",
   "volume": 35,
@@ -206,28 +184,6 @@
   "serum_rms_db": -11.00116884530513,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.0037320551221409204,
-  "kept": true
- },
- "Keys -  Zerb": {
-  "sig": "23647bff6d72a298c9cea61ba20fba45",
-  "volume": 67,
-  "start_volume": 39,
-  "start_rms_db": -22.39687727934353,
-  "rms_db": -13.395842010046238,
-  "serum_rms_db": -13.513080269763085,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.8013091673920982,
-  "kept": true
- },
- "Keys - Loop": {
-  "sig": "3d8937b0b6553050dcfeed203426cd4a",
-  "volume": 44,
-  "start_volume": 51,
-  "start_rms_db": -7.455972044529333,
-  "rms_db": -9.332551252825043,
-  "serum_rms_db": -9.704887852600248,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.30733484144757917,
   "kept": true
  },
  "Keys - Catching Flies": {
@@ -296,17 +252,6 @@
   "limiter_loss_db": 0.4514563458850862,
   "kept": true
  },
- "Lead - Ari": {
-  "sig": "653ac8a46cef7690e362006f80a6409e",
-  "volume": 52,
-  "start_volume": 70,
-  "start_rms_db": -7.883808526321897,
-  "rms_db": -12.466610063954612,
-  "serum_rms_db": -12.5439112698241,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.19223129909477166,
-  "kept": true
- },
  "Lead - HotLap": {
   "sig": "21d63803bfff2c1853f5220ce94b74bc",
   "volume": 55,
@@ -338,28 +283,6 @@
   "serum_rms_db": -6.023181852062152,
   "shortfall_db": 0.48047365466650227,
   "limiter_loss_db": 0.577560406028935,
-  "kept": true
- },
- "Lead - Lynnic": {
-  "sig": "e7a3ae010b9e8ff6ad197c6605ec39f3",
-  "volume": 81,
-  "start_volume": 86,
-  "start_rms_db": -15.722068609267607,
-  "rms_db": -16.755163615277795,
-  "serum_rms_db": -16.860271082730957,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.012919946949466521,
-  "kept": true
- },
- "Lead - Oskar Med": {
-  "sig": "e552b4ea0f74a78a57725f84d4902035",
-  "volume": 29,
-  "start_volume": 57,
-  "start_rms_db": -7.125427985190634,
-  "rms_db": -17.699358760052192,
-  "serum_rms_db": -17.67581966685806,
-  "shortfall_db": 0.023539093194131055,
-  "limiter_loss_db": 0.4990933354281495,
   "kept": true
  },
  "Lead - Nyday": {
@@ -461,17 +384,6 @@
   "limiter_loss_db": -0.5888426057197407,
   "kept": true
  },
- "Pad - CamelPhat": {
-  "sig": "3f02f81c08240ccd24cb13bdf31f1197",
-  "volume": 73,
-  "start_volume": 75,
-  "start_rms_db": -13.111065653883562,
-  "rms_db": -13.489234169480138,
-  "serum_rms_db": -13.848107495980283,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.37924114994111946,
-  "kept": true
- },
  "Pad - BICEP": {
   "sig": "53cd0dc1895c40b7c58704b144c3fb91",
   "volume": 39,
@@ -481,50 +393,6 @@
   "serum_rms_db": -15.232535457787161,
   "shortfall_db": 0.2996310667895816,
   "limiter_loss_db": 0.7205885467440876,
-  "kept": true
- },
- "Pad - Nu Aspect": {
-  "sig": "5dd5ef9d26f9fd793eb80696722f6782",
-  "volume": 67,
-  "start_volume": 84,
-  "start_rms_db": -18.865805127166922,
-  "rms_db": -22.93260497956162,
-  "serum_rms_db": -23.12023047837176,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.12019882036083729,
-  "kept": true
- },
- "Pad - Nu Aspect 2": {
-  "sig": "c57b1ca666dc6e9176a856a1da1baf61",
-  "volume": 40,
-  "start_volume": 75,
-  "start_rms_db": -6.451122090115289,
-  "rms_db": -15.872589502855085,
-  "serum_rms_db": -14.80684830679751,
-  "shortfall_db": 1.0657411960575747,
-  "limiter_loss_db": -1.274901989371223,
-  "kept": true
- },
- "Pad - Origins": {
-  "sig": "66f32cc0ce1ee6ce27347bed198c43d7",
-  "volume": 39,
-  "start_volume": 65,
-  "start_rms_db": -7.569037336786852,
-  "rms_db": -15.87713254732271,
-  "serum_rms_db": -15.93647169461857,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.06134412010512591,
-  "kept": true
- },
- "Pluck - HotLap": {
-  "sig": "8311b79e871138a3ee2ddb731d8d5891",
-  "volume": 49,
-  "start_volume": 54,
-  "start_rms_db": -18.809889991796965,
-  "rms_db": -19.4536772271156,
-  "serum_rms_db": -19.92087536602183,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.30906846450470127,
   "kept": true
  },
  "Pad - Small Town Kid": {
@@ -538,17 +406,6 @@
   "limiter_loss_db": 0.06971680564931404,
   "kept": true
  },
- "Pluck - London Topaz": {
-  "sig": "b2160f2ddb99492a11a369f05a326815",
-  "volume": 70,
-  "start_volume": 61,
-  "start_rms_db": -25.5802357684283,
-  "rms_db": -23.651613970834532,
-  "serum_rms_db": -23.490924843045452,
-  "shortfall_db": 0.1606891277890803,
-  "limiter_loss_db": 0.28463533566229415,
-  "kept": true
- },
  "Pluck - Movement": {
   "sig": "70731816894b76f468cea2fe5b149a02",
   "volume": 68,
@@ -558,138 +415,6 @@
   "serum_rms_db": -17.037369704444167,
   "shortfall_db": 0.4111378285270426,
   "limiter_loss_db": 1.9376004048701283,
-  "kept": true
- },
- "Pluck - Scorpios": {
-  "sig": "00e9bbaf22ee81160a9e6b601f89ee35",
-  "volume": 31,
-  "start_volume": 48,
-  "start_rms_db": -17.450520499514354,
-  "rms_db": -24.316621859760026,
-  "serum_rms_db": -24.745320329264366,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.35204513811964944,
-  "kept": true
- },
- "Pluck - Origins": {
-  "sig": "47c72e0b9c1568eedd7e0e84817779a1",
-  "volume": 32,
-  "start_volume": 39,
-  "start_rms_db": -13.04292327734726,
-  "rms_db": -16.219321007855964,
-  "serum_rms_db": -16.47937679371132,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.2879285314176876,
-  "kept": true
- },
- "Pluck - NOTSOBAD": {
-  "sig": "c2347563e0808a4518ee033e16cb4ff6",
-  "volume": 70,
-  "start_volume": 84,
-  "start_rms_db": -21.599637963963332,
-  "rms_db": -25.00676854100332,
-  "serum_rms_db": -24.656608898022764,
-  "shortfall_db": 0.35015964298055735,
-  "limiter_loss_db": -0.053283193164521236,
-  "kept": true
- },
- "Pluck - Nu Aspect": {
-  "sig": "069836151bc9165023604450a4ddf7f5",
-  "volume": 71,
-  "start_volume": 62,
-  "start_rms_db": -27.231992772858582,
-  "rms_db": -23.67882028662653,
-  "serum_rms_db": -24.38574891320515,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.4549154340994228,
-  "kept": true
- },
- "Pluck - all things break": {
-  "sig": "8a0d07aecb7617bd1b661eb9f361818e",
-  "volume": 50,
-  "start_volume": 69,
-  "start_rms_db": -12.28306705301758,
-  "rms_db": -16.789077716379047,
-  "serum_rms_db": -17.260747306274766,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.7984049748519695,
-  "kept": true
- },
- "Pluck - Selected": {
-  "sig": "63b8dbd330f4aeabace8476977e4f1d9",
-  "volume": 62,
-  "start_volume": 84,
-  "start_rms_db": -18.545916632893366,
-  "rms_db": -23.572323139420103,
-  "serum_rms_db": -23.694734542194244,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.13547041946150173,
-  "kept": true
- },
- "Keys - Why U So": {
-  "sig": "4614602bc418ab9bf90d3212842646f1",
-  "volume": 30,
-  "start_volume": 46,
-  "start_rms_db": -8.099283698737228,
-  "rms_db": -15.061413820599029,
-  "serum_rms_db": -15.433540720759884,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.053940885819187656,
-  "kept": true
- },
- "Lead - Kisaya": {
-  "sig": "1e833c15a9b224229f0291b5ab92c878",
-  "volume": 49,
-  "start_volume": 50,
-  "start_rms_db": -15.145153859517412,
-  "rms_db": -15.485811343486965,
-  "serum_rms_db": -15.445310949264268,
-  "shortfall_db": 0.04050039422269691,
-  "limiter_loss_db": 0.060800623871116954,
-  "kept": true
- },
- "Pad - Reiny": {
-  "sig": "7158aa8f856ceddac3eda11eeeb5e5d3",
-  "volume": 68,
-  "start_volume": 86,
-  "start_rms_db": -12.581081143465623,
-  "rms_db": -17.633867952373773,
-  "serum_rms_db": -17.62716770794328,
-  "shortfall_db": 0.006700244430493996,
-  "limiter_loss_db": 0.03730443185050447,
-  "kept": true
- },
- "Pad - Aquatiq": {
-  "sig": "9fc98718b7ce00c0ca13643aee4fb6f6",
-  "volume": 69,
-  "start_volume": 74,
-  "start_rms_db": -15.777247779910589,
-  "rms_db": -16.531634144458238,
-  "serum_rms_db": -16.801718351990385,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.19194080433530303,
-  "kept": true
- },
- "Lead - Consoul Training": {
-  "sig": "49ed0b76eae0e5692f61331891c1413c",
-  "volume": 101,
-  "start_volume": 52,
-  "start_rms_db": -19.815802650091147,
-  "rms_db": -8.861869431158574,
-  "serum_rms_db": -8.958912149290018,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.8310750897161086,
-  "kept": true
- },
- "Pluck - Deep In The Water": {
-  "sig": "c684a391ed0572409b563af548fa885a",
-  "volume": 28,
-  "start_volume": 42,
-  "start_rms_db": -17.6358190890035,
-  "rms_db": -22.40443013057904,
-  "serum_rms_db": -22.698594951818436,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.3424753766761022,
   "kept": true
  },
  "Lead - Self Control": {
@@ -767,6 +492,281 @@
   "serum_rms_db": -18.51864597450551,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.19071860677900787,
+  "kept": true
+ },
+ "Keys - Loop": {
+  "sig": "92b04792c8698ac107f691f7214c3acf",
+  "volume": 43,
+  "start_volume": 51,
+  "start_rms_db": -7.195700121225119,
+  "rms_db": -9.792725113227025,
+  "serum_rms_db": -9.704887852600248,
+  "shortfall_db": 0.08783726062677744,
+  "limiter_loss_db": 0.11163020235872168,
+  "kept": true
+ },
+ "Bass - Black Out": {
+  "sig": "9c0a3e87ca2179c1c5e234b5ddef104a",
+  "volume": 44,
+  "start_volume": 35,
+  "start_rms_db": -11.09052706307688,
+  "rms_db": -7.058026811128397,
+  "serum_rms_db": -7.435136044418215,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.5537306307532832,
+  "kept": true
+ },
+ "Keys - Why U So": {
+  "sig": "4ff416d4ee7852473e3b7ff3514aeb2d",
+  "volume": 30,
+  "start_volume": 46,
+  "start_rms_db": -8.0110734969064,
+  "rms_db": -15.122328861783867,
+  "serum_rms_db": -15.433540720759884,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.22387690834190366,
+  "kept": true
+ },
+ "Lead - Ari": {
+  "sig": "96a3466312f8a97e9463ffc5b75d1b04",
+  "volume": 53,
+  "start_volume": 70,
+  "start_rms_db": -8.140533725500834,
+  "rms_db": -12.114325094217948,
+  "serum_rms_db": -12.5439112698241,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.38734463967400323,
+  "kept": true
+ },
+ "Keys - Atlantic": {
+  "sig": "e0f8106d1a44cd5f0a1a68ab1910359f",
+  "volume": 64,
+  "start_volume": 46,
+  "start_rms_db": -18.701891144347133,
+  "rms_db": -13.100809011267714,
+  "serum_rms_db": -13.008012128426415,
+  "shortfall_db": 0.09279688284129861,
+  "limiter_loss_db": 0.29105828134952816,
+  "kept": true
+ },
+ "Lead - Kisaya": {
+  "sig": "20bd5dbdbe6b708f32ba29d1bd413224",
+  "volume": 50,
+  "start_volume": 50,
+  "start_rms_db": -15.254556626539904,
+  "rms_db": -15.189643836441089,
+  "serum_rms_db": -15.445310949264268,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.03976399564725952,
+  "kept": true
+ },
+ "Lead - Oskar Med": {
+  "sig": "c5dcaab942737e67fef1d7fe0bd6447d",
+  "volume": 29,
+  "start_volume": 57,
+  "start_rms_db": -6.862738793946669,
+  "rms_db": -17.05540193781563,
+  "serum_rms_db": -17.67581966685806,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.6742474145209272,
+  "kept": true
+ },
+ "Lead - Lynnic": {
+  "sig": "0d49b36138bba157a4235e49f4420e5a",
+  "volume": 81,
+  "start_volume": 86,
+  "start_rms_db": -15.704174993798794,
+  "rms_db": -16.704847151614082,
+  "serum_rms_db": -16.860271082730957,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.0038424911857859456,
+  "kept": true
+ },
+ "Pad - CamelPhat": {
+  "sig": "3e86bde51b3765bab2fb63ce22357bee",
+  "volume": 73,
+  "start_volume": 75,
+  "start_rms_db": -13.316271843553885,
+  "rms_db": -13.599236713770658,
+  "serum_rms_db": -13.848107495980283,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.09694133807298044,
+  "kept": true
+ },
+ "Pad - Nu Aspect 2": {
+  "sig": "434e7dc1c674255916c5416b7d2985ce",
+  "volume": 44,
+  "start_volume": 75,
+  "start_rms_db": -7.932912219881255,
+  "rms_db": -15.725252036072298,
+  "serum_rms_db": -14.80684830679751,
+  "shortfall_db": 0.9184037292747878,
+  "limiter_loss_db": 1.3661316648690374,
+  "kept": true
+ },
+ "Pad - Aquatiq": {
+  "sig": "f967acd2583a962025d97ddfcc19d66d",
+  "volume": 68,
+  "start_volume": 74,
+  "start_rms_db": -15.55799987762856,
+  "rms_db": -17.11383136025177,
+  "serum_rms_db": -16.801718351990385,
+  "shortfall_db": 0.31211300826138455,
+  "limiter_loss_db": 0.28573090005272306,
+  "kept": true
+ },
+ "Pad - Nu Aspect": {
+  "sig": "063008a855509a056a91a2ab1c50535e",
+  "volume": 66,
+  "start_volume": 84,
+  "start_rms_db": -18.945694365683924,
+  "rms_db": -23.088919475259672,
+  "serum_rms_db": -23.12023047837176,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.1713688357403882,
+  "kept": true
+ },
+ "Pluck - all things break": {
+  "sig": "c83f0120ec2bb20c3323a08ff448c1a6",
+  "volume": 50,
+  "start_volume": 69,
+  "start_rms_db": -12.066497175795085,
+  "rms_db": -16.839954821300537,
+  "serum_rms_db": -17.260747306274766,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.06637481333071094,
+  "kept": true
+ },
+ "Pad - Origins": {
+  "sig": "0e12b775c2b6cae91bf850259d6dfeb9",
+  "volume": 39,
+  "start_volume": 65,
+  "start_rms_db": -7.6182918089190865,
+  "rms_db": -15.834833437954202,
+  "serum_rms_db": -15.93647169461857,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.19223503291228639,
+  "kept": true
+ },
+ "Pad - Reiny": {
+  "sig": "9f9fe6cacab08e8e1a1b091b88f0165f",
+  "volume": 65,
+  "start_volume": 86,
+  "start_rms_db": -13.027828800656152,
+  "rms_db": -17.89400774363594,
+  "serum_rms_db": -17.62716770794328,
+  "shortfall_db": 0.2668400356926597,
+  "limiter_loss_db": -0.017725289682104517,
+  "kept": true
+ },
+ "Pluck - HotLap": {
+  "sig": "c9e057485925c523d3f8f2b62c06b5dc",
+  "volume": 50,
+  "start_volume": 54,
+  "start_rms_db": -18.495272890416942,
+  "rms_db": -19.059006601961862,
+  "serum_rms_db": -19.92087536602183,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.1678143172334714,
+  "kept": true
+ },
+ "Lead - Consoul Training": {
+  "sig": "2ce03d086f8cfd06b7ce94af324c5a72",
+  "volume": 102,
+  "start_volume": 52,
+  "start_rms_db": -19.821435423141295,
+  "rms_db": -8.826091421644026,
+  "serum_rms_db": -8.958912149290018,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.6617731991641556,
+  "kept": true
+ },
+ "Pluck - London Topaz": {
+  "sig": "ae04a8a899ea1569aee8080519802665",
+  "volume": 70,
+  "start_volume": 61,
+  "start_rms_db": -25.62664320828548,
+  "rms_db": -23.919627316743988,
+  "serum_rms_db": -23.490924843045452,
+  "shortfall_db": 0.42870247369853587,
+  "limiter_loss_db": 0.33791864792707216,
+  "kept": true
+ },
+ "Keys -  Zerb": {
+  "sig": "8f87e220883a5f145c39ca36fee19464",
+  "volume": 66,
+  "start_volume": 39,
+  "start_rms_db": -22.70784789286408,
+  "rms_db": -13.635523235926916,
+  "serum_rms_db": -13.513080269763085,
+  "shortfall_db": 0.1224429661638311,
+  "limiter_loss_db": 0.24626617498297598,
+  "kept": true
+ },
+ "Pluck - NOTSOBAD": {
+  "sig": "aa364ed5367b3fdbedd525a595182f92",
+  "volume": 73,
+  "start_volume": 84,
+  "start_rms_db": -21.832005178531247,
+  "rms_db": -24.076175550894344,
+  "serum_rms_db": -24.656608898022764,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.4574972559561026,
+  "kept": true
+ },
+ "Pluck - Scorpios": {
+  "sig": "b7f2ccdb99c6084810a015fbb3e2622b",
+  "volume": 31,
+  "start_volume": 48,
+  "start_rms_db": -17.09868012608232,
+  "rms_db": -24.453939689557846,
+  "serum_rms_db": -24.745320329264366,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.2717403116925361,
+  "kept": true
+ },
+ "Pluck - Origins": {
+  "sig": "919f9322b197f4751d95c2958244ffb8",
+  "volume": 32,
+  "start_volume": 39,
+  "start_rms_db": -13.001172307190885,
+  "rms_db": -16.60739434064523,
+  "serum_rms_db": -16.47937679371132,
+  "shortfall_db": 0.12801754693390777,
+  "limiter_loss_db": 0.6919107172367873,
+  "kept": true
+ },
+ "Pluck - Nu Aspect": {
+  "sig": "2b22068b392b4af79f996524f6865914",
+  "volume": 72,
+  "start_volume": 62,
+  "start_rms_db": -26.570264757729785,
+  "rms_db": -24.144770166910053,
+  "serum_rms_db": -24.38574891320515,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.129555711957817,
+  "kept": true
+ },
+ "Pluck - Selected": {
+  "sig": "ad89e4dd515b8a3940ae0537f9be2aef",
+  "volume": 63,
+  "start_volume": 84,
+  "start_rms_db": -18.217911009904427,
+  "rms_db": -23.22175685807125,
+  "serum_rms_db": -23.694734542194244,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.5814756066859523,
+  "kept": true
+ },
+ "Pluck - Deep In The Water": {
+  "sig": "0cc05b0ca8c26f4f554ac2f11bf1e578",
+  "volume": 29,
+  "start_volume": 42,
+  "start_rms_db": -17.25510453714633,
+  "rms_db": -22.12728999021984,
+  "serum_rms_db": -22.698594951818436,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 1.1864415674650495,
   "kept": true
  }
 }

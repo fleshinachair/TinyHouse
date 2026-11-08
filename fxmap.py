@@ -121,7 +121,15 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
 # drive of the sum on the 3rd harmonic of a sine, to 0.1).
 EQ_GAIN_RANGE_DB = 48.0
 EQ_FREQ_MIN, EQ_FREQ_MAX = 21.5332, 20000.0
-FOLDED_KNOBS = {"FXEQ": ("kParamGain1", "kParamGain2", "kParamFreq1", "kParamFreq2"), "FXDistortion": ("kParamDrive",)}
+# A Utils Width is a knob with its own law (calibration/probe_utils.py width: a stored 0 plus a route of 10..100 % at macro 100 % reads the width at that knob position): the
+# width in percent is about 100 (2 x)^3 for the knob position x (0.2: 6 %, 0.4: 50 %, 0.5: 99 %, 0.6: 172 %, 0.8: 397 %, 1.0: 768 %), side scale = width / 100 (stored 25 / 50 /
+# 150 / 200: -12 / -6 / +3.5 / +6 dB of side against mid), and a route adds its amount to the position (a stored 50 % = position 0.4 plus 25 % read 213 %, measured 207-213).
+UTILS_WIDTH_KNOB = [(0.0, 0.0), (0.1, 0.8), (0.2, 6.2), (0.3, 21.8), (0.4, 49.5), (0.5, 98.6), (0.6, 171.5), (0.7, 265.1), (0.8, 397.2), (0.9, 566.0), (1.0, 767.5)]
+# The Utils HPF / LPF knobs are logarithmic and a route moves them by about 8.6 octaves per 100 % (calibration/probe_utils.py route: +10 % = +0.82..0.92 octaves, +25 % = +1.9..2.2,
+# -10 % = -0.85..-0.94); the LPF knob's stored ends are 50 Hz and 19.9 kHz, 8.64 octaves, which is the span taken for both (the HPF's top end is not known, 640 Hz assumed).
+UTILS_CUT_OCTAVES = 8.64
+UTILS_CUT_RANGE = {"kParamHPF": (1.34, 640.0), "kParamLPF": (50.0, 19924.0)}
+FOLDED_KNOBS = {"FXEQ": ("kParamGain1", "kParamGain2", "kParamFreq1", "kParamFreq2"), "FXDistortion": ("kParamDrive",), "FXUtils": ("kParamWidth", "kParamHPF", "kParamLPF")}
 
 
 def fold_macro_knobs(nodes: list[dict], mods: list[dict], macros: list[float]) -> list[dict]:
@@ -141,7 +149,15 @@ def fold_macro_knobs(nodes: list[dict], mods: list[dict], macros: list[float]) -
         pp = out[i][f"FX{kind}"]["plainParams"]
         param = m["dest_param"]
         band = int(param[-1]) if kind == "EQ" else 0
-        if kind == "Distortion":
+        if kind == "Utils" and param in UTILS_CUT_RANGE:
+            lo, hi = UTILS_CUT_RANGE[param]
+            f0 = float(pp.get(param, lo if param == "kParamHPF" else hi))
+            pp[param] = min(max(f0 * 2.0 ** (UTILS_CUT_OCTAVES * a * d), lo), hi)
+        elif kind == "Utils":
+            xs, ws = [p[0] for p in UTILS_WIDTH_KNOB], [p[1] for p in UTILS_WIDTH_KNOB]
+            x = float(np.interp(float(pp.get(param, 100.0)), ws, xs))
+            pp[param] = float(np.interp(min(max(x + a * d, 0.0), 1.0), xs, ws))
+        elif kind == "Distortion":
             pp[param] = min(max(float(pp.get(param, DIST_DEFAULT_DRIVE)) + m["amount_pct"] * d, 0.0), 100.0)
         elif param.startswith("kParamGain"):
             pp[param] = min(max(float(pp.get(param, 0.0)) + a * d * EQ_GAIN_RANGE_DB, -EQ_GAIN_RANGE_DB / 2), EQ_GAIN_RANGE_DB / 2)
@@ -416,9 +432,11 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
     return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "envs": envs, "ignored": ignored}
 
 
-def filter_bands(nodes: list[dict], ctx: dict | None) -> tuple[list[dict], list[str]]:
-    """The static low-pass / high-pass Filter FX nodes of the master rack as EQ bands, and why any were left out."""
+def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None) -> tuple[list[dict], list[str]]:
+    """The static low-pass / high-pass Filter FX nodes of the master rack as EQ bands, and why any were left out. `handled` collects the indices of the nodes dealt
+    with: carried as bands, or open (a low-pass above 19 kHz or a high-pass under 25 Hz changes nothing) or dry."""
     out, why = [], []
+    handled = handled if handled is not None else set()
     if not FILTER_FX_ENABLED:
         return out, why
     inside = branch_nodes(nodes)
@@ -444,8 +462,9 @@ def filter_bands(nodes: list[dict], ctx: dict | None) -> tuple[list[dict], list[
             why.append(f"Filter model {ty}")
             continue
         wet = float(pp.get("kParamWet", 100.0))
-        if wet < FX_FILTER_MIN_WET:
-            continue                                    # off, or too little of the signal to matter: not worth a note
+        if wet < 1.0:
+            handled.add(i)
+            continue                                    # dry: the signal goes past it
         if dynamic:
             why.append("Filter moved by an envelope/LFO/velocity")
             continue
@@ -463,7 +482,12 @@ def filter_bands(nodes: list[dict], ctx: dict | None) -> tuple[list[dict], list[
         reso = float(pp.get("kParamReso", 0.0))                # an unwritten Reso plays as 0 (no passband loss, no peak): measured, probe_fxfilter_types.py
         q = (0.5 if ty == "default" else 0.7071) + 4.0 * min(max(reso, 0.0), 100.0) / 100.0 * (0.0 if ty == "default" else 1.0)
         if (kind == "lp" and fc > 19000) or (kind == "hp" and fc < 25):
+            handled.add(i)
             continue                                    # out of the audible band: nothing to carry
+        handled.add(i)
+        # Wet is a smoothstep s with the dry part kept, (1 - s^2) + s h, as for the other effects (calibration/probe_fxfilter_wet.py: MgL24 / MgL12 at Wet 25 / 50 / 75 fit it to
+        # 0.4-1.0 dB, a linear mix is 2-3 dB off at 25 and 50). The default-type branch used a linear mix, and every other type ignored the Wet.
+        s_w = smoothstep(min(max(wet, 0.0), 100.0) / 100.0)
         if kind == "lp" and (ty in ("default", "MgL6", "L6")):
             # A 6 dB/octave low-pass (the default Filter FX, MG Low 6): the engine's EQ has only 12 dB/octave biquads, and one of those falls
             # twice as fast past the corner (Keys - Zerb's high end was 12 dB too low at 12 kHz). A high shelf of up to -24 dB, fitted to the
@@ -477,8 +501,12 @@ def filter_bands(nodes: list[dict], ctx: dict | None) -> tuple[list[dict], list[
                 w = min(max(wet, 0.0), 100.0) / 100.0
                 drive = float(np.interp(float(pp.get("kParamDrive", 0.0)), [d for d, _ in FX_FILTER_DRIVE_DB], [g for _, g in FX_FILTER_DRIVE_DB]))
                 lin = 10 ** ((drive if w < 0.99 else 0.0) / 20) * 10 ** (delta / 20)
-                target = 20.0 * np.log10(np.maximum(np.abs((1.0 - w) + w * h * lin), 1e-6))
+                target = 20.0 * np.log10(np.maximum(np.abs((1.0 - s_w ** 2) + s_w * h * lin), 1e-6))
                 out += fit_filter_curve(target, fc3)
+                continue
+            h = 1.0 / (1.0 + 1j * FGRID / fc3)
+            if s_w < 0.99:
+                out += fit_filter_curve(20.0 * np.log10(np.maximum(np.abs((1.0 - s_w ** 2) + s_w * h), 1e-6)), fc3)
                 continue
             target = -10.0 * np.log10(1.0 + (FGRID / fc3) ** 2)
             band, _ = fit_one(target, "hishelf", fc3, spread=1.5)
@@ -490,6 +518,11 @@ def filter_bands(nodes: list[dict], ctx: dict | None) -> tuple[list[dict], list[
             # are a Q 0.5 biquad; an odd one left over is fitted by a shelf, since the engine's EQ has no one-pole.
             n = FX_FILTER_POLES[ty]
             fp = serum_filter_hz(norm)
+            if s_w < 0.99:                                   # partly wet: the filtered part mixed with the dry one, fitted by a few bands
+                x = FGRID / fp
+                h = (1.0 / (1.0 + 1j * x)) ** n if kind == "lp" else (1j * x / (1.0 + 1j * x)) ** n
+                out += fit_filter_curve(20.0 * np.log10(np.maximum(np.abs((1.0 - s_w ** 2) + s_w * h), 1e-6)), fp)
+                continue
             out += [{"kind": kind, "fc": fp, "gain": 0.0, "q": 0.5} for _ in range(n // 2)]
             if n % 2:
                 one = (FGRID / fp) ** 2 if kind == "lp" else (fp / FGRID) ** 2
@@ -700,6 +733,38 @@ def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | No
     return width, mono, why
 
 
+# The Utils effect's own HPF and LPF knobs (Hz), measured with noise through one Utils node (calibration/probe_utils.py filters): the high-pass is a 3rd-order Butterworth (-12 dB at
+# 0.70 and -24 dB at 0.45 of the stated 100 Hz, 0.74 / 0.47 at 400 Hz) whose -3 dB point sits at about 1.14 x the stated frequency; the low-pass is a 2nd-order Butterworth at the stated
+# frequency (-12 dB at 2.0 x, -24 dB at 3.9 x). The knob ends (HPF under 25 Hz, LPF over 19 kHz) are off. 32 factory presets store an HPF (median 60 Hz) and 17 an LPF (median 1.2 kHz),
+# which the EQ stage now carries (a Utils with only these used to read "not carried").
+UTILS_HPF_CORNER = 1.14
+
+
+def utils_filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None) -> tuple[list[dict], list[str]]:
+    """The HPF and LPF of every enabled master-signal Utils as EQ bands, and why any were left out."""
+    out, why = [], []
+    handled = handled if handled is not None else set()
+    inside = branch_nodes(nodes)
+    mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils"]
+    for i, n in enumerate(nodes):
+        if kind_of(n) != "Utils" or not enabled(n) or i in inside:
+            continue
+        pp = plain(n)
+        if any(m["dest_id"] == i and m["dest_param"] in ("kParamHPF", "kParamLPF") and not 25 <= m["source"] <= 32 for m in mods):
+            why.append("Utils HPF / LPF moved by a route")
+            continue
+        handled.add(i)
+        hp, lp = float(pp.get("kParamHPF", 0.0)), float(pp.get("kParamLPF", 20000.0))
+        if hp >= 25.0:
+            fc = hp * UTILS_HPF_CORNER
+            out.append({"kind": "hp", "fc": fc, "gain": 0.0, "q": 1.0})
+            band, _ = fit_one(-10.0 * np.log10(1.0 + (fc / FGRID) ** 2), "loshelf", fc, spread=1.5)             # the third pole: a one-pole high-pass
+            out.append(band)
+        if lp <= 19000.0:
+            out.append({"kind": "lp", "fc": lp, "gain": 0.0, "q": 0.7071})
+    return out, why
+
+
 def curve(bands: list[dict]) -> np.ndarray:
     y = np.zeros_like(FGRID)
     for b in bands:
@@ -771,13 +836,16 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
     for n in range(1, EQ_SLOTS + 1):
         P.update({f"eq{n}_type": EQ_OFF, f"eq{n}_freq": 64, f"eq{n}_gain": 64, f"eq{n}_q": 64})
     bands = eq_bands(nodes)
-    fbands, fwhy = filter_bands(nodes, ctx)
+    handled: set = set()
+    fbands, fwhy = filter_bands(nodes, ctx, handled)
+    ubands, uwhy_f = utils_filter_bands(nodes, ctx, handled)
+    fbands, fwhy = fbands + ubands, fwhy + uwhy_f
     dbands, dwhy = dist_filter_bands(nodes)
     fbands, fwhy = fbands + dbands, fwhy + dwhy
     bands = bands + fbands
-    notes, info = [], {"eq_bands_in": len(bands), "filter_fx_bands": len(fbands)}
+    notes, info = [], {"eq_bands_in": len(bands), "filter_fx_bands": len(fbands), "filter_fx_handled": sorted(handled)}
     if fbands:
-        notes.append("Filter FX carried as " + ", ".join(f"{b['kind']} {b['fc']:.0f} Hz" for b in fbands) + " in the EQ")
+        notes.append("Filter FX (and Utils HPF / LPF) carried as " + ", ".join(f"{b['kind']} {b['fc']:.0f} Hz" for b in fbands) + " in the EQ")
     if fwhy:
         notes.append("Filter FX not carried: " + "; ".join(sorted(set(fwhy))))
     inside = branch_nodes(nodes)
@@ -1149,10 +1217,14 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     ms_idx = ms_branches(nodes)
     ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) for j in ms_idx) and all(
         kind_of(nodes[j]) != "Split" or not enabled(nodes[j]) for j in branch_nodes(nodes))
-    ignored = sorted({kind_of(x) for x in nodes if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x) and not dry(x)
-                      and not (kind_of(x) == "Utils" and carried_utils) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
+    # A Utils is carried when its width / mono-below went to the master stage and its HPF / LPF to the EQ (utils_filter_bands); LevelOut is a uniform gain (the loudness fit),
+    # Balance (a pan, 6 factory presets) is not carried.
+    utils_ok = lambda i, x: i in info.get("filter_fx_handled", ()) and not uwhy and abs(float(plain(x).get("kParamBalance", 0.0))) < 1.0
+    ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x) and not dry(x)
+                      and not (kind_of(x) == "Utils" and utils_ok(i, x)) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
                       and not (kind_of(x) == "SplitMS" and ms_plain)})
-    if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) for x in nodes) and not info.get("filter_fx_bands") and dynamic_filter(nodes, ctx) is None:
+    dyn_i = (dynamic_filter(nodes, ctx) or {}).get("index")
+    if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) and i not in info.get("filter_fx_handled", ()) and i != dyn_i for i, x in enumerate(nodes)):
         ignored = sorted(set(ignored) | {"Filter"})
     if ignored:
         notes.append("not carried: " + ", ".join(ignored))

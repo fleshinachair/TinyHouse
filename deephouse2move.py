@@ -1020,6 +1020,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     routes = []                                  # envelope routes
     other = []                                   # LFO/velocity/etc: not representable
     mod_wheel_idle = 0
+    bip_env = 0
     for m in ph["mods"]:
         src, a = m["source"], m["amount_pct"] / 100.0
         key = (m["dest_type"], m["dest_param"], m["dest_id"])
@@ -1043,10 +1044,17 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             mod_wheel_idle += 1
         elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/probe_venv.py)
             routes.append((src - 2, key, a))
+            if m.get("bipolar") and key[0] == "VoiceFilter" and key[1] == "kParamFreq":
+                # A bipolar route is the source minus one half, so once the envelope has fallen the cutoff sits half the depth below the stored one and the
+                # engine's unipolar envelope only gets the depth: fold the offset into the base (Lead - Let It Go: Env2 -> cutoff +17 % bipolar, sustain 0)
+                fold[key] += a * -0.5
+                bip_env += 1
         else:
             other.append((src, key, a, bool(m.get("bipolar"))))
     if fold:
         note.append(f"{len(fold)} macro-driven target(s) folded in at the saved macro position")
+    if bip_env:
+        note.append(f"{bip_env} bipolar envelope route(s) to the cutoff: the base sits half their depth lower")
     if mod_wheel_idle:
         note.append(f"{mod_wheel_idle} mod-wheel route(s) rest at the wheel's zero (no wheel on the Move)")
 

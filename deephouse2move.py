@@ -1186,6 +1186,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     nz = ph["noise"]
     if nz.get("click"):
         note.append("noise osc plays a short one-shot click in Serum; not carried")
+    noise_db = 0.0                    # the slot's level against the engine's White at the same volume, for a route into its volume as well
     if nz["enabled"]:
         P["noise_level"] = pot_level(level_of(3, nz["level"]))
         P["noise_type"], kind = noise_type_for(nz.get("sample_name"))
@@ -1194,7 +1195,8 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if standin:
                 # not noise: a noise with the sample's own octave spectrum and level stands in (sample_export.noise_standin)
                 P["noise_type"], P["noise_hp"], P["noise_lp"] = standin[0], standin[1], standin[2]
-                P["noise_level"] = pot_level(level_of(3, nz["level"]) * 10 ** (standin[3] / 20))
+                noise_db = standin[3]
+                P["noise_level"] = pot_level(level_of(3, nz["level"]) * 10 ** (noise_db / 20))
                 kind = f"noise osc plays '{nz['sample_name'].rsplit('/', 1)[-1]}' in Serum, which is not noise; a noise with that sample's octave spectrum stands in"
             note.append(kind)
         if not nz.get("sample_name"):
@@ -1204,6 +1206,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 P["noise_type"] = NOISE_TYPE_ENGINE.get(typ, 0)
                 P["noise_hp"], P["noise_lp"] = noise_color_pots(nz.get("color"))
                 if typ is None:                        # the unwritten type is 2.2 dB under White at the same volume (probe_noise_color.py)
+                    noise_db = -2.2
                     P["noise_level"] = pot_level(level_of(3, nz["level"]) * 10 ** (-2.2 / 20))
             else:
                 note.append(f"noise type {typ} (sparse clicks in Serum) approximated by pink noise through a high-pass")
@@ -1398,6 +1401,8 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         appr.append("Filter 2 follows the envelope Filter 1 uses, not its own (both spare envelopes are taken)")
     for n, (_, e, dest, a) in enumerate(mod_routes[:2], 1):
         P[f"me{n}_a"], P[f"me{n}_d"], P[f"me{n}_s"], P[f"me{n}_r"] = pot_env(ph["envs"][e])
+        if dest == "Noise Level":
+            a *= 10 ** (noise_db / 40)           # the route moves the knob and the gain is its square (calibration/probe_noise_route.py): the level offset is half in dB
         P[f"me{n}_dst"], P[f"me{n}_amt"] = ME_DST[dest], round(_clamp(64 + 63 * a, 0, 127))
     if len(mod_routes) > 2:
         appr.append(f"{len(mod_routes) - 2} extra envelope route(s) dropped (Tablor has 2)")

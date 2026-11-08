@@ -87,14 +87,19 @@ struct VoiceContext {
 
 inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16;
 /* The strides the code below walks the parameter table with: if the generator ever reorders them this stops the build. */
-static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 2 + kLfoShape && TB_P_LFO1_S0 == TB_P_LFO1_RATE + 2 &&
-              TB_P_LFO1_MODE == TB_P_LFO1_RATE + 1, "LFO parameters must be consecutive: rate, mode, 16 shape points");
+static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 == TB_P_LFO1_RATE + 2 &&
+              TB_P_LFO1_MODE == TB_P_LFO1_RATE + 1 && TB_P_LFO1_SMOOTH == TB_P_LFO1_S15 + 1 &&
+              TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH == 3 + kLfoShape, "LFO parameters must be consecutive: rate, mode, 16 shape points, smooth");
 static_assert(TB_P_LFO1_S15 - TB_P_LFO1_S0 == kLfoShape - 1, "LFO shape points must be consecutive");
 static_assert(TB_P_LR2_SRC - TB_P_LR1_SRC == 4 && TB_P_LR1_DST == TB_P_LR1_SRC + 1 && TB_P_LR1_AMT == TB_P_LR1_SRC + 2 &&
               TB_P_LR1_BIP == TB_P_LR1_SRC + 3, "LFO route parameters must be src, dst, amt, bip, consecutive");
 
 /* An LFO's rate pot in Hz: 0.05 to 120, logarithmic. */
 inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
+
+/* An LFO's Smooth pot as the time constant of a one-pole low-pass on its output: 2 ms to 0.7 s, logarithmic; 0 is off. Serum's Smooth was measured
+ * as such a filter, of the same absolute time constant at any LFO rate (calibration/probe_lfo_smooth.py). */
+inline float potLfoSmoothTau(float v) { return v < 0.5f ? 0.0f : 0.002f * std::pow(350.0f, pot01(v)); }
 
 /* The shape: 16 points of one cycle, 0..127 for 0..1, read round the loop with linear interpolation. */
 inline float lfoShapeAt(const float *P, int lfo, float phase)
@@ -189,7 +194,7 @@ public:
         /* Serum's noise is mono with a random left/right level imbalance per note (2.3 dB on average, calibration/noise_stereo: correlation 1.000, side/mid -13..-29 dB) */
         noisePan = ((float) rand() / (float) RAND_MAX * 2.0f - 1.0f) * 0.27f;
         for (int l = 0; l < kLfos; l++)             /* Trig restarts at the top of the cycle, Free joins the running one */
-            lfoPhase[l] = P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] >= 1.0f ? c.lfoFree[l] : 0.0f;
+            { lfoPhase[l] = P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] >= 1.0f ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; }
 
         filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
@@ -214,7 +219,7 @@ public:
         bool legato = P[TB_P_LEGATO] > 0.5f && !isReleasing();       /* a releasing voice has to be brought back in whatever the legato switch says */
         if (!legato) {              /* env retrig switches cut: always retrig */
             for (int l = 0; l < kLfos; l++)
-                if (P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] < 1.0f) lfoPhase[l] = 0.0f;
+                if (P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] < 1.0f) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; }
             filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
             adsr.noteOn();
@@ -492,6 +497,13 @@ private:
                     lfoPhase[l] -= std::floor(lfoPhase[l]);
                 }
                 lfoOut[l] = lfoShapeAt(P, l, lfoPhase[l]);                    // 0..1
+                const float tau = potLfoSmoothTau(P[TB_P_LFO1_SMOOTH + l * (TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH)]);
+                if (tau > 0.0f) {
+                    /* the smoother starts at the LFO's first value (measured), then follows it with the block-rate one-pole */
+                    if (!lfoSmInit[l]) { lfoSm[l] = lfoOut[l]; lfoSmInit[l] = true; }
+                    else if (blockSize > 0) lfoSm[l] += (1.0f - std::exp(-(float) blockSize / ((float) sampleRate * tau))) * (lfoOut[l] - lfoSm[l]);
+                    lfoOut[l] = lfoSm[l];
+                } else lfoSmInit[l] = false;
             }
             const int stride = TB_P_LR2_SRC - TB_P_LR1_SRC;
             for (int r = 0; r < kLfoRoutes; r++) {
@@ -753,6 +765,8 @@ private:
     AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */
     float lfoPhase[kLfos] = {};
+    float lfoSm[kLfos] = {};             /* each LFO's smoothed output, and whether it has started since the note began */
+    bool lfoSmInit[kLfos] = {};
     float lfoLvl[MD_COUNT] = {};         /* LFO offsets to the level KNOBS (before the taper) */
     ValueSmoother<float> noteSmoother;
     const Wavetable *lastTable[kOscs] = {};

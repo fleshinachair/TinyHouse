@@ -243,7 +243,7 @@ def physical(tree: dict, header: dict) -> dict:
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
         pp, cv = _pp(node), (node.get("curveData") or {})
-        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "mode": pp.get("kParamDefaultMode"), "type": pp.get("kParamType"),
+        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "smooth": pp.get("kParamSmooth"), "mode": pp.get("kParamDefaultMode"), "type": pp.get("kParamType"),
                      "x": cv.get("xVals"), "y": cv.get("yVals"), "c": cv.get("curveVals"), "name": node.get("curveDisplayName")})
     # Serum's routing slots 0..4 are osc A, B, C, noise, sub. Measured with a closed filter:
     # only A reaches the filter by default, the others bypass it unless routed there.
@@ -394,7 +394,7 @@ TABLOR_DEFAULTS = {
     "me1_a": 0, "me1_d": 64, "me1_s": 0, "me1_r": 64, "me2_a": 0, "me2_d": 64, "me2_s": 0, "me2_r": 64,
     "vca_vel": 0, "vca_vlaw": 1, "flt_key": 0, "flt_vel": 0, "flt_env": 64,
     "me1_dst": 0, "me1_amt": 64, "me2_dst": 0, "me2_amt": 64,
-    **{f"lfo{n}_{k}": v for n in range(1, 5) for k, v in ({"rate": 60, "mode": 0} | {f"s{j}": round(127 * (0.5 + 0.5 * math.sin(2 * math.pi * j / 16))) for j in range(16)}).items()},
+    **{f"lfo{n}_{k}": v for n in range(1, 5) for k, v in ({"rate": 60, "mode": 0, "smooth": 0} | {f"s{j}": round(127 * (0.5 + 0.5 * math.sin(2 * math.pi * j / 16))) for j in range(16)}).items()},
     **{f"lr{r}_{k}": v for r in range(1, 9) for k, v in (("src", 0), ("dst", 0), ("amt", 64), ("bip", 0))},
     "voice_mode": 0, "voices": 8, "glide": 0, "glide_mode": 0, "legato": 0, "pb_range": 2, "volume": 100,
 }
@@ -852,6 +852,21 @@ LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destina
 # half a beat, 4 Hz at 120 BPM, where the converter had it at 14.69 Hz). A synced LFO's stored Rate is not a frequency: it picks a note division, one per band of the Rate
 # knob. Edges and divisions (in beats) as swept on Serum at 120 BPM; with Triplets on, the top quarter of each band plays the division's 2/3 length.
 LFO_SYNC_BANDS = [(0.5, 1.25, 8.0), (1.25, 3.15, 4.0), (3.15, 5.5, 2.0), (5.5, 9.5, 1.0), (9.5, 15.8, 0.5), (15.8, 22.5, 0.25), (22.5, 1e9, 0.125)]
+# Serum's LFO Smooth (0..100) is a one-pole low-pass on the LFO's output of the same absolute time constant at any rate (calibration/probe_lfo_smooth.py, Lead - Loop's own
+# tree: tau 6-8 ms at Smooth 8-25, 10 ms at 40, 15 at 55, 28 at 70, 73-91 at 85, over 150 at 100); tau = 14 ms * s / (102 - s) follows it. The engine's pot is log, 2 ms .. 0.7 s.
+LFO_SMOOTH_TAU_MS = 14.0
+
+
+def lfo_smooth_pot(smooth) -> int:
+    """The engine's lfoN_smooth pot for a Serum Smooth value (0 when unwritten or too small to matter: under 2.5 ms)."""
+    if not smooth or smooth <= 0:
+        return 0
+    tau = LFO_SMOOTH_TAU_MS * smooth / (102.0 - min(smooth, 100.0)) / 1000.0
+    if tau < 0.0025:
+        return 0
+    return int(round(_clamp(127 * math.log(tau / 0.002) / math.log(350.0), 1, 127)))
+
+
 LFO_SYNC_BPM = 120.0       # the tempo of every other measurement here (the engine's LFO is free-running: it has no host tempo)
 
 
@@ -1013,6 +1028,7 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
                 hz = lfo_sync_hz(d["rate"], bool(d.get("triplets"))) or hz
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
         P[f"lfo{n}_mode"] = 0 if d.get("mode") in (None, 0, 0.0) else 1
+        P[f"lfo{n}_smooth"] = lfo_smooth_pot(d.get("smooth"))
         # a Random S&H LFO has no period, so a sine table puts a tone on its destination that Serum does not have (Lead - Other Side:
         # its 26 Hz Random S&H into an oscillator's level was a steady tremolo against Serum's flute-like note). Built flat at its mid level instead: a
         # bipolar route then adds nothing and a unipolar one a steady half-depth offset, the random LFO's average.

@@ -1071,6 +1071,13 @@ static void testLfo()
     const auto vf = levels(flat, 100), vs = levels(swung, 100);
     CHECK(depth(vf) < 1.3, "with no route the level is steady (swing x%.2f)", depth(vf));
     CHECK(depth(vs) > 3.0, "an LFO routed to a level makes it swing (x%.1f)", depth(vs));
+    {   /* Smooth: a one-pole on the LFO's output; a long time constant (pot 100 is about 0.1 s) flattens the 5 Hz swing */
+        Engine sm;
+        setup(sm, true, 75); sm.pots[TB_P_LFO1_SMOOTH] = 100;
+        playChord(sm);
+        const auto vm = levels(sm, 100);
+        CHECK(depth(vm) < 0.5 * depth(vs), "LFO Smooth flattens the swing (x%.1f against x%.1f)", depth(vm), depth(vs));
+    }
 
     /* the period: the level's autocorrelation peaks one LFO cycle (0.2 s = about 14 windows) away */
     {

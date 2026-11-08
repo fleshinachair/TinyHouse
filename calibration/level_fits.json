@@ -175,17 +175,6 @@
   "limiter_loss_db": -0.007543348589237553,
   "kept": true
  },
- "Keys - Abelon": {
-  "sig": "a131e9ae8676a625eef6209ad64be090",
-  "volume": 47,
-  "start_volume": 66,
-  "start_rms_db": -5.176443017041878,
-  "rms_db": -10.003592736047066,
-  "serum_rms_db": -10.0040401224747,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.01590906062903663,
-  "kept": true
- },
  "Keys - Billboard": {
   "sig": "7a0ad5f19fdc7ece3bec032ea19c0047",
   "volume": 35,
@@ -307,17 +296,6 @@
   "limiter_loss_db": 0.4514563458850862,
   "kept": true
  },
- "Keys - Lynnic": {
-  "sig": "1353b41fda7e59fae021b40d13b7d62e",
-  "volume": 36,
-  "start_volume": 57,
-  "start_rms_db": -11.424158209968764,
-  "rms_db": -19.341782876966644,
-  "serum_rms_db": -18.51864597450551,
-  "shortfall_db": 0.8231369024611332,
-  "limiter_loss_db": 1.0307499718107742,
-  "kept": true
- },
  "Lead - Ari": {
   "sig": "653ac8a46cef7690e362006f80a6409e",
   "volume": 52,
@@ -395,17 +373,6 @@
   "limiter_loss_db": 0.1505394914210747,
   "kept": true
  },
- "Lead - Other Side": {
-  "sig": "84a9d7d60797bc43d942e0241d40e6dd",
-  "volume": 51,
-  "start_volume": 49,
-  "start_rms_db": -13.649115118959214,
-  "rms_db": -13.015347512635739,
-  "serum_rms_db": -13.156404214192223,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.21601836881874092,
-  "kept": true
- },
  "Lead - Rivo": {
   "sig": "005bd0f40d0e01324912ddd6521dd4fd",
   "volume": 90,
@@ -426,28 +393,6 @@
   "serum_rms_db": -18.645360907807998,
   "shortfall_db": 0.0,
   "limiter_loss_db": -0.929441284131233,
-  "kept": true
- },
- "Lead - Self Control": {
-  "sig": "9b74f3eeffde4147330c5c3f40a742fa",
-  "volume": 49,
-  "start_volume": 70,
-  "start_rms_db": -4.801645691449405,
-  "rms_db": -9.216070071361406,
-  "serum_rms_db": -10.338733520524636,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.396932321416001,
-  "kept": true
- },
- "Lead - Self Control Noise": {
-  "sig": "ec778ddf77ee1ab58bc9d2b7963e5306",
-  "volume": 84,
-  "start_volume": 76,
-  "start_rms_db": -26.158981703150044,
-  "rms_db": -24.370937235185956,
-  "serum_rms_db": -24.42431468274908,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.021198356617304626,
   "kept": true
  },
  "Lead - Rollin": {
@@ -536,17 +481,6 @@
   "serum_rms_db": -15.232535457787161,
   "shortfall_db": 0.2996310667895816,
   "limiter_loss_db": 0.7205885467440876,
-  "kept": true
- },
- "Pad - MIND": {
-  "sig": "922662d080cb689c2e3e1b71ace8f239",
-  "volume": 64,
-  "start_volume": 74,
-  "start_rms_db": -17.168486950698597,
-  "rms_db": -19.549056234133985,
-  "serum_rms_db": -19.6064853831875,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.1145505271805618,
   "kept": true
  },
  "Pad - Nu Aspect": {
@@ -692,17 +626,6 @@
   "limiter_loss_db": -0.13547041946150173,
   "kept": true
  },
- "Lead - Loop": {
-  "sig": "9784418c687333752548d35cdf6df88c",
-  "volume": 55,
-  "start_volume": 80,
-  "start_rms_db": -5.121073733009222,
-  "rms_db": -9.423946782767688,
-  "serum_rms_db": -9.092170896437135,
-  "shortfall_db": 0.33177588633055244,
-  "limiter_loss_db": 0.977448947154345,
-  "kept": true
- },
  "Keys - Why U So": {
   "sig": "4614602bc418ab9bf90d3212842646f1",
   "volume": 30,
@@ -767,6 +690,83 @@
   "serum_rms_db": -22.698594951818436,
   "shortfall_db": 0.0,
   "limiter_loss_db": -0.3424753766761022,
+  "kept": true
+ },
+ "Lead - Self Control": {
+  "sig": "22d4d9bbb42f873189a24ef540b271ea",
+  "volume": 44,
+  "start_volume": 70,
+  "start_rms_db": -5.320970745026182,
+  "rms_db": -12.136254664853912,
+  "serum_rms_db": -10.338733520524636,
+  "shortfall_db": 1.7975211443292753,
+  "limiter_loss_db": 1.618217615769101,
+  "kept": true
+ },
+ "Lead - Self Control Noise": {
+  "sig": "da5930f24962ebab6b4a7fd4a8ad5c94",
+  "volume": 84,
+  "start_volume": 76,
+  "start_rms_db": -26.13679012836855,
+  "rms_db": -24.349995956131707,
+  "serum_rms_db": -24.42431468274908,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.012567909911446407,
+  "kept": true
+ },
+ "Lead - Loop": {
+  "sig": "85562d5ea42fd7855fe32875e105cba3",
+  "volume": 54,
+  "start_volume": 80,
+  "start_rms_db": -5.019162721640727,
+  "rms_db": -9.041303201728132,
+  "serum_rms_db": -9.092170896437135,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.44631555924482846,
+  "kept": true
+ },
+ "Lead - Other Side": {
+  "sig": "a3be227d1b469b4813ef51461bff379e",
+  "volume": 51,
+  "start_volume": 49,
+  "start_rms_db": -13.647999483973138,
+  "rms_db": -13.014102409414502,
+  "serum_rms_db": -13.156404214192223,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.21517658782982707,
+  "kept": true
+ },
+ "Keys - Abelon": {
+  "sig": "4cd963b36dae3f08e3ac8ba639d8edd8",
+  "volume": 48,
+  "start_volume": 66,
+  "start_rms_db": -5.150590119162998,
+  "rms_db": -9.616753303390274,
+  "serum_rms_db": -10.0040401224747,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.07869558606030758,
+  "kept": true
+ },
+ "Pad - MIND": {
+  "sig": "49471242831031324f775af54af55b84",
+  "volume": 61,
+  "start_volume": 74,
+  "start_rms_db": -16.138074359182717,
+  "rms_db": -19.58311653791458,
+  "serum_rms_db": -19.6064853831875,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.18215464829010486,
+  "kept": true
+ },
+ "Keys - Lynnic": {
+  "sig": "5f267749c436dc43a3007dcc060b2d6d",
+  "volume": 37,
+  "start_volume": 57,
+  "start_rms_db": -12.017269918554394,
+  "rms_db": -18.31251239544344,
+  "serum_rms_db": -18.51864597450551,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.19071860677900787,
   "kept": true
  }
 }

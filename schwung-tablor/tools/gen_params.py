@@ -290,6 +290,8 @@ LFOS = [dict(
     rate = pot(f"lfo{n}_rate", f"L{n}RT", f"LFO{n} Rate", 60),
     mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free"], 0),
     shape = [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)],
+    # Serum's LFO Smooth: a one-pole low-pass on the LFO's output, 2 ms to 0.7 s (log), 0 = off (calibration/probe_lfo_smooth.py)
+    smooth = pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0),
 ) for n in range(1, N_LFO + 1)]
 LROUTES = [dict(
     src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4"], 0),
@@ -534,7 +536,7 @@ BANKS = [
     ("LFO", False,
         # Each LFO's 18 parameters (rate, mode, 16 shape points) and each route's 3 are CONSECUTIVE in the table:
         # voice.h strides through them. Rows stay in this order for that reason (see the static_asserts there).
-        [r_ for L in LFOS for r_ in (row(L["rate"], L["mode"], *L["shape"][:6]), row(*L["shape"][6:14]), row(*L["shape"][14:]))] +
+        [r_ for L in LFOS for r_ in (row(L["rate"], L["mode"], *L["shape"][:6]), row(*L["shape"][6:14]), row(*L["shape"][14:], L["smooth"]))] +
         [row(R["src"], R["dst"], R["amt"], R["bip"]) for R in LROUTES]),
     # No page on the device: set by the converter, reachable from the web UI.
     ("Stereo", False, [

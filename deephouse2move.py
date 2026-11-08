@@ -1276,6 +1276,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     else:
         P["flt_env"] = 64                     # no filter envelope depth
     f2_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 1)]
+    f2_me = None
     if (reaches2 or serial) and f2_routes:
         tot2 = Counter()
         for e, _, a in f2_routes:
@@ -1286,7 +1287,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(ph["envs"][e2], CAL.get("flt_decay_mult", 1.0))     # the one filter envelope is Filter 2's
             feg = e2
         elif e2 != feg:
-            appr.append("Filter 2 follows the envelope Filter 1 uses, not its own")
+            # Filter 2 has its own envelope: a spare modulation envelope pointed at "Filter 2 Freq" (same units as flt2_env, its own ADSR); if it loses its place below,
+            # Filter 2 follows the filter envelope as before
+            f2_me = (e2, tot2[e2] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"])
     synced = {o["id"] for o in keep if any(w["mode"] == "kSync" for w in o["warp"])}
     mod_routes = []
     for e, key, a in routes:
@@ -1315,7 +1318,14 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         pot = level_pot(route[2])
         return route[3] > 0 and pot is not None and P[pot] == 0
 
+    if f2_me:
+        mod_routes.append((abs(f2_me[1]), f2_me[0], "Filter 2 Freq", f2_me[1]))
     mod_routes.sort(key=lambda r: (needed(r), r[0]), reverse=True)
+    if f2_me and any(r[2] == "Filter 2 Freq" for r in mod_routes[:2]):
+        P["flt2_env"] = 64                                    # its own envelope carries the sweep
+    elif f2_me:
+        P["flt2_env"] = round(_clamp(64 + 63 * f2_me[1], 0, 127))
+        appr.append("Filter 2 follows the envelope Filter 1 uses, not its own (both spare envelopes are taken)")
     for n, (_, e, dest, a) in enumerate(mod_routes[:2], 1):
         P[f"me{n}_a"], P[f"me{n}_d"], P[f"me{n}_s"], P[f"me{n}_r"] = pot_env(ph["envs"][e])
         P[f"me{n}_dst"], P[f"me{n}_amt"] = ME_DST[dest], round(_clamp(64 + 63 * a, 0, 127))

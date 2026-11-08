@@ -443,3 +443,20 @@ Serum's output above 1 kHz is at the floor while the engine's hard-clip curve (c
 odd harmonics of the filtered bass, which the pre-filter's lower level fit then lifts further. The pre-filter is right in structure; the curve's high-order
 content is the open lead (compare Serum's Overdrive against the engine modes out to the 15th harmonic). 31 Deep House loudness fits went stale with the
 new parameters and were refit (70/70 valid).
+
+## Distortion Overdrive: a level-dependent gain, and the AVAION diagnosis corrected
+Measured with `calibration/probe_dist_curve.py` (a sine rendered with and without the effect, output against input sample by sample, the voice's random start phase
+aligned on the fundamental) and `probe_dist_od.py` (harmonics 1-15); the gain table is `calibration/dist_overdrive_gain.json`.
+- Serum's HardClip and SoftClip are static curves (small-signal gain the same at input peaks of 0.035 and 0.35; HardClip fits a hard clip to 0.5-0.9 dB rms over harmonics
+  1-9). The engine's hard clip is right for HardClip.
+- Overdrive is NOT static: its output is a hard ceiling at 0.386 (probe units) for every drive, and its gain depends on the LEVEL of the input, not on the instant:
+  at drive 100 the initial slope is 33x for an input peak of 0.01, 15x at 0.05, 6x at 0.14, 2.7x at 0.35; at drive 60 it is 5.5x up to a peak of 0.09 and falls to 1.85x at 0.35;
+  drive 20 is linear (0.91x) at every level. Above the drive's own maximum gain the gain falls so that gain x peak creeps up only slowly (drive 100: 0.76 -> 0.95 over a 10x
+  level range), i.e. a leveller (about 5:1 above a knee) ahead of the clip. So the clip is never driven harder than about 2x its ceiling, which is why its harmonics fall
+  faster than a hard clip's (3rd -12 dB, 5th -21, 7th -36 re the fundamental at drive 100). The engine's `dist_curves.json` fit (one G, K per drive) is the compromise over four
+  levels (Overdrive fit error 2-5 dB at drives 50-70, HardClip 0.1). The attack and release of the leveller are NOT measured (a clipped output hides the gain), so it is not modelled yet.
+  33 of the 626 factory presets have an Overdrive; 1 of the 70 Deep House presets (Bass - AVAION, drive 25, which is in the linear zone).
+- CORRECTION to the Bass - AVAION note above: the engine's hard-clip harmonics are NOT why it got worse after the pre-filter. At drive 25 the Overdrive is in its linear zone,
+  and engine bands above 640 Hz are the same with the distortion bypassed (dist_mix 0), with dist_drive 10 or 20, and with the pre-filter off. The excess lives in bands
+  at -75 to -90 dB re the peak (the engine's 16-bit dither/aliasing floor against Serum's digital silence); the pre-filter only lowers the level fit's headroom a few dB
+  there (volume 45 -> 53). The 8.6 -> 16.2 is the metric reading below-audible bands, not a clipper problem. In the 100-1000 Hz bands the pre-filter is mixed (one band 12 dB too low, another 6 dB closer), so the pre-filter stays on structure, not on this preset's score.

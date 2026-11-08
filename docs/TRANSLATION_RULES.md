@@ -286,3 +286,10 @@ Banks: a bank is a folder under `/data/UserData/schwung/presets/tinyhouse/`; loo
 - **Filter 2 has its own envelope** when its cutoff route uses another envelope than Filter 1's: a spare modulation envelope (engine `me1`/`me2`) pointed at "Filter 2 Freq" (same units as `flt2_env`, its own ADSR); if both spare
   envelopes are taken Filter 2 follows the filter envelope as before. Lead - Other Side, noise only (FX stripped on both sides, 2-4 kHz band, 220 ms into the note at velocity 100): Serum -47 dB, engine -61 before, -45 after;
   4-8 kHz Serum -63, engine -79 before, -60 after. With the whole chain the engine is still 8 dB short at the peak (the EQs inside the main rack's SplitMS branches are not carried).
+
+## Added 2026-11-08: mono notes over a releasing note
+
+- **A mono note arriving while the previous note is still releasing took the voice with `Voice::start`**, which zeroes the amplitude envelope and the filters and draws new oscillator phases: a step from the release level down to zero, i.e. a click at
+  every such join. Lead - Rollin (mono, 20 ms between short notes) had 20 dB more 31-125 Hz than Serum's, and a thump on every note (probably the "struck more times" the user hears). The takeover now goes through `retrigger` (envelope re-attacks from where it is,
+  phases and filters carry on; a releasing voice is brought back whatever the Legato switch says). Native test `testMonoTakeover` (largest sample step across the join: 26 x the steady wave's before, 0.2 x after).
+  Demo-MIDI octave bands, engine - Serum at 31 / 62 / 125 Hz: Rollin +15 / +27 / +21 -> -8 / +2 / -2 dB, octave-band rms 12.8 -> 4.1 dB; Bass - Self Control 17.3 -> 13.8; the other 20 presets with a demo MIDI unchanged (the mean over the 22: 9.5 -> 8.95).

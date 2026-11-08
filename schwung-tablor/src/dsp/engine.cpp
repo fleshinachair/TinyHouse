@@ -94,7 +94,10 @@ void Engine::noteOn(int note, float vel)
             monoStack[monoStackLen++] = note;
 
         Voice &v = voices[0];
-        if (v.isActive() && !v.isReleasing()) {
+        if (v.isActive()) {
+            /* A note arriving while the previous one is still releasing takes its voice over where it is: the amplitude envelope re-attacks from its current level and the
+             * oscillator phases and filters carry on. A fresh start() zeroes the envelope, which is a step down from the release level (a click: a mono preset with short notes,
+             * Lead - Rollin, had 20 dB more sub-bass than Serum's from those steps). */
             v.retrigger(c, note, vel);          /* legato / retrig path */
         } else {
             float from = glideOn ? lastPlayedNote : -1.0f;

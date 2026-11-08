@@ -419,6 +419,13 @@ def noise_color_pots(color: float | None) -> tuple[int, int]:
     return (0 if hz <= 24 else max(pot(hz), 1)), 127
 
 
+def _interp(x, xs, ys):
+    if x <= xs[0]: return ys[0]
+    for i in range(1, len(xs)):
+        if x <= xs[i]: return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1])
+    return ys[-1]
+
+
 NOISE_TYPE_ENGINE = {"White": 0, "Pink": 1, "Brown": 4}
 
 
@@ -1199,6 +1206,17 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 P["noise_level"] = pot_level(level_of(3, nz["level"]) * 10 ** (noise_db / 20))
                 kind = f"noise osc plays '{nz['sample_name'].rsplit('/', 1)[-1]}' in Serum, which is not noise; a noise with that sample's octave spectrum stands in"
             note.append(kind)
+        elif nz.get("sample_name"):
+            # a White / Pink / HP12 sample is that noise and Serum's Color still acts on it (calibration/probe_noise_hp12.py)
+            P["noise_hp"], P["noise_lp"] = noise_color_pots(nz.get("color"))
+            if P["noise_type"] == 3 and nz.get("color") is not None:
+                # HP12 Pink with a Color above neutral: pink through one 12 dB/octave high-pass whose corner is 1.1 kHz at no Color, 1.9 kHz at 0.6, 5.3 kHz at 0.79, 12 kHz at 1.0
+                c = nz["color"]
+                if c >= 0.55:
+                    P["noise_type"], P["noise_lp"] = 1, 127
+                    P["noise_hp"] = round(_interp(c, [0.55, 0.6, 0.79, 1.0], [75, 84, 103, 119]))
+                else:
+                    P["noise_hp"] = 0               # the type's own 1.2 kHz high-pass; a low Color is a low-pass on top
         if not nz.get("sample_name"):
             # the noise oscillator itself: its Type is the spectrum and its Color two 12 dB/octave filters (NOISE_COLOR above)
             typ = nz.get("type")

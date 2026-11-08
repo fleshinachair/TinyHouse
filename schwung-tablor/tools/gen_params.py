@@ -200,8 +200,9 @@ for _k, _n in (("wt1", "WT1"), ("wt2", "WT2"), ("wt3", "WT3"), ("sub", "Sub"), (
         BUSES["%s_%d" % (_k, _b)] = pot("%s_bus%d" % (_k, _b), "%s%d" % (_k[:2].upper() + _k[-1:].upper(), _b), "%s Bus %d" % (_n, _b), 0)
 # Serum's Sample and Multisample oscillators: one sample set (a .tbs file made by sample_export.py), played from the keyboard at its
 # regions' pitch, with its own level, tuning and routing. Set by the converter; no page on the device.
-# Serum's HyperD (Hyper/Dimension) AHEAD of the distortion: Voices detuned copies of the signal, each on a delay line that a smooth random LFO moves, mixed with the dry
-# signal by Wet. Detune scales how far the delay moves (the pitch deviation grows with it), Rate how fast. The effect block's own Width stage is the HyperD that follows the
+# Serum's HyperD (Hyper/Dimension) AHEAD of the distortion: Voices delayed copies of the signal, each on a delay line that a triangle wave moves (a pitch-shifted copy at a fixed offset for seconds at a time), mixed with the dry
+# signal by Wet. Detune scales how far the delay swings (20 ms peak to peak at 100 %), Rate how fast the triangle runs (0.25 Hz at 50 %, as Rate squared).
+# The effect block's own Width stage is the HyperD that follows the
 # distortion; this one is for a HyperD in front of it, where the distortion clips the moving cloud together. Wet 0 is off. No page on the device: set by the converter,
 # in the main rack and, as "b1." / "b2." keys, in a bus rack.
 HYD = dict(

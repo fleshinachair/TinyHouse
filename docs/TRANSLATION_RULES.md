@@ -293,3 +293,19 @@ Banks: a bank is a folder under `/data/UserData/schwung/presets/tinyhouse/`; loo
   every such join. Lead - Rollin (mono, 20 ms between short notes) had 20 dB more 31-125 Hz than Serum's, and a thump on every note (probably the "struck more times" the user hears). The takeover now goes through `retrigger` (envelope re-attacks from where it is,
   phases and filters carry on; a releasing voice is brought back whatever the Legato switch says). Native test `testMonoTakeover` (largest sample step across the join: 26 x the steady wave's before, 0.2 x after).
   Demo-MIDI octave bands, engine - Serum at 31 / 62 / 125 Hz: Rollin +15 / +27 / +21 -> -8 / +2 / -2 dB, octave-band rms 12.8 -> 4.1 dB; Bass - Self Control 17.3 -> 13.8; the other 20 presets with a demo MIDI unchanged (the mean over the 22: 9.5 -> 8.95).
+
+## Added 2026-11-08: Serum's HyperD measured (the Hyper stage reworked)
+
+- **Structure** (`calibration/hyperd_fit.py render|fit|check`; a pure sine through HyperD at several Detune / Rate / Unison / Wet, Lead - Rollin's oscillator through its own HyperD, white noise through it). With two voices a channel holds lines whose
+  offset from the note stays constant for seconds and then flips sign (Detune 100 %, Rate 50 %, note 72: -4.1 Hz for 2 s, +5.3 Hz for 2 s, ...): every voice's delay is moved by a TRIANGLE wave (constant slope = constant pitch offset), not a smooth
+  random LFO. The offsets scale with the harmonic number (h3 5.6 Hz where h1 has 1.8): a time-scaled copy, not a frequency shift. Peak-to-peak swing = 20 ms x Detune (linear: lines at +-1.0 / 2.7 / 5.2 Hz at 20 / 50 / 100 %), the triangle frequency grows
+  as Rate squared (half period 5 s at Rate 30, 2 s at 50, 0.5 s at 100: 0.25 Hz at 50 %), Unison 1 is a bypass. Left and right have their own voices (phases and speeds differ). The voices are not normalised by their number: white noise through 7
+  voices at Wet 100 gains +6.2 dB on the mono sum (each channel's cloud is incoherent: 7 x 1.0 / 2), a sine +8.4 dB per channel; 2 / 3 / 4 / 8 voices +0.8 / +3.5 / +4.9 / +8.4 dB (the engine uses (n / 7)^0.3 x 0.95 per voice). Wet is the usual
+  smoothstep law with the dry part. The wet path has no bass: a 12 dB/oct high-pass near 150 Hz (third-octave gain of noise re the dry, Wet 50: dry only below 100 Hz, -2.3 dB; at Wet 100 -9 dB at 31 Hz against +6 in the mid); at Detune / Rate 100
+  Serum keeps a little more bass than that (not modelled).
+- **Engine Hyper stage** (`fx.h class Hyper`; was: two sines, 1/sqrt(n) normalisation, depth ~ Detune^0.8, rate ~ Rate^1.5, 1 ms, 8 Hz). Pure sine, engine against Serum (`hyperd_fit.py check`): histogram of the line spread rms 6.9 -> 4.5 dB, level 8 dB under
+  Serum's -> within 0.8 dB at 2..8 voices, AM std 0.5-7.2 (Serum 2.8-5.7) -> 4.1-5.7. White noise, third-octave gain re dry, all bands above 200 Hz within +-1.5 dB. Lead - Rollin's isolated HyperD: profile rms 6.8 (no stage) / 4.5 (old stage) -> 3.8 dB, FM 4x -> 1.4x,
+  AM 0.5x -> 1.6x of Serum's.
+- **Lead - Other Side without its two interim hand values** (unison 7/90/64 on osc A and Filter 2 at 74; `Hyper` + the aux-curve / own-envelope Filter 2 replace them): demo MIDI, engine - Serum, octave-band rms 4.7 (converter before) / 4.9 (interim) -> 3.4 dB, level +0.2 dB,
+  fast envelope flutter (500-5000 Hz, 4 ms) 0.77 (before) / 1.83 (interim) -> 1.65 against Serum's 1.73. Lead - Rollin (mono fix + Hyper): 11.4 -> 4.9 dB, flutter 0.82 -> 1.09 (Serum 0.92), loudness std of the 100-500 / 500-2k / 2-8 kHz bands 2.8 / 1.8 / 2.1 ->
+  4.8 / 3.2 / 2.4 dB (Serum 4.0 / 3.5 / 2.9). Not solved: Rollin's 31 / 62 Hz bands +7 / +7 dB over Serum's (they are -8 / -2 with the stage off; hard clipping of the beating voices makes slow DC wobble) and 4-16 kHz +8 / +6.

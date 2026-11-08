@@ -87,11 +87,13 @@ def enabled(node: dict) -> bool:
 
 
 WET_DEFAULT = {"Reverb": 25.0, "Delay": 25.0, "Conv": 25.0}
+DRY_KINDS = ("Distortion", "Comp", "Bode", "Filter", "Utils", "Split", "SplitMS")      # effects whose Wet 0 is bypass (not Chorus / Flanger / Phaser: those still add)
 
 
 def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) -> list[dict]:
     """The rack with every macro that drives an effect's Wet applied at its saved position (Serum adds amount x macro, in
-    percentage points of Wet). Envelope and LFO routes to a Wet are dynamic and left alone."""
+    percentage points of Wet; a Distortion / Comp / Bode / Filter / Utils / Split that stores no Wet is fully wet, which a -100 % route at macro 0 leaves at 100: ARP - Aardvark,
+    FX - Church, PD - Butterbrot). Envelope and LFO routes to a Wet are dynamic and left alone."""
     out = copy.deepcopy(nodes)
     for m in mods or []:
         if not (m.get("dest_type", "").startswith("FX") and m.get("dest_param") == "kParamWet" and 25 <= m["source"] <= 32 and macros):
@@ -106,7 +108,7 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
             node[key]["plainParams"] = {}
         pp = node[key]["plainParams"]
         d = (2.0 * mv - 1.0) if m.get("bipolar") else mv
-        pp["kParamWet"] = min(max(pp.get("kParamWet", WET_DEFAULT.get(kind_of(node), 0.0)) + m["amount_pct"] * d, 0.0), 100.0)
+        pp["kParamWet"] = min(max(pp.get("kParamWet", WET_DEFAULT.get(kind_of(node), 100.0 if kind_of(node) in DRY_KINDS else 0.0)) + m["amount_pct"] * d, 0.0), 100.0)
     return out
 
 
@@ -1046,9 +1048,13 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     if uwhy:
         notes.append("Utils not carried: " + "; ".join(sorted(set(uwhy))))
     carried_utils = (width != 1.0 or mono is not None) and not uwhy
-    ignored = sorted({kind_of(x) for x in nodes if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x)
+    # A Distortion / Comp / Bode / Filter / Utils / Split node with a stored Wet under 1 % and no envelope / LFO / velocity route to its Wet passes the signal untouched
+    # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
+    wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not 25 <= m.get("source", 0) <= 32}
+    dry = lambda x: kind_of(x) in DRY_KINDS and float(plain(x).get("kParamWet", 100.0)) < 1.0 and "FX" + kind_of(x) not in wet_mod
+    ignored = sorted({kind_of(x) for x in nodes if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x) and not dry(x)
                       and not (kind_of(x) == "Utils" and carried_utils) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)})
-    if any(kind_of(x) == "Filter" and enabled(x) for x in nodes) and not info.get("filter_fx_bands") and dynamic_filter(nodes, ctx) is None:
+    if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) for x in nodes) and not info.get("filter_fx_bands") and dynamic_filter(nodes, ctx) is None:
         ignored = sorted(set(ignored) | {"Filter"})
     if ignored:
         notes.append("not carried: " + ", ".join(ignored))

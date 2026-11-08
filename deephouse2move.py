@@ -1484,7 +1484,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     P["fx_on"] = 1
     P["eq_on"] = int(any(P[f"eq{n}_type"] for n in range(1, 5)) or any(P.get(f"eq{t}{n}_type", 0) for t in "ms" for n in range(1, 5)))
     P["wide_on"] = int(P["fx_wide"] > 0)
-    P["dly_on"] = int(P["dly_mix"] > 0)
+    P["dly_on"] = int(P["dly_mix"] > 0 or P.get("dly2_mix", 0) > 0)
     P["rev_on"] = int(P["rev_mix"] > 0)
     if CARRY_BUSES:
         note += map_bus_racks(ph, P, feg if (flt_routes and not bypassed) else None)
@@ -1547,7 +1547,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
             notes += [f"FX bus {b}: {n}" for n in fnotes]
         fx_p["eq_on"] = int(any(fx_p.get(f"eq{n}_type", 0) for n in range(1, 5)) or any(fx_p.get(f"eq{t}{n}_type", 0) for t in "ms" for n in range(1, 5)))
         fx_p["wide_on"] = int(fx_p.get("fx_wide", 0) > 0)
-        fx_p["dly_on"] = int(fx_p.get("dly_mix", 0) > 0)
+        fx_p["dly_on"] = int(fx_p.get("dly_mix", 0) > 0 or fx_p.get("dly2_mix", 0) > 0)
         fx_p["rev_on"] = int(fx_p.get("rev_mix", 0) > 0)
         for k in BUS_KEYS + ["eq_on", "wide_on", "dly_on", "rev_on", "mwidth"]:
             if k in fx_p:

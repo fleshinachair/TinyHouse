@@ -91,6 +91,7 @@ private:
     float compOnSeen = -1.0f;
     uint32_t ditherState = 2463534242u;                                /* the output dither's generator */
     float modSeen[TB_P_PHAS_POLES - TB_P_CHOR_ON + 1] = {};           /* the chorus, flanger and phaser pots are contiguous */
+    float dly2Seen[TB_P_DLY2_MODE - TB_P_DLY2_MIX + 1] = {};              /* the second delay's pots are contiguous */
     float hydSeen[TB_P_HYD_WET - TB_P_HYD_UNI + 1] = {};              /* the HyperD pots are contiguous */
     float msSeen[TB_P_EQS4_Q - TB_P_EQM1_TYPE + 1] = {};              /* so are the SplitMS branch EQs' */
     bool  fxSeenValid = false;

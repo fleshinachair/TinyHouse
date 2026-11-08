@@ -211,6 +211,17 @@ HYD = dict(
     rate = pot("hyd_rate", "HYDR", "Hyper Rate",   40),
     wet  = pot("hyd_wet",  "HYDW", "Hyper Wet",    0),
 )
+# A second delay after the first: Serum racks with two Delay nodes (10 of the 70 Deep House presets). Same laws as the first, the same tempo scale. No page on the device:
+# set by the converter, in the main rack and as "b1." / "b2." keys in a bus rack.
+DLY2 = dict(
+    mix   = pot("dly2_mix",   "D2MX", "Delay 2 Mix",   0),
+    time  = pot("dly2_time",  "D2TM", "Delay 2 Time",  94),
+    timer = pot("dly2_timer", "D2TR", "Delay 2 Time R", 94),
+    fb    = pot("dly2_fb",    "D2FB", "Delay 2 Feedback", 50),
+    lo    = pot("dly2_lo",    "D2LO", "Delay 2 Low Cut", 0),
+    hi    = pot("dly2_hi",    "D2HI", "Delay 2 High Cut", 127),
+    mode  = enum("dly2_mode", "D2MD", "Delay 2 Mode", DELAY_MODES, 0),
+)
 SAMPLE = dict(
     set   = wtfile("smp_set", "SMPS", "Sample Set"),
     level = pot("smp_level", "SMPL", "Sample Level", 0),
@@ -540,6 +551,8 @@ BANKS = [
         row(BUSES["sub_1"], BUSES["sub_2"], BUSES["noise_1"], BUSES["noise_2"], BUSES["smp_1"], BUSES["smp_2"]),
         row(BUSES["flt1_1"], BUSES["flt1_2"], BUSES["flt2_1"], BUSES["flt2_2"], FLTOUT["f1"], FLTOUT["f2"]),
         row(HYD["uni"], HYD["det"], HYD["rate"], HYD["wet"]),
+        row(DLY2["mix"], DLY2["time"], DLY2["timer"], DLY2["fb"], DLY2["lo"], DLY2["hi"]),
+        row(DLY2["mode"]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[0][k], EQM[1][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[2][k], EQM[3][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[0][k], EQS[1][k])]),

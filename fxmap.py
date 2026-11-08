@@ -814,35 +814,40 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
 
 # ------------------------------------------------------------------------------ delay
 def map_delay(nodes: list[dict], fp: dict | None) -> tuple[dict, list[str], dict]:
-    P = {"dly_mix": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50, "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly_sync": 0}
+    P = {"dly_mix": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50, "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly_sync": 0,
+         "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0}
     ds = [n for n in nodes if kind_of(n) == "Delay" and enabled(n)]
     if not ds:
         return P, [], {}
-    # the node the fingerprint's mix is mostly about: the one with the most wet
-    node = max(ds, key=lambda n: plain(n).get("kParamWet", 0.0))
-    pp = plain(node)
+    # Two delays are carried (the engine has two, one after the other): the two with the most wet, in the rack's order
+    keep = sorted(sorted(ds, key=lambda n: -plain(n).get("kParamWet", 0.0))[:2], key=ds.index)
     d = DELAY_DEFAULT
-    ms_l = delay_ms(pp, "L")
-    ms_r = delay_ms(pp, "R")
-    fb = pp.get("kParamFeedback", d["fb"]) / 100.0
-    f, bw = pp.get("kParamFreq", d["freq"]), pp.get("kParamBW", d["bw"])
-    lo, hi = f / 2 ** (bw * DELAY_BW_SCALE / 2), f * 2 ** (bw * DELAY_BW_SCALE / 2)
+    notes, info = [], {"delay_ms": [], "delay_wet": []}
     pot_ms = lambda ms: int(round(min(max(127 * math.log(max(ms, 1.0)) / math.log(1500.0), 0), 127)))
-    P.update(dly_time=pot_ms(ms_l), dly_timer=pot_ms(ms_r), dly_fb=int(round(min(fb, 0.97) * 127)),
-             dly_lo=pot_freq(lo), dly_hi=pot_freq(min(hi, 20000.0)), dly_mode=int(round(pp.get("kParamMode", d["mode"]))))
-    # The mix is the stored Wet (macros folded in) through the delay's own wet law, which the engine shares (a smoothstep, measured on Serum). It was
-    # read off a burst through Serum at an assumed echo time before, and a time that missed the echo (tempo-synced, ping-pong) gave a ratio of 1.0.
-    ratio = M.smooth(min(max(pp.get("kParamWet", 25.0), 0.0), 100.0) / 100.0)
-    notes_w = []
-    w = M.inv_smoothstep(ratio)
-    P["dly_mix"] = int(round(w * 127))
+    for n, node in enumerate(keep):
+        pre = "dly_" if n == 0 else "dly2_"
+        pp = plain(node)
+        ms_l = delay_ms(pp, "L")
+        ms_r = delay_ms(pp, "R")
+        fb = pp.get("kParamFeedback", d["fb"]) / 100.0
+        f, bw = pp.get("kParamFreq", d["freq"]), pp.get("kParamBW", d["bw"])
+        lo, hi = f / 2 ** (bw * DELAY_BW_SCALE / 2), f * 2 ** (bw * DELAY_BW_SCALE / 2)
+        P.update({pre + "time": pot_ms(ms_l), pre + "timer": pot_ms(ms_r), pre + "fb": int(round(min(fb, 0.97) * 127)),
+                  pre + "lo": pot_freq(lo), pre + "hi": pot_freq(min(hi, 20000.0)), pre + "mode": int(round(pp.get("kParamMode", d["mode"])))})
+        # The mix is the stored Wet (macros folded in) through the delay's own wet law, which the engine shares (a smoothstep, measured on Serum). It was
+        # read off a burst through Serum at an assumed echo time before, and a time that missed the echo (tempo-synced, ping-pong) gave a ratio of 1.0.
+        ratio = M.smooth(min(max(pp.get("kParamWet", 25.0), 0.0), 100.0) / 100.0)
+        w = M.inv_smoothstep(ratio)
+        P[pre + "mix"] = int(round(w * 127))
+        info["delay_ms"].append([round(ms_l), round(ms_r)]); info["delay_wet"].append(round(w, 3))
+        if ms_l > 1500 or ms_r > 1500:
+            notes.append("Delay: a time over 1.5 s is clamped")
     P["dly_sync"] = 1                       # Serum's Delay times are note steps (DELAY_STEPS, at 120 BPM here): the engine's follow the host tempo
-    notes = list(notes_w)
-    if len(ds) > 1:
-        notes.append(f"Delay: {len(ds)} delays, the one with the most wet is carried")
-    if ms_l > 1500 or ms_r > 1500:
-        notes.append("Delay: a time over 1.5 s is clamped")
-    return P, notes, {"delay_ms": [round(ms_l), round(ms_r)], "delay_wet": round(w, 3)}
+    if len(ds) > 2:
+        notes.append(f"Delay: {len(ds)} delays, the two with the most wet are carried")
+    if len(info["delay_ms"]) == 1:
+        info = {"delay_ms": info["delay_ms"][0], "delay_wet": info["delay_wet"][0]}
+    return P, notes, info
 
 
 # ------------------------------------------------------------------------------ chorus, flanger, phaser
@@ -1067,7 +1072,7 @@ def fx_defaults() -> dict:
     P = {"fx_space": 100}
     P.update(map_eq([])[0])
     P.update({"dist_drive": 0, "dist_mode": 0, "dist_mix": 127, "dist_cal": 0, "dist_out": 64, "dist_level": 64, "fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64, "dly_mix": 0, "dly_sync": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50,
-              "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127,
+              "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0, "rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127,
               "comp_on": 1, "comp_thresh": 127, "comp_ratio": 0, "comp_attack": 40, "comp_release": 60, "comp_makeup": 0, "comp_mix": 0, "comp_knee": 32,
               "comp_multi": 0, "comp_thresh2": 127, "comp_thresh3": 127, "comp_gain1": 64, "comp_gain2": 64, "comp_gain3": 64, "comp_below": 0,
               "chor_on": 0, "chor_mix": 0, "chor_rate": 37, "chor_d1": 21, "chor_d2": 22, "chor_depth": 64, "chor_fb": 0, "chor_filt": 127, "chor_fmode": 0,

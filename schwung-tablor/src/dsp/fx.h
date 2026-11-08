@@ -143,6 +143,8 @@ struct FxSettings {
     float wideMix = 0, wideRate = 0.5f, wideDepth = 0.5f;
     float delayMix = 0, delayMs = 250, delayRMs = 250, delayFb = 0.4f, delayLoHz = 20, delayHiHz = 16000;
     int   delayPing = 0;
+    float delay2Mix = 0, delay2Ms = 250, delay2RMs = 250, delay2Fb = 0.4f, delay2LoHz = 20, delay2HiHz = 16000;   /* a second delay after the first (Serum racks with two) */
+    int   delay2Ping = 0;
     float revMix = 0, revT60 = 2.0f, revDampHz = 8000, revLoHz = 20, revWidth = 1.0f;
     struct Band { int type = EQ_OFF; float hz = 1000, gainDb = 0, q = 1; } band[4];
     Band msBand[2][4];        /* the EQs inside a SplitMS node: [0] the Mid branch, [1] the Side branch (fxmap.ms_branches) */
@@ -431,6 +433,8 @@ private:
 class Fx {
 public:
     static constexpr int kLines = 8;
+    struct DelayUnit { std::vector<float> buf[2]; int pos = 0; float wetCur = 0.0f, dryCur = 1.0f; float timeCur[2] = { 0, 0 }; float fbLp[2] = { 0, 0 }, fbHp[2] = { 0, 0 }; bool ran = false; };
+    struct DelayPrm { float mix, ms, rms, fb, lo, hi; int ping; };
     static constexpr int kDelayMax = 1 << 17;       /* 2.97 s at 44.1 kHz */
     static constexpr int kChorusMax = 2048;         /* 46 ms */
     static constexpr int kAps = 4;
@@ -438,8 +442,7 @@ public:
     explicit Fx(float sampleRate = 44100.0f) : sr(sampleRate)
     {
         chorusBuf.assign(kChorusMax, 0.0f);
-        delayBuf[0].assign(kDelayMax, 0.0f);
-        delayBuf[1].assign(kDelayMax, 0.0f);
+        for (auto &d : dly) { d.buf[0].assign(kDelayMax, 0.0f); d.buf[1].assign(kDelayMax, 0.0f); }
         const float scale = sr / 44100.0f;
         for (int i = 0; i < kLines; i++) {
             lines[i].len = std::max(16, (int) (fxdetail::kLineLen[i] * scale));
@@ -494,8 +497,8 @@ public:
             }
         eqAny = eqAny || msAny;
         /* A stage still fading out has to keep running, or it would cut off. */
-        baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.revMix > 0.0f ||
-                    wideCur > 0.0f || delayWetCur > 0.0f || revWetCur > 0.0f || wideRan || delayRan || revRan || mod.active() || hyper.active();
+        baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.delay2Mix > 0.0f || s.revMix > 0.0f ||
+                    wideCur > 0.0f || dly[0].wetCur > 0.0f || dly[1].wetCur > 0.0f || revWetCur > 0.0f || wideRan || dly[0].ran || dly[1].ran || revRan || mod.active() || hyper.active();
         anyActive = baseActive || xfOn;
     }
 
@@ -534,8 +537,14 @@ public:
         if (st.wideMix > 0.0f || wideCur > 0.0f) { processWide(L, R, n); wideRan = true; }
         else if (wideRan) { clearWide(); wideRan = false; }
 
-        if (st.delayMix > 0.0f || delayWetCur > 0.0f) { processDelay(L, R, n); delayRan = true; }
-        else if (delayRan) { clearDelay(); delayRan = false; }
+        {
+            const DelayPrm q[2] = { { st.delayMix, st.delayMs, st.delayRMs, st.delayFb, st.delayLoHz, st.delayHiHz, st.delayPing },
+                                    { st.delay2Mix, st.delay2Ms, st.delay2RMs, st.delay2Fb, st.delay2LoHz, st.delay2HiHz, st.delay2Ping } };
+            for (int k = 0; k < 2; k++) {
+                if (q[k].mix > 0.0f || dly[k].wetCur > 0.0f) { processDelay(dly[k], q[k], L, R, n); dly[k].ran = true; }
+                else if (dly[k].ran) { clearDelay(dly[k]); dly[k].ran = false; }
+            }
+        }
 
         if (st.revMix > 0.0f || revWetCur > 0.0f) { processReverb(L, R, n); revRan = true; }
         else if (revRan) { clearReverb(); revRan = false; }
@@ -764,30 +773,30 @@ private:
     /* Stereo mode: each side echoes itself. Ping-pong: the mono sum feeds the left line, the
      * left echo feeds the right line, and the right echo feeds back to the left, so the right
      * echo lands at the left time plus the right time (measured on Serum's Mode 1). */
-    void processDelay(float *L, float *R, int n)
+    void processDelay(DelayUnit &u, const DelayPrm &q, float *L, float *R, int n)
     {
-        const float tgtWet = fxdetail::kDelayOut * wetGain(st.delayMix);
-        const float tgtDry = dryGain(st.delayMix);
-        const float dw = (tgtWet - delayWetCur) / (float) n, dd = (tgtDry - delayDryCur) / (float) n;
+        const float tgtWet = fxdetail::kDelayOut * wetGain(q.mix);
+        const float tgtDry = dryGain(q.mix);
+        const float dw = (tgtWet - u.wetCur) / (float) n, dd = (tgtDry - u.dryCur) / (float) n;
         const float lim = (float) (kDelayMax - 4);
-        const float tgtT[2] = { std::min(st.delayMs * 0.001f * sr, lim), std::min(st.delayRMs * 0.001f * sr, lim) };
-        if (!delayRan) { delayTimeCur[0] = tgtT[0]; delayTimeCur[1] = tgtT[1]; }   /* no glide from zero */
+        const float tgtT[2] = { std::min(q.ms * 0.001f * sr, lim), std::min(q.rms * 0.001f * sr, lim) };
+        if (!u.ran) { u.timeCur[0] = tgtT[0]; u.timeCur[1] = tgtT[1]; }   /* no glide from zero */
         const float slew = 1.0f - std::exp(-1.0f / (0.05f * sr));       /* a knob turn glides over 50 ms */
-        const float aHp = 1.0f - std::exp(-fxdetail::kTwoPi * st.delayLoHz / sr);
-        const float aLp = 1.0f - std::exp(-fxdetail::kTwoPi * std::min(st.delayHiHz, sr * 0.45f) / sr);
-        const float fb = st.delayFb;
+        const float aHp = 1.0f - std::exp(-fxdetail::kTwoPi * q.lo / sr);
+        const float aLp = 1.0f - std::exp(-fxdetail::kTwoPi * std::min(q.hi, sr * 0.45f) / sr);
+        const float fb = q.fb;
         /* Serum's delay filter has unity gain at its centre whatever its width (calibration/probe_delay_filter2.json: 0.0 dB at Freq for BW 0.75..9). The two one-poles lose
          * R / (1 + R) at their geometric centre, R being the ratio of the corners: a narrow filter lost 2.6 dB per pass, so its echoes died faster than Serum's. */
-        const float cornerRatio = std::max(std::min(st.delayHiHz, sr * 0.45f) / std::max(st.delayLoHz, 1.0f), 1.0001f);
+        const float cornerRatio = std::max(std::min(q.hi, sr * 0.45f) / std::max(q.lo, 1.0f), 1.0001f);
         const float makeup = (1.0f + cornerRatio) / cornerRatio;
         const int mask = kDelayMax - 1;
-        float *bl = delayBuf[0].data(), *br = delayBuf[1].data();
+        float *bl = u.buf[0].data(), *br = u.buf[1].data();
         for (int i = 0; i < n; i++) {
-            for (int c = 0; c < 2; c++) delayTimeCur[c] += (tgtT[c] - delayTimeCur[c]) * slew;
+            for (int c = 0; c < 2; c++) u.timeCur[c] += (tgtT[c] - u.timeCur[c]) * slew;
             float echo[2];
             for (int c = 0; c < 2; c++) {
                 const float *buf = c ? br : bl;
-                const float rp = (float) delayPos - delayTimeCur[c] + (float) kDelayMax;
+                const float rp = (float) u.pos - u.timeCur[c] + (float) kDelayMax;
                 const int i0 = (int) rp;
                 const float fr = rp - (float) i0;
                 const float a = buf[i0 & mask], b = buf[(i0 + 1) & mask];
@@ -798,27 +807,27 @@ private:
              * untouched and a preset with a narrow filter had an echo 5-12 dB too loud). */
             float ef[2];
             for (int c = 0; c < 2; c++) {
-                fbHp[c] = sanitize(fbHp[c] + aHp * (echo[c] - fbHp[c]));
-                const float hp = echo[c] - fbHp[c];
-                fbLp[c] = sanitize(fbLp[c] + aLp * (hp - fbLp[c]));
-                ef[c] = fbLp[c] * makeup;
+                u.fbHp[c] = sanitize(u.fbHp[c] + aHp * (echo[c] - u.fbHp[c]));
+                const float hp = echo[c] - u.fbHp[c];
+                u.fbLp[c] = sanitize(u.fbLp[c] + aLp * (hp - u.fbLp[c]));
+                ef[c] = u.fbLp[c] * makeup;
             }
             float f[2];
-            if (st.delayPing) { f[0] = ef[1] * fb; f[1] = 0.0f; }
+            if (q.ping) { f[0] = ef[1] * fb; f[1] = 0.0f; }
             else { f[0] = ef[0] * fb; f[1] = ef[1] * fb; }
-            if (st.delayPing) {
-                bl[delayPos] = sanitize(0.5f * (L[i] + R[i]) + f[0]);
-                br[delayPos] = sanitize(ef[0]);
+            if (q.ping) {
+                bl[u.pos] = sanitize(0.5f * (L[i] + R[i]) + f[0]);
+                br[u.pos] = sanitize(ef[0]);
             } else {
-                bl[delayPos] = sanitize(L[i] + f[0]);
-                br[delayPos] = sanitize(R[i] + f[1]);
+                bl[u.pos] = sanitize(L[i] + f[0]);
+                br[u.pos] = sanitize(R[i] + f[1]);
             }
-            delayWetCur += dw; delayDryCur += dd;
-            L[i] = L[i] * delayDryCur + ef[0] * delayWetCur;
-            R[i] = R[i] * delayDryCur + ef[1] * delayWetCur;
-            delayPos = (delayPos + 1) & mask;
+            u.wetCur += dw; u.dryCur += dd;
+            L[i] = L[i] * u.dryCur + ef[0] * u.wetCur;
+            R[i] = R[i] * u.dryCur + ef[1] * u.wetCur;
+            u.pos = (u.pos + 1) & mask;
         }
-        delayWetCur = tgtWet; delayDryCur = tgtDry;
+        u.wetCur = tgtWet; u.dryCur = tgtDry;
     }
 
     /* Eight-line feedback delay network behind four series allpass diffusers. Decay time is
@@ -887,12 +896,12 @@ private:
     }
 
     void clearWide() { std::fill(chorusBuf.begin(), chorusBuf.end(), 0.0f); wideCur = 0; }
-    void clearDelay()
+    void clearDelay(DelayUnit &u)
     {
-        std::fill(delayBuf[0].begin(), delayBuf[0].end(), 0.0f);
-        std::fill(delayBuf[1].begin(), delayBuf[1].end(), 0.0f);
-        fbLp[0] = fbLp[1] = fbHp[0] = fbHp[1] = 0;
-        delayWetCur = 0; delayDryCur = 1;
+        std::fill(u.buf[0].begin(), u.buf[0].end(), 0.0f);
+        std::fill(u.buf[1].begin(), u.buf[1].end(), 0.0f);
+        u.fbLp[0] = u.fbLp[1] = u.fbHp[0] = u.fbHp[1] = 0;
+        u.wetCur = 0; u.dryCur = 1;
     }
     void clearReverb()
     {
@@ -921,12 +930,7 @@ private:
     float wideCur = 0.0f;
     bool wideRan = false;
 
-    std::vector<float> delayBuf[2];
-    int delayPos = 0;
-    float delayWetCur = 0.0f, delayDryCur = 1.0f;
-    float delayTimeCur[2] = { 0, 0 };
-    float fbLp[2] = { 0, 0 }, fbHp[2] = { 0, 0 };
-    bool delayRan = false;
+    DelayUnit dly[2];
 
     struct Line { std::vector<float> buf; int pos = 0; int len = 1; float lp = 0; };
     Line lines[kLines];

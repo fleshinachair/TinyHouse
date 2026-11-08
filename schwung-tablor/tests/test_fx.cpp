@@ -167,6 +167,13 @@ static void testDelay()
     CHECK(std::fabs(L[(size_t) eL] - 1.09f) < 0.05f, "a tap at wet 100 is %.3f of the click: the echo level of a noise burst is Serum's, and the delay's band-pass acts on the first echo", L[(size_t) eL]);
     CHECK(std::fabs(L[kT0]) < 1e-6f, "and the dry is gone at wet 100 (%.4f)", L[kT0]);
 
+    FxSettings two = s;                          /* a second delay behind the first: its echoes are the first's echoes delayed again (Serum racks with two Delay nodes) */
+    two.delay2Mix = 1.0f; two.delay2Ms = 300; two.delay2RMs = 300; two.delay2Fb = 0.0f; two.delay2LoHz = 20; two.delay2HiHz = 20000; two.delay2Ping = 0;
+    std::vector<float> L2, R2;
+    impulse(two, L2, R2);
+    const int e2L = peakAt(L2, kT0 + 100), e2R = peakAt(R2, kT0 + 100);
+    CHECK(std::abs(e2L - kT0 - 17640) <= 2 && std::abs(e2R - kT0 - 22050) <= 2, "two delays: the echoes land at 100 + 300 ms and 200 + 300 ms (%d, %d samples)", e2L - kT0, e2R - kT0);
+
     FxSettings ping = s;
     ping.delayPing = 1;
     impulse(ping, L, R);

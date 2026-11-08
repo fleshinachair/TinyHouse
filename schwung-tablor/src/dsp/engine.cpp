@@ -318,6 +318,13 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.delayLoHz = potEqFreq(pots[TB_P_DLY_LO]);
     s.delayHiHz = potEqFreq(pots[TB_P_DLY_HI]);
     s.delayPing = (int) pots[TB_P_DLY_MODE] == 1;
+    s.delay2Mix = delayOn ? std::min(pot01(pots[TB_P_DLY2_MIX]) * space, 1.0f) : 0.0f;
+    s.delay2Ms = std::pow(1500.0f, pot01(pots[TB_P_DLY2_TIME])) * tempoScale;
+    s.delay2RMs = std::pow(1500.0f, pot01(pots[TB_P_DLY2_TIMER])) * tempoScale;
+    s.delay2Fb = std::min(pot01(pots[TB_P_DLY2_FB]), 0.97f);
+    s.delay2LoHz = potEqFreq(pots[TB_P_DLY2_LO]);
+    s.delay2HiHz = potEqFreq(pots[TB_P_DLY2_HI]);
+    s.delay2Ping = (int) pots[TB_P_DLY2_MODE] == 1;
 
     s.revMix = revOn ? std::min(pot01(pots[TB_P_REV_MIX]) * space, 1.0f) : 0.0f;
     s.revT60 = 0.2f * std::pow(150.0f, pot01(pots[TB_P_REV_DECAY]));
@@ -354,7 +361,7 @@ void Engine::refreshFx()
     const float tempoNow = pots[TB_P_DLY_SYNC] >= 1.0f ? hostBpm : 0.0f;
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
-        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 &&
+        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 &&
         std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0) return;
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
@@ -362,6 +369,7 @@ void Engine::refreshFx()
     compOnSeen = pots[TB_P_COMP_ON];
     std::memcpy(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen);
     std::memcpy(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen);
+    std::memcpy(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen);
     std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
     fxSeenValid = true;
     fx.set(fxSettings(pots));

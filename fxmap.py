@@ -112,6 +112,46 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
     return out
 
 
+# Macro routes into an EQ band's knobs, measured on Serum (calibration/probe_fx_macro.py eq: noise through a bell / low-pass with a route from Macro 1 at 100 %): the gain
+# knob spans -24..+24 dB, so a route adds 0.48 dB per percent (25 % from 0 dB gave +11.9, 50 % from -12 dB +11.8, 100 % clipped at +24); the frequency knob is a log scale from
+# 21.5332 Hz (the value Serum stores for the knob's left end) to 20 kHz, so a route adds its amount to the knob position (+10 % = +0.99 octave, +25 % from 3 kHz = 16.9 kHz). A
+# macro only sits at its saved position (a bipolar route is the macro minus one half, probe_macro_bipolar.py), so the route is folded into the stored value. Before this a
+# macro-driven EQ was carried at its stored knobs (Camp Fire 1: a low-pass at 21 Hz that the HIGH CUT macro opens to 20 kHz stayed shut, 28 dB too quiet).
+# A Distortion's Drive is a percentage and a route adds its amount in percentage points (probe_fx_macro.py dist: drive 10/25/50 + 20/40/-10 % x macro 100 % gave the static
+# drive of the sum on the 3rd harmonic of a sine, to 0.1).
+EQ_GAIN_RANGE_DB = 48.0
+EQ_FREQ_MIN, EQ_FREQ_MAX = 21.5332, 20000.0
+FOLDED_KNOBS = {"FXEQ": ("kParamGain1", "kParamGain2", "kParamFreq1", "kParamFreq2"), "FXDistortion": ("kParamDrive",)}
+
+
+def fold_macro_knobs(nodes: list[dict], mods: list[dict], macros: list[float]) -> list[dict]:
+    """The rack with the macros that drive an EQ band's gain or frequency, or a Distortion's drive, applied at their saved position."""
+    out = copy.deepcopy(nodes)
+    for m in mods or []:
+        if m.get("dest_param") not in FOLDED_KNOBS.get(m.get("dest_type"), ()) or not (25 <= m["source"] <= 32 and macros):
+            continue
+        i = m.get("dest_id")
+        kind = m["dest_type"][2:]
+        if not isinstance(i, int) or not 0 <= i < len(out) or kind_of(out[i]) != kind:
+            continue
+        d = macro_value(m, macros) - (0.5 if m.get("bipolar") else 0.0)
+        a = m["amount_pct"] / 100.0
+        if not isinstance(out[i][f"FX{kind}"].get("plainParams"), dict):
+            out[i][f"FX{kind}"]["plainParams"] = {}
+        pp = out[i][f"FX{kind}"]["plainParams"]
+        param = m["dest_param"]
+        band = int(param[-1]) if kind == "EQ" else 0
+        if kind == "Distortion":
+            pp[param] = min(max(float(pp.get(param, DIST_DEFAULT_DRIVE)) + m["amount_pct"] * d, 0.0), 100.0)
+        elif param.startswith("kParamGain"):
+            pp[param] = min(max(float(pp.get(param, 0.0)) + a * d * EQ_GAIN_RANGE_DB, -EQ_GAIN_RANGE_DB / 2), EQ_GAIN_RANGE_DB / 2)
+        else:
+            span = math.log(EQ_FREQ_MAX / EQ_FREQ_MIN)
+            x = math.log(max(float(pp.get(param, EQ_DEFAULT[band]["freq"])), EQ_FREQ_MIN) / EQ_FREQ_MIN) / span
+            pp[param] = EQ_FREQ_MIN * math.exp(min(max(x + a * d, 0.0), 1.0) * span)
+    return out
+
+
 def norm_name(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", s.lower())
 
@@ -998,6 +1038,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     if _cache is None:
         _cache = json.loads(TABLOR_CACHE.read_text(encoding="utf-8")) if TABLOR_CACHE.exists() else {}
     nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    nodes = fold_macro_knobs(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
     fp = fingerprint_for(name)
     # A fingerprint is keyed by preset name, so it must not outlive its effects: a rack with no
     # reverb (or width effect) gets none, whatever was measured for the name.

@@ -55,7 +55,7 @@ def serum_tree(t, h, kinds):
     """The preset with only the master-rack nodes of these kinds the converter reads (macros folded into the stored values) enabled; the others stay in their
     places, disabled (the mod slots refer to a module by its position)."""
     ph = d2m.physical(t, h)
-    nodes = fxmap.fold_macro_wets(ph["fx_nodes"], ph["mods"], ph["macros"])
+    nodes = fxmap.fold_macro_knobs(fxmap.fold_macro_wets(ph["fx_nodes"], ph["mods"], ph["macros"]), ph["mods"], ph["macros"])
     inside = fxmap.branch_nodes(nodes)
     tt = copy.deepcopy(t)
     raw = tt["FXRack0"]["FX"]

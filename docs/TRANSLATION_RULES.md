@@ -39,6 +39,12 @@ Facts measured on Serum that are not obvious from the code (all now in `deephous
   ranges. Serum's noise osc can hold a one-shot click sample (short): left out. Macros that drive an effect's Wet are folded in
   (`fold_macro_wets`), 19 of 70 presets. `fit_level.py` (threaded) is unstable for some presets; `refit.py`-style sequential fit +
   `cap_limiter` is repeatable.
+- Volume cap for the Deep House bank (2026-11-08): the converter's closed-form volume leaves some presets hotter than Serum's, and the engine's soft limiter
+  (knee 0.7) then adds distortion Serum's render lacks (Keys - BUNT: EQ-only distortion floor about -47 dBc; volume 52 -> 40 takes its band loss 16.9 -> 7.8).
+  `python calibration/cap_bank.py SRC DEST` runs `import_pack.cap_limiter` (the Factory importer's rule: at most 1.5% of samples reach the shoulder) over a
+  converted bank. Measured on all 70: mean band loss 12.955 -> 12.636, presets under 14 dB 42 -> 44; 17 volumes change, Can't Find You 19.4 -> 6.4,
+  Keys - BUNT 19.8 -> 7.8, Nu Aspect 2 11.6 -> 9.3; Lead - Self Control 14.3 -> 16.8 and Keys - Why U So 6.5 -> 7.9 get worse (the lower level drifts from Serum's).
+  A knee of 0.98 in the engine was worse than the cap.
 - Wavetable position is STEPPED, not blended, for tables whose WAV `clm ` chunk reads "<!>2048 0..." (frame = floor(pos*N); Default Shapes,
   Basic Shapes, DS Saw and Tri); "2..." tables interpolate. The engine reads the flag (`Wavetable::stepped`); tablor_cli.cpp loads tables
   exactly like the module (0.9-peak normalise + stepped) so level fits are valid. Modulation source ids: 1 = Mod Wheel (0 in every render).

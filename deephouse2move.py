@@ -243,7 +243,7 @@ def physical(tree: dict, header: dict) -> dict:
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
         pp, cv = _pp(node), (node.get("curveData") or {})
-        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "mode": pp.get("kParamDefaultMode"), "type": pp.get("kParamType"),
+        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "mode": pp.get("kParamDefaultMode"), "type": pp.get("kParamType"),
                      "x": cv.get("xVals"), "y": cv.get("yVals"), "c": cv.get("curveVals"), "name": node.get("curveDisplayName")})
     # Serum's routing slots 0..4 are osc A, B, C, noise, sub. Measured with a closed filter:
     # only A reaches the filter by default, the others bypass it unless routed there.
@@ -848,6 +848,21 @@ def write_embedded_table(data: list, wt_out: Path, subdir: str) -> str:
 
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
+# A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
+# half a beat, 4 Hz at 120 BPM, where the converter had it at 14.69 Hz). A synced LFO's stored Rate is not a frequency: it picks a note division, one per band of the Rate
+# knob. Edges and divisions (in beats) as swept on Serum at 120 BPM; with Triplets on, the top quarter of each band plays the division's 2/3 length.
+LFO_SYNC_BANDS = [(0.5, 1.25, 8.0), (1.25, 3.15, 4.0), (3.15, 5.5, 2.0), (5.5, 9.5, 1.0), (9.5, 15.8, 0.5), (15.8, 22.5, 0.25), (22.5, 1e9, 0.125)]
+LFO_SYNC_BPM = 120.0       # the tempo of every other measurement here (the engine's LFO is free-running: it has no host tempo)
+
+
+def lfo_sync_hz(rate: float, triplets: bool) -> float | None:
+    """Hz at LFO_SYNC_BPM of a synced LFO with this stored Rate, or None below the swept range (the caller keeps the stored value)."""
+    for lo, hi, beats in LFO_SYNC_BANDS:
+        if lo <= rate < hi:
+            if triplets and rate >= lo + 0.75 * (hi - lo) and hi < 1e8:
+                beats *= 2.0 / 3.0
+            return LFO_SYNC_BPM / 60.0 / beats
+    return None
 
 
 LFO_SCALES = Path(__file__).resolve().parent / "calibration/lfo_scales.json"
@@ -991,7 +1006,11 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         clipped[l] = ([round(127 * abs(x) / peak) for x in e], math.copysign(math.sqrt(min(abs(v) / 4.0, 1.0)), v))
     for n, l in enumerate(chosen, 1):
         d = ph["lfos"][l]
-        hz = d["rate"] if (d.get("rate") is not None and not d.get("sync")) else LFO_DEFAULT_HZ
+        hz = LFO_DEFAULT_HZ
+        if d.get("rate") is not None:
+            hz = d["rate"]
+            if d.get("sync") is None or d.get("sync"):         # an unwritten BeatSync is ON: the Rate picks a note division (LFO_SYNC_BANDS)
+                hz = lfo_sync_hz(d["rate"], bool(d.get("triplets"))) or hz
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
         P[f"lfo{n}_mode"] = 0 if d.get("mode") in (None, 0, 0.0) else 1
         # a Random S&H LFO has no period, so a sine table puts a tone on its destination that Serum does not have (Lead - Other Side:

@@ -1044,7 +1044,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             mod_wheel_idle += 1
         elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/probe_venv.py)
             routes.append((src - 2, key, a))
-            if m.get("bipolar") and key[0] == "VoiceFilter" and key[1] == "kParamFreq":
+            if m.get("bipolar") and key == ("VoiceFilter", "kParamFreq", 0):
                 # A bipolar route is the source minus one half, so once the envelope has fallen the cutoff sits half the depth below the stored one and the
                 # engine's unipolar envelope only gets the depth: fold the offset into the base (Lead - Let It Go: Env2 -> cutoff +17 % bipolar, sustain 0)
                 fold[key] += a * -0.5

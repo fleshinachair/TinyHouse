@@ -130,6 +130,38 @@ def route_curve(slot: dict):
     return [curve_value(cv["xVals"], cv["yVals"], cv.get("curveVals") or [], k / 32.0) for k in range(33)]
 
 
+def aux_curve(slot: dict):
+    """A route's aux curve (kParamAuxCurveData on, the points in flex[1]) as 33 samples of the scale it gives the depth for an aux value x = k / 32, or None for a straight route.
+    Measured (calibration/probe_aux_curve.py): the depth is amount x curve(x), the curve read as 1 - y like every Serum curve, and it REPLACES the straight x: a macro at 0 / .25 / .5 / .75 / 1
+    on a curve (0.8 -> 0.2) gave 0.20 / .35 / .50 / .66 / .79, velocity and note number (x = value / 127) on (0.43 -> 0) gave 0.64 / .77 / .90 / 1.0 at 20 / 60 / 100 / 127, and a random aux
+    (21, 22: uniform 0..1 per note) on (0.274 -> 0.166) gave 0.73..0.81, mean 0.78."""
+    flex = slot.get("flex") or []
+    cv = flex[1] if len(flex) > 1 and isinstance(flex[1], dict) else {}
+    if _pp(slot).get("kParamAuxCurveData", 0.0) < 0.5 or not cv.get("xVals") or len(cv["xVals"]) != len(cv.get("yVals") or []):
+        return None
+    return [curve_value(cv["xVals"], cv["yVals"], cv.get("curveVals") or [], k / 32.0) for k in range(33)]
+
+
+def aux_scale(aux: int, curve, macros: list) -> float:
+    """The factor a route's aux source gives its depth in a static preset: the aux's value x (a macro at its saved value, velocity VELOCITY_NOMINAL / 127, note 60 / 127, a random aux or an
+    envelope / LFO gate at its mean) through the route's aux curve when it has one (probe_aux_curve.py), else x itself."""
+    if 25 <= aux <= 32:
+        x = macros[aux - 25] / 100.0
+    elif aux == 16:
+        x = VELOCITY_NOMINAL / 127.0
+    elif aux == 17:
+        x = 60 / 127.0
+    else:
+        x = None                                         # random per note (21, 22) or an envelope / LFO gate: the mean over x
+    if curve is None:
+        return 0.5 if x is None else x
+    if x is None:
+        return (sum(curve) - 0.5 * (curve[0] + curve[-1])) / (len(curve) - 1)
+    pos = _clamp(x, 0.0, 1.0) * 32.0
+    i = min(int(pos), 31)
+    return curve[i] + (curve[i + 1] - curve[i]) * (pos - i)
+
+
 def physical(tree: dict, header: dict) -> dict:
     """Decode a Serum tree into plain physical units."""
     g = _pp(tree.get("Global0", {}))
@@ -182,22 +214,21 @@ def physical(tree: dict, header: dict) -> dict:
                          # Out 38-46 routes render the same in Serum with or without it, and the scale made the engine's match worse).
                          "amount_pct": _pp(s).get("kParamAmount", 0.0) * (1.0 if (s["source"][1:] or [0])[0] in (16, 17) else _pp(s).get("kParamOut", 100.0) / 100.0),
                          "bipolar": bool(_pp(s).get("kParamBipolar", 0.0)),
-                         "curve": route_curve(s)})
+                         "curve": route_curve(s), "aux_curve": aux_curve(s)})
     macros = [_pp(tree.get(f"Macro{i}", {})).get("kParamValue", 0.0) for i in range(8)]
-    # A route's second source (source = [main, aux]) scales its depth: with a macro as the aux source the depth is multiplied by the macro's value (a
-    # route gated by a macro at 0 does nothing: Pad - MIND's filter envelope, which left its filter closed in Serum while the engine opened it). The other aux
-    # sources are not carried. 16 is the velocity and 17 the note number (calibration/probe_aux_source.py: on a plain slot the depth scales by x / 127), but a slot
-    # also has an aux curve (kParamAuxCurveData) and Lead - Tonic Walter's, rendered at velocity 100, is the unscaled route (60 darker, 127 brighter): a static
-    # scale of 100/127 made it 25 dB too dark in the 2.5-5 kHz band, so they are left at full depth. 1 (the mod wheel), 18, 19 and 24 are closed at rest (the route is
-    # off), 21 and 22 are random per note (taken at their mean, 0.5), 20 and 23 constant (left).
+    # A route's second source (source = [main, aux]) scales its depth by the aux's value x: a macro at its saved value (a route gated by a macro at 0 does nothing: Pad - MIND's filter
+    # envelope, which left its filter closed in Serum while the engine opened it), velocity (x = velocity / 127) and note number (x = note / 127) at their nominal values
+    # (calibration/probe_aux_source.py), a random aux (21, 22: uniform per note) at its mean, and when the slot has an aux curve (kParamAuxCurveData) the curve's value in place
+    # of x (calibration/probe_aux_curve.py; it explains Lead - Tonic Walter's route, which at velocity 100 is almost the unscaled one: a plain 100/127 made it 25 dB too dark, and the
+    # old fix left every velocity / note aux at full depth). 1 (the mod wheel), 18, 19 and 24 are closed at rest (the route is off), 20 and 23 constant (left).
     for m in mods:
         aux = m.get("aux") or 0
-        if 25 <= aux <= 32:
-            m["amount_pct"] = m["amount_pct"] * macros[aux - 25] / 100.0
-        elif aux == 1 or aux in (18, 19, 24):
+        if aux == 1 or aux in (18, 19, 24):
             m["amount_pct"] = 0.0                  # the mod wheel (1) and the sources closed at rest (probe_aux_source.py): the route does nothing in a static preset
-        elif aux in (21, 22) or 2 <= aux <= 15:
-            m["amount_pct"] *= 0.5                 # (an envelope or LFO as the gate, 2..15, is not unipolar noise but its mean is as good a static guess: two vibrato routes)                 # random per note, 0..1: its mean (a vibrato route gated by it was carried at full depth: Keys - Billboard)
+        elif 25 <= aux <= 32 or aux in (16, 17, 21, 22) or 2 <= aux <= 15:
+            # a macro at its saved value, velocity / note at their nominal values, a random aux or an envelope / LFO gate at its mean (two vibrato routes: Keys - Billboard's
+            # random-gated vibrato was carried at full depth), each through the route's aux curve when it has one (aux_scale)
+            m["amount_pct"] *= aux_scale(aux, m.get("aux_curve"), macros)
     # An envelope's Sustain is a plain 0..1 knob, so a macro, velocity or note route into it is folded in at the saved macro value or the nominal velocity / note
     # (Bass - Let It Go: velocity into the filter envelope's sustain, +73 %, which at velocity 100 holds the filter at 0.57 where the preset's own value is 0).
     # The attack, decay and release knobs are logarithmic times and are left as stored.

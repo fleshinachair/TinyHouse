@@ -155,6 +155,7 @@ def physical(tree: dict, header: dict) -> dict:
             "detune_wid": p.get("kParamDetuneWid"),      # how far the stack spreads, not stereo
             "stereo_pct": p.get("kParamUnisonStereo"),
             "table": wt.get("relativePathToWT"),
+            "embedded": wt.get("embeddedWTData") if not wt.get("relativePathToWT") else None,        # a table edited in Serum and stored in the preset (no file)
             "table_pos": wtp.get("kParamTablePos", 1.0),            # 1..256
             "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0)}
                      for m, a in (("kParamWarpMenu", "kParamWarp"),
@@ -784,6 +785,29 @@ def resolve_table(ref, pack: dict[str, Path], serum_tables: Path | None,
     return f"{MOVE_WT_ROOT}/{subdir}/{Path(dest_rel).as_posix()}", rel
 
 
+# A wavetable edited in Serum is stored inside the preset (WTOsc `embeddedWTData`, a flat list of 2048-sample frames) and the oscillator has no table path; 34 oscillators of the
+# 626 factory presets (BA - 303 Reality's saw, ...) did, and played the engine's "Init" table (a pulse) instead. It is written out as a float WAV in Serum's own layout (a `clm `
+# chunk, frame size 2048, stepped: the interpolation digit of Serum's Default Shapes) and loaded like any other table.
+EMBEDDED_FRAME = 2048
+
+
+def write_embedded_table(data: list, wt_out: Path, subdir: str) -> str:
+    arr = [float(x) for x in data]
+    n = len(arr) // EMBEDDED_FRAME * EMBEDDED_FRAME
+    arr = arr[:n] if n else arr
+    digest = hashlib.md5(struct.pack(f"<{len(arr)}f", *arr)).hexdigest()[:12]
+    name = f"embedded_{digest}.wav"
+    dest = wt_out / subdir / "embedded" / name
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        clm = b"<!>2048 01000000 wavetable (www.xferrecords.com)"
+        pcm = struct.pack(f"<{len(arr)}f", *arr)
+        fmt = struct.pack("<HHIIHH", 3, 1, 44100, 44100 * 4, 4, 32)
+        body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"clm " + struct.pack("<I", len(clm)) + clm + (bytes(1) if len(clm) % 2 else b"") + b"data" + struct.pack("<I", len(pcm)) + pcm
+        dest.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    return f"{MOVE_WT_ROOT}/{subdir}/embedded/{name}"
+
+
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 
@@ -1097,6 +1121,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             else:
                 crit.append(f"{k} warp {w['mode'][1:]} unsupported (no FM/RM/fold in Tablor)")
         path, ref = resolve_table(o["table"], pack, serum_tables, wt_out, subdir)
+        if path is None and not ref and o.get("embedded"):
+            path = write_embedded_table(o["embedded"], wt_out, subdir)
+            note.append(f"{k}: the preset's own embedded wavetable ({len(o['embedded']) // EMBEDDED_FRAME} frames)")
         paths[f"{k}_table"] = path or "Init"
         if path is None and ref:
             missing.append(ref)

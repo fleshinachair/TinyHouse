@@ -1601,6 +1601,15 @@ def unsupported_reasons(m: dict) -> list:
 
 
 # ---------------------------------------------------------------------------
+def default_serum_tables():
+    """Serum 2's own Tables folder, where the factory wavetables a preset names live (a pack holds only its own). Without it they fall back to Init."""
+    try:
+        import serum_paths
+        return serum_paths.SERUM_TABLES if serum_paths.SERUM_TABLES.is_dir() else None
+    except Exception:
+        return None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("src", type=Path, help=".SerumPack zip or folder of .SerumPreset files")
@@ -1649,7 +1658,7 @@ def main() -> None:
     results, skipped = [], []
     for vf in sorted(vital_dir.glob("*.vital")):
         v = json.loads(vf.read_text(encoding="utf-8"))
-        m = map_to_tablor(v, tables, a.serum_tables, wt_out, a.wt_subdir)
+        m = map_to_tablor(v, tables, a.serum_tables or default_serum_tables(), wt_out, a.wt_subdir)
         trim_for_headroom(m, out / "move")
         m["notes"] += apply_level_fit(m["name"], m["params"])
         why = unsupported_reasons(m)

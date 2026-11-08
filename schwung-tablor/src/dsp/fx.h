@@ -150,7 +150,8 @@ struct FxSettings {
     Band msBand[2][4];        /* the EQs inside a SplitMS node: [0] the Mid branch, [1] the Side branch (fxmap.ms_branches) */
     bool eqEnable = true;     /* the EQ's own switch: it fades in and out, the bands keep running */
     float distDrive = 0, distMix = 1;       /* distortion: drive 0..1 (0 is off), wet part 0..1 */
-    int   distMode = 0;                     /* 0 soft (tanh), 1 asymmetric, 2 hard clip, 3 sine (the calibrated law only) */
+    int   distMode = 0;                     /* 0 soft (tanh), 1 asymmetric, 2 hard clip, 3 sine, 4 hold (the calibrated law only) */
+    int   distHold = 1;                     /* mode 4: Serum's Downsample, a sample-and-hold of this many samples */
     bool  distCal = false;                  /* the calibrated law: out = level (1 - s^2) x + s out curve(gain x), s = distMix */
     float distGain = 1, distOut = 1, distLevel = 1;
     int   distPre = 0;                      /* a filter before the curve, on the distorted part: 0 off, 1 low-pass, 2 high-pass (the calibrated law only) */
@@ -724,12 +725,14 @@ private:
                 case 1:  f = std::tanh(g * (vf + bias)) - biasOut; break;
                 case 2:  f = std::min(std::max(g * vf, -1.0f), 1.0f); break;
                 case 3:  f = std::sin(g * vf); break;
+                case 4:  if (dsCount == 0) dsHold[c] = vf; f = dsHold[c]; break;      /* Serum's Downsample: the sample at the start of each hold, repeated */
                 default: f = std::tanh(g * vf); break;
                 }
                 float o = lv * (dry * v + s * k * f);
                 distDc[c] += dcA * (o - distDc[c]);              /* every curve can leave a DC term on a loud or lopsided input (the bias, a sine fold of an offset): taken out of the sum */
                 y[c] = o - distDc[c];
             }
+            if (st.distMode == 4) { if (++dsCount >= st.distHold) dsCount = 0; } else dsCount = 0;
             L[i] = x[0] + w * (y[0] - x[0]);
             R[i] = x[1] + w * (y[1] - x[1]);
         }
@@ -945,6 +948,8 @@ private:
     bool revRan = false;
     float eqCur = 1.0f, eqTarget = 1.0f;
     float distCur = 0.0f, distTarget = 0.0f, distDc[2] = { 0.0f, 0.0f };
+    int   dsCount = 0;
+    float dsHold[2] = { 0.0f, 0.0f };
     StereoBiquad distPreBq;
     MbBq mbLp2[2], mbHp2[2], mbLp1[2], mbHp1[2], mbApLp[2], mbApHp[2];
     float mbMs[3] = { 0, 0, 0 }, mbGain[3] = { 0, 0, 0 };

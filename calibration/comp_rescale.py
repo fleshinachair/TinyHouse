@@ -42,7 +42,7 @@ def rescale(state, vol_from, vol_to):
             t_out = -90.0 + 120.0 * pot / 127.0 + gain_db(vol_from)
             new = (t_out - gain_db(vol_to) + 90.0) / 120.0
             state = _set(state, k, round(min(max(new, 0.0), 1.0) * 127))
-    if _get(state, "dist_cal") >= 1 and _get(state, "dist_mix") > 0:
+    if _get(state, "dist_cal") >= 1 and _get(state, "dist_mix") > 0 and _get(state, "dist_mode", 0) != 4:      # (mode 4, the hold, has no gain: its Drive pot is the hold length)
         dg = gain_db(vol_to) - gain_db(vol_from)
         state = _set(state, "dist_drive", round(min(max(_get(state, "dist_drive") + dg * 127.0 / 70.0, 0), 127)))
         state = _set(state, "dist_out", round(min(max(_get(state, "dist_out") - dg * 127.0 / 48.0, 0), 127)))

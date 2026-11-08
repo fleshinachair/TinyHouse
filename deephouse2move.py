@@ -572,6 +572,25 @@ BEND_WARPS = {"kBendPos": +1, "kBendPosNeg": +1, "kBendNeg": -1, "kPD_OSC": +1, 
 SYNC_POT = [(0.0, 0.0), (0.15, 0.0), (0.2, 6.0), (0.3, 20.0), (0.4, 44.0), (0.5, 64.0), (0.6, 88.0), (0.7, 108.0), (0.8, 124.0), (1.0, 127.0)]
 PWM_BEND_POT = [(0.0, 64.0), (0.2, 90.0), (0.4, 104.0), (0.6, 122.0), (0.8, 127.0), (1.0, 127.0)]
 WARP_NOISE_FLOOR = 0.02    # a warp mode with ~0 amount is not audible
+WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves.json"
+
+
+def WARP_SHAPERS() -> dict:
+    """Serum's Dist* oscillator warps the engine can shape (calibration/warp_dist_curves.json: curve family, pre-gain G and output gain K per amount)."""
+    return json.loads(WARP_DIST_FILE.read_text(encoding="utf-8"))
+
+
+def warp_shaper_pots(k: str, mode: str, amount: float) -> dict:
+    """The engine's per-oscillator shaper pots (wtN_shape / _sgain / _sout) for a Dist* warp at an amount: G and K interpolated in the log between the measured amounts
+    (an amount of 0 is an identity for every mode but SoftSat, whose first row already shapes), pots the inverse of voice.h's G = 0.02 * 15000^(pot/127), K = 0.5 * 120^(pot/127)."""
+    c = WARP_SHAPERS()[mode]
+    am = c["amounts"]
+    j = max(1, min(len(am) - 1, next((i for i, a in enumerate(am) if a >= amount), len(am) - 1)))
+    f = _clamp((amount - am[j - 1]) / (am[j] - am[j - 1]), 0.0, 1.0)
+    lg = (1 - f) * math.log(c["G"][j - 1]) + f * math.log(c["G"][j])
+    lk = (1 - f) * math.log(c["K"][j - 1]) + f * math.log(c["K"][j])
+    pot = lambda v, lo, span: int(round(_clamp(127.0 * (v - math.log(lo)) / math.log(span), 0, 127)))
+    return {f"{k}_shape": int(c["engine_curve"]), f"{k}_sgain": pot(lg, 0.02, 15000.0), f"{k}_sout": pot(lk, 0.5, 120.0)}
 
 
 def pot_time(t: float) -> int:        # Tablor potEnvTime inverse: 1 ms .. 10 s
@@ -1201,6 +1220,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 # same wave an octave up. The harmonic amplitudes are those of the table's even harmonics, which the engine cannot take out; the pitch is right.
                 P[f"{k}_tune"] = round(_clamp(P[f"{k}_tune"] + 12, -48, 48))
                 appr.append(f"{k} warp EvenOdd approximated by an octave up (the engine cannot remove the odd harmonics)")
+            elif w["mode"] in WARP_SHAPERS() and not P.get(f"{k}_shape"):
+                P.update(warp_shaper_pots(k, w["mode"], _clamp(w["amount"], 0, 1)))
+                appr.append(f"{k} warp {w['mode'][1:]} carried as a static waveshaper (fitted to Serum's harmonics, a few dB)")
             elif w["mode"] == "kSync":
                 P[f"{k}_sync"] = round(interp(SYNC_POT, _clamp(w["amount"], 0, 1)))
             elif w["mode"] in BEND_WARPS and n == 3:
@@ -1322,12 +1344,16 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 lvl = bus_of.get(src, [0.0, 0.0])[b]
                 P[f"{key}_bus{b + 1}"] = int(round(127.0 * (_clamp(lvl, 0.0, 100.0) / 100.0) ** 3))
     serial = False                                  # Filter 1's output goes into Filter 2
+    serial2 = False                                 # Filter 2's output goes into Filter 1
     if CARRY_BUSES:
         for slot, fk, fl_on in ((5, "flt1", ph["filter2"]["enabled"]), (6, "flt2", ph["filter"]["enabled"])):       # (in series: into the other filter, which has to be on)
             d = fdest_of.get(slot, 0)
             if d == 3 and fl_on and slot == 5:
                 P["flt1_out"] = 3
                 serial = True
+            elif d == 3 and fl_on and not serial:          # Filter 2 into Filter 1 (the engine runs Filter 2 first); both ways at once is a loop and is not carried
+                P["flt2_out"] = 3
+                serial2 = True
             elif d == 3 and fl_on:
                 crit.append("Voice Filter 2 routed into Filter 1 in series (not carried)")
             elif d in (1, 2):
@@ -1384,9 +1410,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         if smp:
             P["smp_bal"] = pot_bal(smp[0]["id"])
         reaches2 = {k: P[k] for k in ("wt1_bal", "wt2_bal", "wt3_bal", "sub_bal", "noise_bal", "smp_bal") if P[k] > 0}
-        if reaches2 or serial:
+        if reaches2 or serial or serial2:
             voice_filter_pots(f2, 1, "flt2", "filter 2")
-            note.append("second voice filter carried (" + ", ".join(f"{k[:-4]} {v / 63.5 - 1:+.1f}" for k, v in reaches2.items()) + (", " if reaches2 else "") + ("in series after filter 1" if serial else "") + ")")
+            note.append("second voice filter carried (" + ", ".join(f"{k[:-4]} {v / 63.5 - 1:+.1f}" for k, v in reaches2.items()) + (", " if reaches2 else "") + ("in series after filter 1" if serial else "in series before filter 1" if serial2 else "") + ")")
         elif ph["filter2_enabled"]:
             note.append("second voice filter is on but no source is sent to it")
 
@@ -1406,7 +1432,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P["flt_env"] = 64                     # no filter envelope depth
     f2_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 1)]
     f2_me = None
-    if (reaches2 or serial) and f2_routes:
+    if (reaches2 or serial or serial2) and f2_routes:
         tot2 = Counter()
         for e, _, a in f2_routes:
             tot2[e] += a

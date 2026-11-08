@@ -460,3 +460,34 @@ aligned on the fundamental) and `probe_dist_od.py` (harmonics 1-15); the gain ta
   and engine bands above 640 Hz are the same with the distortion bypassed (dist_mix 0), with dist_drive 10 or 20, and with the pre-filter off. The excess lives in bands
   at -75 to -90 dB re the peak (the engine's 16-bit dither/aliasing floor against Serum's digital silence); the pre-filter only lowers the level fit's headroom a few dB
   there (volume 45 -> 53). The 8.6 -> 16.2 is the metric reading below-audible bands, not a clipper problem. In the 100-1000 Hz bands the pre-filter is mixed (one band 12 dB too low, another 6 dB closer), so the pre-filter stays on structure, not on this preset's score.
+
+## Cheap factory blockers (2026-11-08 night): series filter, static sources on FX, transparent Split/Bode, Downsample
+Factory importable by the converter's verdict 130 -> see the end of this section (classify_pack, factory_now -> factory_now3); Deep House unchanged (0 of 70 states differ apart from volume).
+- **Voice Filter 2 into Filter 1 in series** (Serum routing slot 6 = Filter): engine `flt2_out = 3` runs Filter 2 first (its drive, filter and gain) and adds its output to Filter 1's input (voice.h `f2First`; both directions at once is a loop and still
+  not carried). Native test `serial2`. 9 factory presets were blocked by it alone.
+- **Mod wheel / velocity / note routes into FX knobs** are folded like macros (`fxmap.foldable_source`: the wheel at 0, velocity at 100/127, the note at middle C): the Filter FX's cutoff (`dynamic_filter`, `filter_bands`), the Wets and the
+  folded EQ / Distortion / Utils knobs. Before, any non-macro source made the node "moved by a modulator" and blocked the preset (BA - Renegade, OR - Thermite, PN - Piano Dance, STR - Hybrid Strings, SY - Thoughtful Keys: all mod wheel).
+  A bipolar route is the source minus one half (probe_macro_bipolar.py); the Wet and Filter FX paths had used 2x - 1 and now use the measured form.
+- **Split / SplitMS whose branch modules are all off or dry** is transparent (calibration/probe_split_plain.py: a frequency Split with a dry Distortion in either branch, or with no modules, is within 0.1 dB of no split, the floor's own noise).
+  **A Bode that stores nothing that shifts, delays or blurs** (only LevelOut / Range / sync / Wet) is a 0 Hz shift through an empty delay and transparent (probe_bode_default.py: no stored params, +-0.1 dB). A Bode with a Shift, Feedback, Blur or
+  OutputMix is still not carried (frequency shifter + delay + diffuser is its own stage, not measured).
+- **Distortion Downsample** (calibration/probe_dist_downsample.py, a 220 Hz sine, images at 44100 / N +- f0): a sample-and-hold of N = 1 + 0.0088 Drive^2 samples (Drive 10..100 % gives N = 2, 5, 9, 15, 23, 33, 44, 57, 72, 89; Drive 0 passes). The
+  engine's distortion mode 4 (Hold) holds the sample taken at the start of each N; its Drive pot is N - 1 (comp_rescale leaves it alone), output gain 0 dB, LevelOut and Wet as for the other modes (assumed, not probed for this mode).
+- **Distortion filter morph (LPHP between its ends)** (calibration/probe_dist_morph.py, noise through Drive 0, PrePost 1, Freq 0.5, BW 2, LPHP 0..100): the filter morphs LP -> band-pass -> HP linearly in the state-variable
+  filter's three outputs (weights (1 - 2t, 2t, 0) up to t = 0.5, then (0, 2 - 2t, 2t - 1)), the band-pass being j x / D, whose peak is Q. That form fits the measured transfer to 0.7-1.1 dB rms at LPHP 20..80 %; the crossfade of
+  LP and HP the converter would have guessed is 6-17 dB off (it has a notch at the cutoff, Serum's has a peak). Carried after the distortion as up to three fitted EQ bands (`dist_filter_bands`, as the partly-wet filters are); an LPHP within 3 %
+  of an end is that end. A morph BEFORE the distortion has no engine pre-filter form (LP / HP only) and now blocks the preset instead of being dropped silently: BA - Fretless Bass, which the pre-filter commit had kept with the morph
+  silently left out, is no longer importable until the engine's pre-filter can morph.
+- Not done from the cheap list, with the reason: Filter FX moved by an LFO (the engine's Filter FX stage is a mix-wide stage that follows the filter envelope; an LFO needs a global-LFO input, 4 presets), Filter FX / voice filter models Diffuser and the
+  single-preset models (no measured law), Bode with a real Shift / Feedback / Blur (a frequency shifter + delay + diffuser stage, not measured), a Split with real effects in its branches (needs a band-split stage).
+
+## Oscillator warps: the Dist* waveshapers (2026-11-08 night)
+Of the 59 factory presets whose only blocker is an oscillator warp, 27 use a Dist* waveshaper (Dist Tube 14, SoftSat 6, TapeSat 3, Diode 2 2, Stomp Box 1, Diode 1 1), the next block FM / PD / RM from the Sub, Noise or another oscillator (about 30, not done).
+- **Measured** (`calibration/probe_warp_dist.py`, a pure sine oscillator through each warp at amounts 0..1, harmonics 1..12): every Dist* warp is a STATIC odd shaper of the waveform (even harmonics at the floor) except Diode 2, which is asymmetric (even and odd
+  harmonics) and is left unsupported (2 presets). The fundamental gains a little with the amount; Dist Tube's 3rd harmonic is -36 dB re the fundamental at 0.1, -20 at 0.5, -11 at 1.0; Diode 1 is nearly a hard clip from 0.1.
+- **Fitted** (`calibration/fit_warp_dist.py` -> `warp_dist_curves.json`): out = K f(G x) of a unit sine, f chosen per mode from hard clip / softsign / cubic soft clip over the odd harmonics 3..11, G and K per amount. Dist Tube = softsign (0.8 dB rms), SoftSat = cubic
+  (1.6), TapeSat = softsign (2.9), Diode 1 = cubic (0.8), Stomp Box = hard clip (1.7). tanh was left out on purpose: `std::tanh` cost 7x the other curves per stream-sample, and nothing fitted notably better with it.
+- **Engine**: `wtN_shape` (0 off, 2 clip, 3 softsign, 4 cubic) with `wtN_sgain` (G = 0.02 x 15000^(pot/127)) and `wtN_sout` (K = 0.5 x 120^(pot/127)) per oscillator, applied to every unison stream's sample before the stack's gains (`WTOscillator::postProcess`), as Serum applies a
+  warp inside the oscillator. The converter (`warp_shaper_pots`) interpolates G and K in the log between the measured amounts and writes the keys only for oscillators that use one (so no other preset's state, or its level-fit signature, changes). A second warp on the same oscillator
+  is still not carried. Native test `testWarpShaper`.
+- **Cost** (native x86, `testWarpShaper`, 16 unison streams, one second of audio): 3.7 ms with no shaper, 4.9-5.2 ms with one (+30-40 % of the oscillator, only on the oscillators that use it); about 0.4 % of a core without it. The ARM figure is not measured (the Move is offline).

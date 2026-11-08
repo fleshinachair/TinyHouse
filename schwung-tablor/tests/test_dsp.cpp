@@ -1,3 +1,4 @@
+#include <chrono>
 /* Phase 2 DSP validation — numeric golden checks for every ported block.
  *
  * The checks assert MEASURED behaviour (frequency response in dB, envelope
@@ -548,6 +549,59 @@ static double stackDb(VoicedWTOscillator &a, VoicedWTOscillator *silent, float n
     return 10.0 * std::log10(acc / count + 1e-20);
 }
 
+/* Serum's Dist* oscillator warps: a static shaper on every stream's sample. A sine through it gains odd harmonics, a pre-gain of 0.02 with an output gain of 50 is transparent,
+ * and a hard clip at high gain squares the wave off at the output gain. */
+static void testWarpShaper()
+{
+    printf("== oscillator warp shaper ==\n");
+    Wavetable wt;
+    buildSineTable(wt);
+    const float note = 48.0f, f0 = 130.8128f;
+    auto render = [&](int shape, float g, float k, std::vector<float> &out) {
+        VoicedWTOscillator o(kMaxUnison);
+        o.setSampleRate(44100.0); o.setWavetable(&wt); o.noteOn(0.0f);
+        VoicedWTParams vp; vp.voices = 1; vp.shape = shape; vp.shapeGain = g; vp.shapeOut = k;
+        out.clear();
+        for (int blk = 0; blk < 44100 / 128; blk++) {
+            float l[128] = {}, r[128] = {};
+            o.processAdding(note, vp, l, r, 128);
+            if (blk * 128 > 8192) out.insert(out.end(), l, l + 128);
+        }
+    };
+    auto amp = [&](const std::vector<float> &x, double hz) {
+        double re = 0, im = 0;
+        for (size_t i = 0; i < x.size(); i++) { const double ph = 6.283185307179586 * hz * (double) i / 44100.0; const double w = 0.5 - 0.5 * std::cos(6.283185307179586 * (double) i / (double) x.size()); re += w * x[i] * std::cos(ph); im += w * x[i] * std::sin(ph); }
+        return std::sqrt(re * re + im * im) * 4.0 / (double) x.size();
+    };
+    std::vector<float> clean, soft, ident, clip;
+    render(0, 1.0f, 1.0f, clean);
+    render(3, 4.0f, 1.0f, soft);
+    render(3, 0.02f, 50.0f, ident);
+    render(2, 100.0f, 0.5f, clip);
+    const double h3clean = 20.0 * std::log10(amp(clean, 3 * f0) / amp(clean, f0) + 1e-12), h3soft = 20.0 * std::log10(amp(soft, 3 * f0) / amp(soft, f0) + 1e-12);
+    CHECK(h3clean < -60.0, "no shaper: no third harmonic (%.1f dB)", h3clean);
+    CHECK(h3soft > -25.0 && h3soft < -8.0, "a softsign shaper at gain 4 makes a third harmonic (%.1f dB re the fundamental)", h3soft);
+    CHECK(std::fabs(20.0 * std::log10(amp(ident, f0) / amp(clean, f0))) < 0.3, "pre-gain 0.02 with output gain 50 is transparent (%.2f dB)", 20.0 * std::log10(amp(ident, f0) / amp(clean, f0)));
+    /* cost, informational: 16 unison streams, one second of audio, wall time per shaper kind (native x86, a relative figure only) */
+    {
+        const char *names[] = { "none", "(unused)", "clip", "softsign", "cubic" };
+        for (int s = 0; s < 5; s++) {
+            VoicedWTOscillator o(kMaxUnison);
+            o.setSampleRate(44100.0); o.setWavetable(&wt); o.noteOn(0.0f);
+            VoicedWTParams vp; vp.voices = 16; vp.detune = 0.3f; vp.shape = s; vp.shapeGain = 3.0f; vp.shapeOut = 0.4f;
+            const auto t0 = std::chrono::steady_clock::now();
+            float acc = 0.0f;
+            for (int rep = 0; rep < 8; rep++)
+                for (int blk = 0; blk < 44100 / 128; blk++) { float l[128] = {}, r[128] = {}; o.processAdding(48.0f, vp, l, r, 128); acc += l[5]; }
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 8.0;
+            printf("  cost: 16 streams, shaper %-8s %6.2f ms per second of audio (%g)\n", names[s], ms, (double) acc);
+        }
+    }
+    float pk = 0.0f;
+    for (float v : clip) pk = std::max(pk, std::fabs(v));
+    CHECK(pk > 0.49f && pk < 0.6f, "a hard clip at high gain peaks at about the output gain (%.3f; the stack's 10 Hz DC blocker lifts the edges of a square by about 12 %%)", pk);
+}
+
 /* Raising the unison cap must not cost the bass.
  *
  * Every stream used to DC-block the shared buffer, so a stack was a cascade of
@@ -759,6 +813,7 @@ int main()
     testMorphToEvenHarmonicsKeepsItsFrame();
     testAnalogTables();
     testUnisonKeepsTheBass();
+    testWarpShaper();
     testHardSync();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;

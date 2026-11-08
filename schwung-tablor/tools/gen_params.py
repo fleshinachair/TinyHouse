@@ -98,6 +98,9 @@ def osc(n):
         bend   = pot(f"wt{n}_bend",    f"BND{n}",  f"WT{n} Bend", 64),
         formant= pot(f"wt{n}_formant", f"FRM{n}",  f"WT{n} Formant", 64),
         sync   = pot(f"wt{n}_sync",    f"SYN{n}",  f"WT{n} Sync", 0),
+        shape  = enum(f"wt{n}_shape",  f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic"], 0),
+        sgain  = pot(f"wt{n}_sgain",   f"SGN{n}",  f"WT{n} Shaper Gain", 64),
+        sout   = pot(f"wt{n}_sout",    f"SOT{n}",  f"WT{n} Shaper Out", 64),
     )
 
 # WT3 is deliberately the plain one: a layer, not a third lead. It has no bend
@@ -415,7 +418,7 @@ TONE = dict(
     # tanh, Asym adds a bias (even harmonics, the diode/tube/overdrive family), Hard clips. No page on the device:
     # the converter sets it from a Serum Distortion effect and fits it.
     ddrive = pot("dist_drive", "DDRV", "Distortion Drive", 0),
-    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine"], 0),
+    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine", "Hold"], 0),
     dmix   = pot("dist_mix",   "DMIX", "Distortion Mix",   127),
     # Calibrated distortion (Serum's measured transfer curves; the converter's Serum Distortion translation). On: Drive is the pre-gain G
     # (-16..+54 dB), Mode adds Sine (3), Wet Gain is the curve's output gain K (-36..+12 dB, 64 = -12), Mix is the wet part s with the dry part
@@ -565,6 +568,8 @@ BANKS = [
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[2][k], EQM[3][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[0][k], EQS[1][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[2][k], EQS[3][k])]),
+        row(O1["shape"], O1["sgain"], O1["sout"], O2["shape"], O2["sgain"], O2["sout"]),
+        row(O3["shape"], O3["sgain"], O3["sout"]),
     ]),
 ]
 

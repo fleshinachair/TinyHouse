@@ -774,6 +774,20 @@ static void testFxBuses()
         return 10.0 * std::log10(a / (x.size() / 4) + 1e-9);
     };
     CHECK(serial(3) < serial(0) - 3.0, "Filter 1 into Filter 2 in series is quieter than Filter 1 alone (%.1f vs %.1f dB)", serial(3), serial(0));
+    /* the other way: a source on Filter 2 only, Filter 2's output into Filter 1 filters it again, and the sound is not lost */
+    auto serial2 = [](int out) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_WT1_BAL] = 127;
+        e.pots[TB_P_FLT_FREQ] = 45; e.pots[TB_P_FLT2_FREQ] = 45; e.pots[TB_P_FLT2_TYPE] = 1;
+        e.pots[TB_P_FLT2_OUT] = (float) out;
+        note(e, 72, 100);
+        auto x = render(e, 200);
+        double a = 0;
+        for (size_t i = x.size() / 2; i < x.size(); i += 2) a += (double) x[i] * x[i];
+        return 10.0 * std::log10(a / (x.size() / 4) + 1e-9);
+    };
+    CHECK(serial2(3) < serial2(0) - 3.0 && serial2(3) > -80.0, "Filter 2 into Filter 1 in series is quieter than Filter 2 alone and not silent (%.1f vs %.1f dB)", serial2(3), serial2(0));
 }
 
 int main()

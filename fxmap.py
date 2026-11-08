@@ -87,6 +87,7 @@ def enabled(node: dict) -> bool:
 
 
 WET_DEFAULT = {"Reverb": 25.0, "Delay": 25.0, "Conv": 25.0}
+BODE_IDLE_KEYS = {"kParamWet", "kParamLevelOut", "kParamRange", "kParamSwapAB", "kParamMonoInput", "kParamRetrig", "kParamBeatSync"}
 DRY_KINDS = ("Distortion", "Comp", "Bode", "Filter", "Utils", "Split", "SplitMS")      # effects whose Wet 0 is bypass (not Chorus / Flanger / Phaser: those still add)
 
 
@@ -107,7 +108,7 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
         if not isinstance(node[key].get("plainParams"), dict):
             node[key]["plainParams"] = {}
         pp = node[key]["plainParams"]
-        d = (2.0 * mv - 1.0) if m.get("bipolar") else mv
+        d = (mv - 0.5) if m.get("bipolar") else mv                 # a bipolar route is the source minus one half (probe_macro_bipolar.py)
         pp["kParamWet"] = min(max(pp.get("kParamWet", WET_DEFAULT.get(kind_of(node), 100.0 if kind_of(node) in DRY_KINDS else 0.0)) + m["amount_pct"] * d, 0.0), 100.0)
     return out
 
@@ -188,15 +189,15 @@ NOTE_NOMINAL = 60                   # and the note (middle C, where the engine's
 
 
 def foldable_source(m: dict, macros: list) -> bool:
-    """A route whose source sits at a fixed value in a static preset: a macro at its saved position, velocity at its nominal value, the note at middle C."""
+    """A route whose source sits at a fixed value in a static preset: a macro at its saved position, velocity at its nominal value, the note at middle C, the mod wheel at rest (0)."""
     s = m.get("source", 0)
-    return (25 <= s <= 32 and bool(macros)) or s in (16, 17)
+    return (25 <= s <= 32 and bool(macros)) or s in (1, 16, 17)
 
 
 def macro_value(m: dict, macros: list) -> float:
     """The value 0..1 a macro (or velocity / the note, at their nominal values) gives a route: the source's position, through the route's own curve when it has one."""
     s = m["source"]
-    x = macros[s - 25] / 100.0 if 25 <= s <= 32 else VELOCITY_NOMINAL / 127.0 if s == 16 else NOTE_NOMINAL / 127.0
+    x = macros[s - 25] / 100.0 if 25 <= s <= 32 else VELOCITY_NOMINAL / 127.0 if s == 16 else 0.0 if s == 1 else NOTE_NOMINAL / 127.0
     lut = m.get("curve")
     return float(np.interp(x, np.linspace(0.0, 1.0, len(lut)), lut)) if lut else x
 
@@ -418,9 +419,9 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
                 return None
             continue
         a = m["amount_pct"] / 100.0
-        if 25 <= m["source"] <= 32 and macros:
+        if foldable_source(m, macros):
             mv = macro_value(m, macros)
-            norm += a * ((2.0 * mv - 1.0) if m.get("bipolar") else mv)
+            norm += a * ((mv - 0.5) if m.get("bipolar") else mv)
         elif m["source"] in ENV_SOURCES:
             envs[m["source"] - 2] = envs.get(m["source"] - 2, 0.0) + a * (0.5 if m.get("bipolar") else 1.0)
         elif 6 <= m["source"] <= 15:
@@ -443,7 +444,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
     mods = (ctx or {}).get("mods", [])
     macros = (ctx or {}).get("macros", [])
     fmods = [m for m in mods if m.get("dest_type") == "FXFilter"]
-    dynamic = any(not (25 <= m["source"] <= 32) for m in fmods)
+    dynamic = any(not foldable_source(m, macros) for m in fmods)
     spec = dynamic_filter(nodes, ctx)
     for i, n in enumerate(nodes):
         if kind_of(n) != "Filter" or not enabled(n):
@@ -470,9 +471,9 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             continue
         norm = float(pp.get("kParamFreq", 0.5))
         for m in fmods:
-            if m.get("dest_param") == "kParamFreq" and macros:
+            if m.get("dest_param") == "kParamFreq" and foldable_source(m, macros):
                 mv = macro_value(m, macros)
-                norm += m["amount_pct"] / 100.0 * ((2.0 * mv - 1.0) if m.get("bipolar") else mv)
+                norm += m["amount_pct"] / 100.0 * ((mv - 0.5) if m.get("bipolar") else mv)
         # The stated cutoff is not where the filter is 3 dB down. Measured on Serum (probe_filterfx.py), the -3 dB point as a
         # fraction of the stated cutoff is 0.47 for the 24 dB ladders, 0.53 for 18 dB, 0.67 for 12 dB; the engine's biquad has
         # its -3 dB point at its own frequency, so that is where it goes. The 6 dB/octave default is matched by a critically
@@ -540,6 +541,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
 # BW 2 (the unwritten BW is about 2) and 6.9 at BW 3, which is a biquad with Q = 0.5 + 0.55 BW. Only the two ends of LPHP are carried, and only a filter AFTER
 # the distortion: the engine's EQ comes after it, and a filter before it (PrePost 2) decides what the distortion makes harmonics of, which an EQ cannot do.
 DIST_FILTER_Q_BASE, DIST_FILTER_Q_PER_BW, DIST_FILTER_BW_DEFAULT = 0.5, 0.55, 2.0
+DIST_MORPH_EDGE = 0.03                    # an LPHP this close to an end is that end
 
 
 def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
@@ -557,15 +559,25 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
             pre_post = 1
         if pre_engine and pp.get("kParamWet", 100.0) >= 1.0 and i != dist_chosen(nodes):
             why.append("Distortion filter before the distortion (a second distortion)")
+        if pre_engine and pp.get("kParamWet", 100.0) >= 1.0 and 0.2 < float(pp.get("kParamLPHP", 0.0)) / 100.0 < 0.8 and i == dist_chosen(nodes):
+            why.append("Distortion filter morph before the distortion (the engine's pre-filter has only the two ends)")
         if pre_post != 1 or pp.get("kParamWet", 100.0) < 1.0:
             continue
         t = float(pp.get("kParamLPHP", 0.0)) / 100.0
-        if 0.2 < t < 0.8:
-            why.append(f"Distortion filter morph {t * 100:.0f} % (between low-pass and high-pass)")
-            continue
-        kind = "lp" if t <= 0.2 else "hp"
         fc = serum_filter_hz(float(pp.get("kParamFreq", 0.5)))
         q = DIST_FILTER_Q_BASE + DIST_FILTER_Q_PER_BW * float(pp.get("kParamBW", DIST_FILTER_BW_DEFAULT))
+        if DIST_MORPH_EDGE < t < 1.0 - DIST_MORPH_EDGE:
+            # Between its ends the filter morphs LP -> band-pass -> HP linearly in the three outputs of the state-variable filter, the band-pass being j x / D (its peak is Q): measured
+            # (calibration/probe_dist_morph.py: LPHP 20..80 % within 0.7-1.1 dB rms of the measured transfer, the crossfade of LP and HP 6-17 dB off). Carried as a few EQ bands fitted to that curve.
+            x = FGRID / fc
+            den = 1.0 - x ** 2 + 1j * x / q
+            lp, bp, hp = 1.0 / den, 1j * x / den, -(x ** 2) / den
+            wl, wb, wh = max(1.0 - 2.0 * t, 0.0), (2.0 * t if t <= 0.5 else 2.0 - 2.0 * t), max(2.0 * t - 1.0, 0.0)
+            w = min(max(float(pp.get("kParamWet", 100.0)), 0.0), 100.0) / 100.0
+            target = 20.0 * np.log10(np.maximum(np.abs((1.0 - w) + w * (wl * lp + wb * bp + wh * hp)), 1e-6))
+            out += fit_filter_curve(target, fc, n=3)
+            continue
+        kind = "lp" if t <= 0.5 else "hp"
         if (kind == "lp" and fc > 19000) or (kind == "hp" and fc < 25):
             continue
         w = min(max(float(pp.get("kParamWet", 100.0)), 0.0), 100.0) / 100.0
@@ -585,7 +597,7 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
 # calibrate_dist.py finds the engine drive whose 2nd and 3rd harmonics match). The modes differ in kind as well as in scale: the
 # clippers (SoftClip, HardClip, Overdrive) are clean until the drive passes a threshold, the default and the asymmetric/diode modes
 # distort from the start. An unwritten mode is the default mode; an unwritten drive is 25 (its harmonics match the drive-25 curve).
-# Downsample is a sample-rate reducer, a different effect, and is not carried.
+# Downsample is a sample-and-hold (the engine's Hold mode, dist_params).
 DIST_SCALES_FILE = Path(__file__).resolve().parent / "calibration/dist_scales.json"
 DIST_DEFAULT_DRIVE = 25.0
 # The calibrated law (the engine's dist_cal; calibration/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py). Serum's curve is measured at its
@@ -594,6 +606,7 @@ DIST_DEFAULT_DRIVE = 25.0
 # is a gain on the sum of (LevelOut / 0.5)^2.
 DIST_CURVES_FILE = Path(__file__).resolve().parent / "calibration/dist_curves.json"
 DIST_PROBE_GAIN = 10 ** (-2.4186 / 20)
+DOWNSAMPLE_HOLD_PER_DRIVE2 = 0.0088          # Serum's Downsample: hold length = 1 + 0.0088 Drive^2 samples (Drive in percent)
 DIST_LEVELOUT_DEFAULT = 0.5
 
 
@@ -610,7 +623,7 @@ def dist_candidates(nodes: list[dict]) -> list:
             continue
         pp = plain(n)
         wet = float(pp.get("kParamWet", 100.0))
-        if wet < 1.0 or str(pp.get("kParamMode", "default")) == "kDownsample":
+        if wet < 1.0:
             continue
         cands.append((wet / 100.0 * float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) / 100.0, -i, n))
     return cands
@@ -652,13 +665,21 @@ def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
     # soft clip at 75); a first node that is off ended the search.
     cands = dist_candidates(nodes)
     if not cands:
-        down = [n for i, n in enumerate(nodes) if kind_of(n) == "Distortion" and enabled(n) and i not in inside and str(plain(n).get("kParamMode")) == "kDownsample" and plain(n).get("kParamWet", 100.0) >= 1.0]
-        return {}, (["Distortion mode Downsample"] if down else [])
+        return {}, []
     for _, _, n in [max(cands, key=lambda c: (c[0], c[1]))]:
         pp = plain(n)
         mode = str(pp.get("kParamMode", "default"))
         wet = float(pp.get("kParamWet", 100.0))
         drive = float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE))
+        if mode == "kDownsample":
+            # A sample-and-hold of N samples, N = 1 + 0.0088 Drive^2 (calibration/probe_dist_downsample.py: images at 44100/N +- f0 for N = 2, 5, 9, 15, 23, 33, 44, 57, 72, 89 at Drive 10..100;
+            # none at 0), the held level unchanged. The engine's Hold mode takes N - 1 on its Drive pot; the curve's output gain is 0 dB, LevelOut and Wet as for the other modes.
+            hold = int(min(max(round(1.0 + DOWNSAMPLE_HOLD_PER_DRIVE2 * drive * drive), 1), 128))
+            lo = float(pp.get("kParamLevelOut", DIST_LEVELOUT_DEFAULT))
+            lv_db = 40.0 * math.log10(max(lo, 1e-3) / DIST_LEVELOUT_DEFAULT)
+            P = {"dist_cal": 1, "dist_mode": 4, "dist_drive": hold - 1, "dist_out": int(round(36.0 * 127.0 / 48.0)),
+                 "dist_level": int(round(min(max(64.0 + lv_db * 64.0 / 24.0, 0), 127))), "dist_mix": int(round(min(max(127.0 * smoothstep(wet / 100.0), 0), 127)))}
+            return P, [f"Distortion carried: Serum Downsample drive {drive:.0f} %, wet {wet:.0f} % -> engine hold of {hold} samples"]
         curves = json.loads(DIST_CURVES_FILE.read_text(encoding="utf-8"))
         cv = curves.get(mode) or curves["default"]
         if len(cv["drives"]) >= 2:
@@ -755,7 +776,7 @@ def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | No
     width, mono, why = 1.0, None, []
     inside = branch_nodes(nodes)
     mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils"]
-    dynamic = any(not (25 <= m["source"] <= 32) for m in mods)
+    dynamic = any(not foldable_source(m, (ctx or {}).get("macros", [])) for m in mods)
     for i, n in enumerate(nodes):
         if kind_of(n) != "Utils" or not enabled(n):
             continue
@@ -790,7 +811,7 @@ def utils_filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None 
         if kind_of(n) != "Utils" or not enabled(n) or i in inside:
             continue
         pp = plain(n)
-        if any(m["dest_id"] == i and m["dest_param"] in ("kParamHPF", "kParamLPF") and not 25 <= m["source"] <= 32 for m in mods):
+        if any(m["dest_id"] == i and m["dest_param"] in ("kParamHPF", "kParamLPF") and not foldable_source(m, (ctx or {}).get("macros", [])) for m in mods):
             why.append("Utils HPF / LPF moved by a route")
             continue
         handled.add(i)
@@ -1252,17 +1273,26 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # A Distortion / Comp / Bode / Filter / Utils / Split node with a stored Wet under 1 % and no envelope / LFO / velocity route to its Wet passes the signal untouched
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
     wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros") or [None])}
-    dry = lambda x: kind_of(x) in DRY_KINDS and float(plain(x).get("kParamWet", 100.0)) < 1.0 and "FX" + kind_of(x) not in wet_mod
+    # A Bode that stores nothing that shifts, delays or blurs (no Shift, Feedback, Blur, DelayTime, OutputMix or width: a stored LevelOut / Range / sync flag only) is a frequency shift of 0 Hz
+    # through an empty delay: transparent (calibration/probe_bode_default.py, a Bode with no stored params: band differences +-0.1 dB, the render's own floor).
+    bode_idle = lambda x: kind_of(x) == "Bode" and set(plain(x)) <= BODE_IDLE_KEYS
+    dry = lambda x: kind_of(x) in DRY_KINDS and (float(plain(x).get("kParamWet", 100.0)) < 1.0 or bode_idle(x)) and "FX" + kind_of(x) not in wet_mod
     # A SplitMS whose branches hold nothing but EQs is carried (their bands are the engine's mid / side EQs: map_eq); one with another effect in a branch is not.
     ms_idx = ms_branches(nodes)
-    ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) for j in ms_idx) and all(
+    ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) or dry(nodes[j]) for j in ms_idx) and all(
         kind_of(nodes[j]) != "Split" or not enabled(nodes[j]) for j in branch_nodes(nodes))
     # A Utils is carried when its width / mono-below went to the master stage and its HPF / LPF to the EQ (utils_filter_bands); LevelOut is a uniform gain (the loudness fit),
     # Balance (a pan, 6 factory presets) is not carried.
     utils_ok = lambda i, x: i in info.get("filter_fx_handled", ()) and not uwhy and abs(float(plain(x).get("kParamBalance", 0.0))) < 1.0
+    # A Split / SplitMS whose branches hold nothing that does anything (every module off or dry) is transparent: a frequency split with dry modules in either branch, or with none, is
+    # within 0.1 dB of no split (calibration/probe_split_plain.py; probe_splitms.py found the same for the mid / side split).
+    def split_clear(i, x):
+        pp = plain(x)
+        k = int(round(pp.get("kParamModuleCount1", 0))) + int(round(pp.get("kParamModuleCount2", 0)))
+        return all(not enabled(nodes[j]) or dry(nodes[j]) for j in range(i + 1, min(i + 1 + k, len(nodes))))
     ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x) and not dry(x)
                       and not (kind_of(x) == "Utils" and utils_ok(i, x)) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
-                      and not (kind_of(x) == "SplitMS" and ms_plain)})
+                      and not (kind_of(x) == "SplitMS" and ms_plain) and not (kind_of(x) in ("Split", "SplitMS") and split_clear(i, x))})
     dyn_i = (dynamic_filter(nodes, ctx) or {}).get("index")
     if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) and i not in info.get("filter_fx_handled", ()) and i != dyn_i for i, x in enumerate(nodes)):
         ignored = sorted(set(ignored) | {"Filter"})

@@ -848,6 +848,30 @@ static void testDist()
     const auto clipped = cal(30.0f, 0.3f, 1.0f, 1.0f, 0, 0.3f), hp = preCal(2, 8.0f * f0), lp = preCal(1, 8.0f * f0);
     CHECK(goertzelDb(hp, f0) < goertzelDb(clipped, f0) - 15.0, "a pre-filter high-pass above the tone pulls the tone out of the curve (%.1f dB down)", goertzelDb(clipped, f0) - goertzelDb(hp, f0));
     CHECK(std::fabs(goertzelDb(lp, f0) - goertzelDb(clipped, f0)) < 0.5, "a pre-filter low-pass above the tone leaves it alone (%.2f dB)", goertzelDb(lp, f0) - goertzelDb(clipped, f0));
+    /* mode 4, Serum's Downsample: a sample-and-hold of distHold samples. A hold of 1 changes nothing (the stage's 8 Hz DC filter moves a 2 kHz tone by well under 0.2 %), and a longer
+     * hold changes the output about once per hold (a tone of SR / (4 hold) advances a quarter turn per hold, so every held value differs from the last) */
+    for (int hold : { 1, 5, 23 }) {
+        FxSettings st;
+        st.distCal = true; st.distGain = 1.0f; st.distOut = 1.0f; st.distLevel = 1.0f; st.distMix = 1.0f; st.distMode = 4; st.distHold = hold;
+        Fx fx(SR);
+        fx.set(st);
+        const int n = 8192;
+        const float hz = hold == 1 ? 2000.0f : (float) SR / (4.0f * (float) hold);
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = 0.2f * std::sin(6.283185307f * hz * (float) i / (float) SR);
+        const std::vector<float> in = L;
+        run(fx, L, R);
+        int bad = 0, steps = 0;
+        for (int i = n / 2; i < n - 1; i++) {
+            if (hold == 1 && std::fabs(L[(size_t) i] - in[(size_t) i]) > 2e-3f) bad++;
+            if (std::fabs(L[(size_t) i + 1] - L[(size_t) i]) > 2e-3f) steps++;
+        }
+        if (hold == 1) CHECK(bad == 0, "a hold of 1 sample passes the signal (%d samples differ)", bad);
+        else {
+            const int span = n - 1 - n / 2;
+            CHECK(std::abs(steps - span / hold) <= span / hold / 10 + 2, "a hold of %d changes the output once per %d samples (%d changes in %d)", hold, hold, steps, span);
+        }
+    }
 }
 
 /* The Filter FX: a filter right after the distortion, its cutoff set from outside each block. */

@@ -68,6 +68,9 @@ public:
         float asym      = 0.0f;
         float fold      = 0.0f;
         float sync      = 0.0f;   /* 0..1 hard sync amount */
+        /* Serum's Dist* oscillator warps: a static shaper out = shapeOut f(shapeGain x) of every stream's sample (calibration/fit_warp_dist.py) */
+        int   shape     = 0;      /* 0 off, 2 hard clip, 3 softsign, 4 cubic soft clip (1 is unused: std::tanh costs 7x the others per sample) */
+        float shapeGain = 1.0f, shapeOut = 1.0f;
     };
 
     void setSampleRate(double sr)
@@ -160,6 +163,16 @@ private:
 
     inline void postProcess(const Params &p, float &v) const
     {
+        if (p.shape >= 2) {
+            const float u = p.shapeGain * v;
+            float f;
+            switch (p.shape) {
+            case 2:  f = std::min(std::max(u, -1.0f), 1.0f); break;
+            case 3:  f = u / (1.0f + std::fabs(u)); break;
+            default: { const float c = std::min(std::max(u, -1.0f), 1.0f); f = 1.5f * (c - c * c * c * (1.0f / 3.0f)); break; }
+            }
+            v = p.shapeOut * f;
+        }
         if (p.asym > 0.0f)
             v = math::lerp(v, math::pow4(v - 1.0f) * -1.0f + 1.0f, math::pow2(p.asym));
         if (p.fold > 0.0f) {
@@ -369,6 +382,8 @@ struct VoicedWTParams {
     /* WT params forwarded to every voice */
     float position = 0.0f, bend = 0.0f, formant = 0.0f, asym = 0.0f, fold = 0.0f;
     float sync = 0.0f;
+    int   shape = 0;
+    float shapeGain = 1.0f, shapeOut = 1.0f;
 };
 
 /* The stack is DC-blocked ONCE, on its own buffer, not by each stream.
@@ -433,6 +448,7 @@ private:
         WTOscillator::Params p;
         p.position = vp.position; p.bend = vp.bend; p.formant = vp.formant;
         p.asym = vp.asym; p.fold = vp.fold; p.sync = vp.sync;
+        p.shape = vp.shape; p.shapeGain = vp.shapeGain; p.shapeOut = vp.shapeOut;
 
         const int voices = std::clamp(vp.voices, 1, (int) oscs.size());
         if (voices == 1) {

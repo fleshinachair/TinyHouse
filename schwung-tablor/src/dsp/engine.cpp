@@ -257,7 +257,8 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.hydDetune = pot01(pots[TB_P_HYD_DET]);
     s.hydRate = pot01(pots[TB_P_HYD_RATE]);
     s.hydWet = all ? pot01(pots[TB_P_HYD_WET]) : 0.0f;
-    s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 3);
+    s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 4);
+    s.distHold = 1 + (int) pots[TB_P_DIST_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one (1..128 samples; calibration/probe_dist_downsample.py) */
     s.distCal = pots[TB_P_DIST_CAL] >= 1.0f;
     if (s.distCal) {
         /* Drive is the pre-gain in dB (-16..+54), Wet Gain the curve's output gain (-36..+12 dB), Level a gain on the sum (-24..+24 dB). Off with FX Enable. */

@@ -340,17 +340,6 @@
   "limiter_loss_db": -0.1713688357403882,
   "kept": true
  },
- "Pad - Origins": {
-  "sig": "0e12b775c2b6cae91bf850259d6dfeb9",
-  "volume": 39,
-  "start_volume": 65,
-  "start_rms_db": -7.6182918089190865,
-  "rms_db": -15.834833437954202,
-  "serum_rms_db": -15.93647169461857,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.19223503291228639,
-  "kept": true
- },
  "Pad - Reiny": {
   "sig": "9f9fe6cacab08e8e1a1b091b88f0165f",
   "volume": 65,
@@ -648,17 +637,6 @@
   "limiter_loss_db": 0.22377058104652292,
   "kept": true
  },
- "Bass - Black Out": {
-  "sig": "4c5cbae2a061fec8189072161983cd6f",
-  "volume": 42,
-  "start_volume": 35,
-  "start_rms_db": -10.609508061722607,
-  "rms_db": -7.441817711563941,
-  "serum_rms_db": -7.435136044418215,
-  "shortfall_db": 0.0066816671457257115,
-  "limiter_loss_db": -0.024291855059546563,
-  "kept": true
- },
  "Lead - Other Side": {
   "sig": "92ff82d473b2fe46eee1618827f05cc7",
   "volume": 51,
@@ -767,6 +745,28 @@
   "serum_rms_db": -24.38574891320515,
   "shortfall_db": 0.0,
   "limiter_loss_db": -0.37940115589541534,
+  "kept": true
+ },
+ "Bass - Black Out": {
+  "sig": "7654837989d01611fdf84b2ff256793a",
+  "volume": 41,
+  "start_volume": 35,
+  "start_rms_db": -9.249388910785267,
+  "rms_db": -6.8964523324062,
+  "serum_rms_db": -7.435136044418215,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.11531719376346139,
+  "kept": true
+ },
+ "Pad - Origins": {
+  "sig": "8ff2f237a9eacae71f4b3eac7ea0e3ca",
+  "volume": 37,
+  "start_volume": 65,
+  "start_rms_db": -6.617562407568476,
+  "rms_db": -15.679850398548929,
+  "serum_rms_db": -15.93647169461857,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.020268636694339648,
   "kept": true
  }
 }

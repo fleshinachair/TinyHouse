@@ -367,6 +367,23 @@ public:
          * shapes, and again coming out, so a resonant peak rounds off instead of
          * ringing past everything. The gain ramps across the block because a knob
          * step would otherwise be a level step. */
+        /* Filter 2 in series into Filter 1 (Serum's routing slot 6 sent to the other filter): Filter 2 runs first and its output is added to Filter 1's input. */
+        const bool f2First = (int) P[TB_P_FLT2_OUT] == 3;
+        auto runF2 = [&]() {
+            const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
+            if (driving2) driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget);
+            runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
+            if (driving2) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
+            if (P[TB_P_FLT2_GAIN] > 0.0f) {
+                const float g = std::pow(10.0f, P[TB_P_FLT2_GAIN] / 127.0f * 24.0f / 20.0f);
+                for (int i = 0; i < n; i++) { pre2L[i] *= g; pre2R[i] *= g; }
+            }
+        };
+        if (f2First) {
+            usesF2 = true;
+            runF2();
+            for (int i = 0; i < n; i++) { preL[i] += pre2L[i]; preR[i] += pre2R[i]; }
+        }
         const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
         if (driving) driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget);
         runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
@@ -378,19 +395,12 @@ public:
         driveGain = driveGainTarget;
         driveMix = driveMixTarget;
 
-        if ((int) P[TB_P_FLT1_OUT] == 3) {                          /* Filter 1 in series into Filter 2 */
+        if ((int) P[TB_P_FLT1_OUT] == 3 && !f2First) {             /* Filter 1 in series into Filter 2 */
             usesF2 = true;
             for (int i = 0; i < n; i++) { pre2L[i] += preL[i]; pre2R[i] += preR[i]; }
         }
         if (usesF2) {
-            const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
-            if (driving2) driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget);
-            runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
-            if (driving2) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
-            if (P[TB_P_FLT2_GAIN] > 0.0f) {
-                const float g = std::pow(10.0f, P[TB_P_FLT2_GAIN] / 127.0f * 24.0f / 20.0f);
-                for (int i = 0; i < n; i++) { pre2L[i] *= g; pre2R[i] *= g; }
-            }
+            if (!f2First) runF2();
             filterOut(pre2L, pre2R, TB_P_FLT2_OUT, TB_P_FLT2_BUS1);
         } else {
             fltPrev2 = -1.0f;                                       /* a filter that was not run restarts from its target */
@@ -539,18 +549,19 @@ private:
         static const struct OscKeys {
             int pos, level, tune, uni, det, spread, pan, sync, bend, form;
             int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync;
+            int shape, sgain, sout;
         } kOsc[kOscs] = {
             { TB_P_WT1_POS, TB_P_WT1_LEVEL, TB_P_WT1_TUNE, TB_P_WT1_UNI, TB_P_WT1_DETUNE,
               TB_P_WT1_SPREAD, TB_P_WT1_PAN, TB_P_WT1_SYNC, TB_P_WT1_BEND, TB_P_WT1_FORMANT,
               MD_WT1_POS, MD_WT1_LEVEL, MD_WT1_TUNE, MD_WT1_BEND, MD_WT1_FORMANT, MD_WT1_PAN,
-              MD_WT1_SYNC },
+              MD_WT1_SYNC, TB_P_WT1_SHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT },
             { TB_P_WT2_POS, TB_P_WT2_LEVEL, TB_P_WT2_TUNE, TB_P_WT2_UNI, TB_P_WT2_DETUNE,
               TB_P_WT2_SPREAD, TB_P_WT2_PAN, TB_P_WT2_SYNC, TB_P_WT2_BEND, TB_P_WT2_FORMANT,
               MD_WT2_POS, MD_WT2_LEVEL, MD_WT2_TUNE, MD_WT2_BEND, MD_WT2_FORMANT, MD_WT2_PAN,
-              MD_WT2_SYNC },
+              MD_WT2_SYNC, TB_P_WT2_SHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT },
             { TB_P_WT3_POS, TB_P_WT3_LEVEL, TB_P_WT3_TUNE, TB_P_WT3_UNI, TB_P_WT3_DETUNE,
               TB_P_WT3_SPREAD, TB_P_WT3_PAN, TB_P_WT3_SYNC, -1, -1,
-              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC },
+              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, TB_P_WT3_SHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT },
         };
 
         int unison[kOscs];
@@ -574,6 +585,10 @@ private:
                        : std::clamp(potBipolar(P[k.bend]) + modOff[k.dBnd], -1.0f, 1.0f);
             v.formant  = k.form < 0 ? 0.0f
                        : std::clamp(potBipolar(P[k.form]) + modOff[k.dFrm], -1.0f, 1.0f);
+            /* a Dist* oscillator warp: the shaper's pre-gain 0.02..300 and output gain 0.5..60, both log over the 0..127 pot */
+            v.shape = std::clamp((int) P[k.shape], 0, 4);
+            v.shapeGain = 0.02f * std::pow(15000.0f, P[k.sgain] / 127.0f);
+            v.shapeOut = 0.5f * std::pow(120.0f, P[k.sout] / 127.0f);
             oscGain[o] = v.gain;
 
             /* An oscillator counts from its pot and its routing, not its live

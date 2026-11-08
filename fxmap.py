@@ -96,7 +96,7 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
     FX - Church, PD - Butterbrot). Envelope and LFO routes to a Wet are dynamic and left alone."""
     out = copy.deepcopy(nodes)
     for m in mods or []:
-        if not (m.get("dest_type", "").startswith("FX") and m.get("dest_param") == "kParamWet" and 25 <= m["source"] <= 32 and macros):
+        if not (m.get("dest_type", "").startswith("FX") and m.get("dest_param") == "kParamWet" and foldable_source(m, macros)):
             continue
         i = m.get("dest_id")
         if not isinstance(i, int) or not 0 <= i < len(out) or kind_of(out[i]) != m["dest_type"][2:]:
@@ -128,7 +128,7 @@ def fold_macro_knobs(nodes: list[dict], mods: list[dict], macros: list[float]) -
     """The rack with the macros that drive an EQ band's gain or frequency, or a Distortion's drive, applied at their saved position."""
     out = copy.deepcopy(nodes)
     for m in mods or []:
-        if m.get("dest_param") not in FOLDED_KNOBS.get(m.get("dest_type"), ()) or not (25 <= m["source"] <= 32 and macros):
+        if m.get("dest_param") not in FOLDED_KNOBS.get(m.get("dest_type"), ()) or not foldable_source(m, macros):
             continue
         i = m.get("dest_id")
         kind = m["dest_type"][2:]
@@ -167,9 +167,20 @@ def reso_from_q(kind: str, q: float) -> float:
     return float(np.interp(math.log(max(q, 1e-3)), np.log(tab), RESO))
 
 
+VELOCITY_NOMINAL = 100              # the velocity a static preset's velocity routes are taken at; the same value as deephouse2move.VELOCITY_NOMINAL (the engine's vca_vel default)
+NOTE_NOMINAL = 60                   # and the note (middle C, where the engine's key tracking pivots)
+
+
+def foldable_source(m: dict, macros: list) -> bool:
+    """A route whose source sits at a fixed value in a static preset: a macro at its saved position, velocity at its nominal value, the note at middle C."""
+    s = m.get("source", 0)
+    return (25 <= s <= 32 and bool(macros)) or s in (16, 17)
+
+
 def macro_value(m: dict, macros: list) -> float:
-    """The value 0..1 a macro gives a route: the macro's position, through the route's own curve when it has one."""
-    x = macros[m["source"] - 25] / 100.0
+    """The value 0..1 a macro (or velocity / the note, at their nominal values) gives a route: the source's position, through the route's own curve when it has one."""
+    s = m["source"]
+    x = macros[s - 25] / 100.0 if 25 <= s <= 32 else VELOCITY_NOMINAL / 127.0 if s == 16 else NOTE_NOMINAL / 127.0
     lut = m.get("curve")
     return float(np.interp(x, np.linspace(0.0, 1.0, len(lut)), lut)) if lut else x
 
@@ -1127,7 +1138,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     carried_utils = (width != 1.0 or mono is not None) and not uwhy
     # A Distortion / Comp / Bode / Filter / Utils / Split node with a stored Wet under 1 % and no envelope / LFO / velocity route to its Wet passes the signal untouched
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
-    wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not 25 <= m.get("source", 0) <= 32}
+    wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros") or [None])}
     dry = lambda x: kind_of(x) in DRY_KINDS and float(plain(x).get("kParamWet", 100.0)) < 1.0 and "FX" + kind_of(x) not in wet_mod
     # A SplitMS whose branches hold nothing but EQs is carried (their bands are the engine's mid / side EQs: map_eq); one with another effect in a branch is not.
     ms_idx = ms_branches(nodes)

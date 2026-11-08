@@ -302,7 +302,7 @@ def physical(tree: dict, header: dict) -> dict:
     return {
         "name": header.get("presetName", ""), "tags": header.get("tags", []),
         "serum_version": header.get("productVersion"),
-        "mono": bool(g.get("kParamMonoToggle", 0)), "legato": bool(g.get("kParamLegato", 0)),
+        "mono": bool(g.get("kParamMonoToggle", 0)) or g.get("kParamPolyCount") == 1.0, "legato": bool(g.get("kParamLegato", 0)),
         "master": g.get("kParamMasterVolume"),
         "porta_s": g.get("kParamPortamentoTime") if (g.get("kParamPortaAlways") or g.get("kParamMonoToggle")) else None,
         "oscs": oscs,

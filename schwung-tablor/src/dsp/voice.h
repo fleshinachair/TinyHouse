@@ -470,8 +470,13 @@ private:
                 modEnv[i].setRelease(potEnvTime(P[k[i].r]));
                 if (blockSize > 0) modEnv[i].process(blockSize);
                 const int dst = (int) P[k[i].dst];
-                if (dst > MD_NONE && dst < MD_COUNT)
-                    modOff[dst] += modEnv[i].getOutput() * potBipolar(P[k[i].amt]);
+                if (dst > MD_NONE && dst < MD_COUNT) {
+                    const float e = modEnv[i].getOutput() * potBipolar(P[k[i].amt]);
+                    /* Serum adds an envelope route to the oscillator volume KNOB and the knob's taper (gain = knob^2) comes after, as for the LFOs:
+                     * from volume 0 a route of depth a gives gain a^2, not a (calibration/probe_noise_route.py: noise slot and WT oscillator, 12 dB per halving of the depth) */
+                    if (dst == MD_WT1_LEVEL || dst == MD_WT2_LEVEL || dst == MD_WT3_LEVEL || dst == MD_SUB_LEVEL || dst == MD_NOISE_LEVEL) lfoLvl[dst] += e;
+                    else modOff[dst] += e;
+                }
             }
         }
 
@@ -497,8 +502,8 @@ private:
                     const float v = P[TB_P_LR1_BIP + r * stride] >= 1.0f ? 2.0f * u - 1.0f : u;
                     const float amt = v * potBipolar(P[TB_P_LR1_AMT + r * stride]);
                     /* Serum moves the volume KNOB, and the knob's taper comes after: a level route is added to the knob
-                     * position here and squared with it below. The spare envelopes' level routes are in the gain
-                     * domain (their calibration), so this is only for the LFOs. */
+                     * position here and squared with it below. The spare envelopes' level routes are added to the knob
+                     * the same way (above). */
                     if (dst == MD_WT1_LEVEL || dst == MD_WT2_LEVEL || dst == MD_WT3_LEVEL || dst == MD_SUB_LEVEL || dst == MD_NOISE_LEVEL)
                         lfoLvl[dst] += amt;
                     else if (dst == MD_WT1_TUNE || dst == MD_WT2_TUNE)

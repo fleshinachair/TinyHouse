@@ -244,6 +244,24 @@ def physical(tree: dict, header: dict) -> dict:
                 b = int(m["dest_param"][-6]) - 1
                 bus[m["dest_id"]][b] = _clamp(bus[m["dest_id"]][b] + m["amount_pct"] * ((x - 0.5) if m["bipolar"] else x), 0.0, 100.0)
     flt2 = _pp(tree.get("VoiceFilter1", {}))
+    # A voice filter's Wet (percent, an unwritten one is fully wet) is a dry / wet mix of the filter: at 0 the signal goes past it untouched (calibration scratch
+    # vf_wet_ab.py: Serum with such a filter on against the same render with it disabled, octave bands within 2 dB; the Factory's "filter on / off" macros store Wet 0
+    # and a +100 % macro route). The routes into it are folded at the saved macro position, the nominal velocity and note, and the mod wheel at 0; an envelope or LFO route
+    # leaves the filter as it is (dynamic). Only a filter whose Wet ends under 1 % and stays there is treated as off.
+    def vf_wet(i, node):
+        wet, dynamic = float(node.get("kParamWet", 100.0)), False
+        for m in mods:
+            if m["dest_type"] == "VoiceFilter" and m["dest_param"] == "kParamWet" and m["dest_id"] == i:
+                src = m["source"]
+                x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else 0.0 if src == 1 else None)
+                if x is None:
+                    dynamic = True
+                else:
+                    wet += m["amount_pct"] * ((x - 0.5) if m["bipolar"] else x)
+        return _clamp(wet, 0.0, 100.0), dynamic
+    wet1, dyn1 = vf_wet(0, flt)
+    wet2, dyn2 = vf_wet(1, flt2)
+    off1, off2 = wet1 < 1.0 and not dyn1, wet2 < 1.0 and not dyn2
     fx = [k[2:] for r in (tree.get("FXRack0", {}).get("FX", []) or [])
           for k in r if k.startswith("FX")]
     # The main rack's nodes as stored, for fxmap.py. The two bus racks are the sources' sends (bus_nodes below).
@@ -269,7 +287,7 @@ def physical(tree: dict, header: dict) -> dict:
                   "type": (_pp(noise_node.get("NoiseOsc3", {})) or {}).get("kParamNoiseType") if isinstance(noise_node.get("NoiseOsc3"), dict) else None,
                   "color": (_pp(noise_node.get("NoiseOsc3", {})) or {}).get("kParamColor") if isinstance(noise_node.get("NoiseOsc3"), dict) else None,
                   "level": _pp(noise_node).get("kParamVolume", DEFAULTS["osc_level"])},
-        "filter": {"enabled": bool(flt.get("kParamEnable", 0)),
+        "filter": {"enabled": bool(flt.get("kParamEnable", 0)) and not off1, "wet": wet1,
                    "model": flt.get("kParamType", DEFAULT_VOICE_FILTER),
                    "cutoff_norm": flt.get("kParamFreq", DEFAULTS["cutoff"]),
                    "cutoff_hz": serum_cutoff_hz(flt.get("kParamFreq", DEFAULTS["cutoff"])),
@@ -277,8 +295,8 @@ def physical(tree: dict, header: dict) -> dict:
                    "drive_pct": flt.get("kParamDrive", 0.0),
                    "keytrack": flt.get("kParamKeyTrack", 0.0),
                    "var": flt.get("kParamVar")},
-        "filter2_enabled": bool(flt2.get("kParamEnable", 0)),
-        "filter2": {"enabled": bool(flt2.get("kParamEnable", 0)),
+        "filter2_enabled": bool(flt2.get("kParamEnable", 0)) and not off2,
+        "filter2": {"enabled": bool(flt2.get("kParamEnable", 0)) and not off2, "wet": wet2,
                     "model": flt2.get("kParamType", DEFAULT_VOICE_FILTER),
                     "cutoff_norm": flt2.get("kParamFreq", DEFAULTS["cutoff"]),
                     "reso_pct": flt2.get("kParamReso", DEFAULTS["reso"]),
@@ -1132,6 +1150,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     f = ph["filter"]
     # Each source goes where Serum sends it: through the filter or direct to the amp (the engine's per-source Route).
     bypassed = f["enabled"] and through == 0 and around > 0
+    for fl, label in ((f, "filter"), (ph["filter2"], "filter 2")):
+        if fl["enabled"] and 1.0 <= fl.get("wet", 100.0) < 99.0:
+            appr.append(f"{label} Wet {fl['wet']:.0f} %: Serum mixes the unfiltered signal back in, the engine's voice filter is fully wet")
     if bypassed:
         appr.append("every source bypasses the filter in Serum, so Tablor's is left open")
     for oid, slot in slot_of.items():

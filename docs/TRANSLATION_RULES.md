@@ -309,3 +309,12 @@ Banks: a bank is a folder under `/data/UserData/schwung/presets/tinyhouse/`; loo
 - **Lead - Other Side without its two interim hand values** (unison 7/90/64 on osc A and Filter 2 at 74; `Hyper` + the aux-curve / own-envelope Filter 2 replace them): demo MIDI, engine - Serum, octave-band rms 4.7 (converter before) / 4.9 (interim) -> 3.4 dB, level +0.2 dB,
   fast envelope flutter (500-5000 Hz, 4 ms) 0.77 (before) / 1.83 (interim) -> 1.65 against Serum's 1.73. Lead - Rollin (mono fix + Hyper): 11.4 -> 4.9 dB, flutter 0.82 -> 1.09 (Serum 0.92), loudness std of the 100-500 / 500-2k / 2-8 kHz bands 2.8 / 1.8 / 2.1 ->
   4.8 / 3.2 / 2.4 dB (Serum 4.0 / 3.5 / 2.9). Not solved: Rollin's 31 / 62 Hz bands +7 / +7 dB over Serum's (they are -8 / -2 with the stage off; hard clipping of the beating voices makes slow DC wobble) and 4-16 kHz +8 / +6.
+
+## Added 2026-11-08: SplitMS branches, Bode defaults
+
+- **SplitMS** (`calibration/probe_splitms.py`, a wide saw through [SplitMS, EQ, EQ, EQ] with +12 dB peaks at 500 / 1000 / 2000 Hz, mid and side measured separately): the modules after the node are ModuleCount1 for the FIRST branch = MID, then ModuleCount2 for the second = SIDE,
+  then the master; **both counts are 0 when unwritten** (not 1: with only ModuleCount2 = 1 the first EQ acts on the side alone and the other two on the whole signal; counts 2 / 1: A and B on the mid, C on the side; counts 1 / 2: A mid, B and C side; counts
+  unwritten: all three on the master). The converter had taken an unwritten count as 1, so Lead - Other Side's second EQ (+12 dB at 13.5 kHz, +4.3 dB low) was dropped as 'inside the branch'; it is a master EQ (disabling it in Serum: -4 dB at 125-500 Hz, -11 dB at 8-16 kHz on mid and side alike) and its first
+  EQ is a SIDE-only EQ (disabling it: side +6 dB at 125 Hz, -5 / -6 dB at 4-16 kHz, mid unchanged). A split with transparent branches is transparent (level +0.1 dB, bands within 0.3).
+- **Bode** (`calibration/probe_bode_default.py`, saw through the node against none): a Bode with no stored params is a no-op (band differences +-0.1 dB, the same as the render against itself), so is one with OutputMix 0.32 (Origins); NOTSOBAD's (OutputMix 26.7, Blur 42) takes
+  up to 2.5 dB off 4-16 kHz and 7 dB more at 60-120 Hz, HotLap's (Blur 100, Feedback 14, no mix) -3.5 dB at 8-16 kHz and +11 dB at 60-120 Hz. Not yet used by the converter.

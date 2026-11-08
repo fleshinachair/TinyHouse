@@ -162,9 +162,10 @@ def biquad_db(kind: str, fc: float, gain_db: float, q: float, f) -> np.ndarray:
 
 def branch_nodes(nodes: list[dict]) -> set[int]:
     """Indices of the nodes that sit inside a Split / SplitMS branch rather than on the master
-    signal. After a split node come ModuleCount1 modules for the first branch and ModuleCount2
-    for the second (each 1 when unwritten); everything after those is back on the master. An
-    EQ inside a branch shapes only that half of the signal, so it is not a master EQ."""
+    signal. After a split node come ModuleCount1 modules for the first branch (Mid for a SplitMS) and ModuleCount2
+    for the second (Side), each 0 when unwritten (calibration/probe_splitms.py: with three EQs after a SplitMS that stores only ModuleCount2 = 1,
+    the first EQ acted on the side alone and the other two on the whole signal); everything after those is back on the master. An
+    EQ inside a branch shapes only that part of the signal, so it is not a master EQ."""
     inside, skip = set(), 0
     for i, n in enumerate(nodes):
         if skip > 0:
@@ -173,7 +174,7 @@ def branch_nodes(nodes: list[dict]) -> set[int]:
             continue
         if kind_of(n) in ("Split", "SplitMS") and enabled(n):
             pp = plain(n)
-            skip = int(round(pp.get("kParamModuleCount1", 1))) + int(round(pp.get("kParamModuleCount2", 1)))
+            skip = int(round(pp.get("kParamModuleCount1", 0))) + int(round(pp.get("kParamModuleCount2", 0)))
     return inside
 
 

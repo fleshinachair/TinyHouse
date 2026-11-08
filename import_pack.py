@@ -207,7 +207,11 @@ def main():
                 continue
             it = {"name": name, "header": header, "tree": tree, "notes": notes, "refs": refs, "end": F.sounding_end(refs)}
             C.mapped = lambda *args, _m=m, **kw: copy.deepcopy(_m)         # fit_item maps the preset itself; hand it ours
-            state = finalize_level(m, it, serum, a.bank)
+            try:
+                state = finalize_level(m, it, serum, a.bank)
+            except RuntimeError as e:                # the voice-only reference (effects stripped) can be silent for a preset whose sound is its effects
+                skipped.append((name, [f"Serum made no sound for the voice reference: {str(e)[:50]}"]))
+                continue
             gap, berr = quality(state, it)
             if abs(gap) > a.max_level_gap or berr > a.max_band_rms:
                 skipped.append((name, [f"too far from Serum after the fit: level {gap:+.1f} dB, octave bands {berr:.1f} dB rms"]))

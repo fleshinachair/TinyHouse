@@ -200,8 +200,9 @@ for _k, _n in (("wt1", "WT1"), ("wt2", "WT2"), ("wt3", "WT3"), ("sub", "Sub"), (
         BUSES["%s_%d" % (_k, _b)] = pot("%s_bus%d" % (_k, _b), "%s%d" % (_k[:2].upper() + _k[-1:].upper(), _b), "%s Bus %d" % (_n, _b), 0)
 # Serum's Sample and Multisample oscillators: one sample set (a .tbs file made by sample_export.py), played from the keyboard at its
 # regions' pitch, with its own level, tuning and routing. Set by the converter; no page on the device.
-# Serum's HyperD (Hyper/Dimension) AHEAD of the distortion: Voices detuned copies of the signal, each on a delay line that a smooth random LFO moves, mixed with the dry
-# signal by Wet. Detune scales how far the delay moves (the pitch deviation grows with it), Rate how fast. The effect block's own Width stage is the HyperD that follows the
+# Serum's HyperD (Hyper/Dimension) AHEAD of the distortion: Voices delayed copies of the signal, each on a delay line that a triangle wave moves (a pitch-shifted copy at a fixed offset for seconds at a time), mixed with the dry
+# signal by Wet. Detune scales how far the delay swings (20 ms peak to peak at 100 %), Rate how fast the triangle runs (0.25 Hz at 50 %, as Rate squared).
+# The effect block's own Width stage is the HyperD that follows the
 # distortion; this one is for a HyperD in front of it, where the distortion clips the moving cloud together. Wet 0 is off. No page on the device: set by the converter,
 # in the main rack and, as "b1." / "b2." keys, in a bus rack.
 HYD = dict(
@@ -359,6 +360,17 @@ def eqband(n):
         q    = pot(f"eq{n}_q",     f"E{n}Q",  f"EQ{n} Q",    64),
     )
 EQ1, EQ2, EQ3, EQ4 = eqband(1), eqband(2), eqband(3), eqband(4)
+# The EQs inside a SplitMS node's two branches (calibration/probe_splitms.py: the first branch is the Mid, the second the Side): four bands each, applied in the
+# mid/side domain at the EQ stage. No page on the device: set by the converter, in the main rack and as "b1." / "b2." keys in a bus rack.
+def msband(side, n):
+    return dict(
+        type = enum(f"eq{side}{n}_type", f"Q{side.upper()}{n}T", f"EQ{side.upper()}{n} Type", EQ_TYPES, 0),
+        freq = pot(f"eq{side}{n}_freq",  f"Q{side.upper()}{n}F", f"EQ{side.upper()}{n} Freq", 64),
+        gain = pot(f"eq{side}{n}_gain",  f"Q{side.upper()}{n}G", f"EQ{side.upper()}{n} Gain", 64),
+        q    = pot(f"eq{side}{n}_q",     f"Q{side.upper()}{n}Q", f"EQ{side.upper()}{n} Q",    64),
+    )
+EQM = [msband("m", n) for n in range(1, 5)]
+EQS = [msband("s", n) for n in range(1, 5)]
 
 GLOBAL = dict(
     mode   = enum("voice_mode", "MODE", "Voice Mode", VOICE_MODES, 0),
@@ -528,6 +540,10 @@ BANKS = [
         row(BUSES["sub_1"], BUSES["sub_2"], BUSES["noise_1"], BUSES["noise_2"], BUSES["smp_1"], BUSES["smp_2"]),
         row(BUSES["flt1_1"], BUSES["flt1_2"], BUSES["flt2_1"], BUSES["flt2_2"], FLTOUT["f1"], FLTOUT["f2"]),
         row(HYD["uni"], HYD["det"], HYD["rate"], HYD["wet"]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[0][k], EQM[1][k])]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[2][k], EQM[3][k])]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[0][k], EQS[1][k])]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[2][k], EQS[3][k])]),
     ]),
 ]
 

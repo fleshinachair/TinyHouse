@@ -211,7 +211,7 @@ public:
         } else {
             noteSmoother.setValueUnsmoothed((float) note / 127.0f);
         }
-        bool legato = P[TB_P_LEGATO] > 0.5f;
+        bool legato = P[TB_P_LEGATO] > 0.5f && !isReleasing();       /* a releasing voice has to be brought back in whatever the legato switch says */
         if (!legato) {              /* env retrig switches cut: always retrig */
             for (int l = 0; l < kLfos; l++)
                 if (P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] < 1.0f) lfoPhase[l] = 0.0f;

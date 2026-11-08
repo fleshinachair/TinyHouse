@@ -646,6 +646,36 @@ static void testNoteOnset()
           "the floor is 3 ms and leaves longer attacks alone (%.1f ms at 0, %.1f ms at 60)", potAttackTime(0) * 1000.0f, potAttackTime(60) * 1000.0f);
 }
 
+/* A mono note arriving over a releasing one takes its voice over where the envelope is: a fresh start() zeroed the amplitude envelope, a step down from the
+ * release level that was a click (Lead - Rollin: 20 dB more sub-bass than Serum's from the steps between its short notes). */
+static void testMonoTakeover()
+{
+    printf("== mono takeover ==\n");
+    auto run = [](bool overReleasing) {
+        srand(7);
+        Engine e;
+        e.setTable(0, sineTable());
+        e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_WT2_LEVEL] = 0; e.pots[TB_P_WT3_LEVEL] = 0;
+        e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127; e.pots[TB_P_VCA_R] = 90;
+        e.pots[TB_P_VOICE_MODE] = 1;
+        note(e, 60, 100);
+        render(e, 100);
+        const uint8_t off[] = { 0x80, 60, 0 };
+        if (overReleasing) { e.onMidi(off, 3); render(e, 4); }
+        auto before = render(e, 1);
+        note(e, 64, 100);
+        auto after = render(e, 1);
+        double steady = 1, jump = 0;
+        for (int i = 1; i < 128; i++) steady = std::max(steady, std::abs((double) before[(size_t) i * 2] - (double) before[(size_t) (i - 1) * 2]));
+        jump = std::abs((double) after[0] - (double) before[(size_t) 127 * 2]);
+        for (int i = 1; i < 8; i++) jump = std::max(jump, std::abs((double) after[(size_t) i * 2] - (double) after[(size_t) (i - 1) * 2]));
+        return jump / steady;
+    };
+    const double held = run(false), releasing = run(true);
+    CHECK(releasing < 2.0, "a note arriving over a releasing one joins without a step (largest step %.1f x the steady wave's; a fresh start() zeroed the envelope and phase)", releasing);
+    CHECK(held < 2.0, "a note arriving over a held one joins without a step (%.1f x)", held);
+}
+
 /* The FX buses: a send is added to the main path (an empty bus is a plain copy, so Direct plus a full send is +6 dB), a source routed to None is
  * on the bus alone, and a bus rack's effects run on what it is sent, tail and all. */
 static void testFxBuses()
@@ -763,6 +793,7 @@ int main()
     testVelocityLaw();
     testFxBuses();
     testNoteOnset();
+    testMonoTakeover();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

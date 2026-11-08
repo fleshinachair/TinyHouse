@@ -145,6 +145,7 @@ struct FxSettings {
     int   delayPing = 0;
     float revMix = 0, revT60 = 2.0f, revDampHz = 8000, revLoHz = 20, revWidth = 1.0f;
     struct Band { int type = EQ_OFF; float hz = 1000, gainDb = 0, q = 1; } band[4];
+    Band msBand[2][4];        /* the EQs inside a SplitMS node: [0] the Mid branch, [1] the Side branch (fxmap.ms_branches) */
     bool eqEnable = true;     /* the EQ's own switch: it fades in and out, the bands keep running */
     float distDrive = 0, distMix = 1;       /* distortion: drive 0..1 (0 is off), wet part 0..1 */
     int   distMode = 0;                     /* 0 soft (tanh), 1 asymmetric, 2 hard clip, 3 sine (the calibrated law only) */
@@ -348,9 +349,10 @@ private:
 
 /* Serum's HyperD (Hyper/Dimension) as the first stage of the block, where the distortion that follows clips the moving cloud together (Lead - Other Side and
  * Lead - Rollin have it in front of a drive-98 distortion; without it the clipped tone is a steady square-like wave where Serum's breathes and has even harmonics).
- * Each voice is a copy of the signal on a delay line that a smooth random LFO (two incommensurate sines, a different phase per voice and per side) moves, which detunes it
- * and makes it beat against the dry signal; the voices are summed at 1/sqrt(n) and mixed with the dry signal by Wet. How far a delay moves follows Detune and how fast
- * follows Rate; the two laws below were fitted to Serum's HyperD alone on a held note (calibration/hyperd_fit.py). */
+ * Measured on Serum (calibration/hyperd_sine.py, hyperd_fit.py): each voice is a copy of the signal on a delay line moved by a TRIANGLE wave, so for seconds at a time it is a
+ * pitch-shifted copy at a fixed offset (a line a few Hz from the note, flipping sign at each vertex) rather than a wobble; the swing is linear in Detune (20 ms peak to peak at 100 %) and the
+ * triangle's frequency grows as Rate squared (0.25 Hz at 50 %); the voices differ in phase and speed, are not normalised by their number (each is at unity: a 7 voice cloud is
+ * +8 dB), and are mixed with the dry signal by Wet through the effects' smoothstep law. */
 class Hyper {
 public:
     static constexpr int kBuf = 8192;                  /* 186 ms at 44.1 kHz, a power of two */
@@ -358,13 +360,16 @@ public:
 
     explicit Hyper(float sampleRate = 44100.0f) : sr(sampleRate)
     {
+        const float w0 = 2.0f * 3.14159265f * kHpHz / sr, cs = std::cos(w0), al = std::sin(w0) / (2.0f * 0.70710678f), a0 = 1.0f + al;      /* RBJ high-pass, Q 0.707 */
+        hpB0 = (1.0f + cs) * 0.5f / a0; hpB1 = -(1.0f + cs) / a0; hpB2 = hpB0; hpA1 = -2.0f * cs / a0; hpA2 = (1.0f - al) / a0;
         for (int c = 0; c < 2; c++) buf[c].assign(kBuf, 0.0f);
         unsigned s = 12345u;
         auto rnd = [&s]() { s = s * 1664525u + 1013904223u; return (float) (s >> 8) * (1.0f / 16777216.0f); };
-        for (int v = 0; v < kMaxV; v++) {
-            spd[v] = 0.7f + 0.6f * rnd();
-            for (int c = 0; c < 2; c++) { ph1[c][v] = rnd(); ph2[c][v] = rnd(); }
-        }
+        for (int c = 0; c < 2; c++)
+            for (int v = 0; v < kMaxV; v++) {
+                ph[c][v] = rnd();
+                spd[c][v] = kSpeedLo + (kSpeedHi - kSpeedLo) * rnd();
+            }
     }
 
     void set(const FxSettings &s) { st = s; }
@@ -375,9 +380,9 @@ public:
         const bool on = st.hydVoices > 1 && st.hydWet > 0.0f;
         const float target = on ? st.hydWet : 0.0f, dg = (target - cur) / (float) n;
         const int nv = std::min(std::max(st.hydVoices, 1), kMaxV);
-        const float depth = kDepthMs * 0.001f * sr * std::pow(st.hydDetune, kDepthExp);
-        const float rateHz = kRateHz * std::pow(st.hydRate, kRateExp);
-        const float norm = 1.0f / std::sqrt((float) nv);
+        const float swing = kDepthMs * 0.001f * sr * std::pow(st.hydDetune, kDepthExp);            /* peak to peak, in samples */
+        const float rateHz = kRateHz * std::pow(2.0f * st.hydRate, kRateExp);
+        const float voiceGain = kVoiceGain * std::pow((float) nv / kVoicesRef, kVoicesExp);        /* Serum's cloud grows a little slower than the number of voices (sine, 2 to 8 voices) */
         for (int i = 0; i < n; i++) {
             cur += dg;
             float *io[2] = { &L[i], &R[i] };
@@ -386,18 +391,23 @@ public:
                 buf[c][(size_t) wp] = x;
                 float acc = 0.0f;
                 for (int v = 0; v < nv; v++) {
-                    const float lfo = 0.5f * (std::sin(fxdetail::kTwoPi * ph1[c][v]) + std::sin(fxdetail::kTwoPi * ph2[c][v]));
-                    const float d = std::min(1.0f + depth * (1.0f + lfo), (float) (kBuf - 3));
+                    const float tri = 4.0f * std::fabs(ph[c][v] - 0.5f) - 1.0f;                       /* +1 at phase 0, -1 at 0.5 */
+                    const float d = 2.0f + 0.5f * swing * (1.0f + tri);
                     const float rp = (float) wp - d + (float) kBuf;
-                    const int i0 = (int) rp;
-                    const float fr = rp - (float) i0;
-                    const float a = buf[c][(size_t) (i0 & (kBuf - 1))], b = buf[c][(size_t) ((i0 + 1) & (kBuf - 1))];
-                    acc += a + (b - a) * fr;
-                    const float inc = rateHz * spd[v] / sr;
-                    ph1[c][v] += inc; if (ph1[c][v] >= 1.0f) ph1[c][v] -= 1.0f;
-                    ph2[c][v] += inc * 1.618f; if (ph2[c][v] >= 1.0f) ph2[c][v] -= 1.0f;
+                    const int i1 = (int) rp;
+                    const float fr = rp - (float) i1;
+                    const float y0 = buf[c][(size_t) ((i1 - 1) & (kBuf - 1))], y1 = buf[c][(size_t) (i1 & (kBuf - 1))];
+                    const float y2 = buf[c][(size_t) ((i1 + 1) & (kBuf - 1))], y3 = buf[c][(size_t) ((i1 + 2) & (kBuf - 1))];
+                    const float c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+                    acc += ((c3 * fr + c2) * fr + c1) * fr + y1;
+                    ph[c][v] += rateHz * spd[c][v] / sr;
+                    ph[c][v] -= std::floor(ph[c][v]);
                 }
-                *io[c] = x * dryGain(cur) + acc * norm * wetGain(cur);
+                /* Serum's wet path has no bass: a 12 dB/oct high-pass near 150 Hz (white noise through the cloud, third-octave gain re the dry: -2 dB at 159 Hz, -7 at 126, -14 at 63, -20 at 50) */
+                const float hp = hpB0 * acc + hpS1[c];
+                hpS1[c] = hpB1 * acc - hpA1 * hp + hpS2[c];
+                hpS2[c] = hpB2 * acc - hpA2 * hp;
+                *io[c] = x * dryGain(cur) + hp * voiceGain * wetGain(cur);
             }
             wp = (wp + 1) & (kBuf - 1);
         }
@@ -406,14 +416,16 @@ public:
     }
 
 private:
-    static constexpr float kDepthMs = 1.0f, kDepthExp = 0.8f, kRateHz = 8.0f, kRateExp = 1.5f;      /* fitted to an isolated Serum HyperD (calibration/hyperd_fit.py): a rough fit */
+    /* fitted to Serum's HyperD alone on a sine and a saw (calibration/hyperd_fit.py) */
+    static constexpr float kDepthMs = 20.0f, kDepthExp = 1.0f, kRateHz = 0.25f, kRateExp = 1.8f, kSpeedLo = 0.3f, kSpeedHi = 1.8f, kVoiceGain = 0.95f, kVoicesRef = 7.0f, kVoicesExp = 0.3f, kHpHz = 150.0f;
     float sr;
     FxSettings st;
     std::vector<float> buf[2];
     int wp = 0;
     float cur = 0.0f;
-    float spd[kMaxV] = {};
-    float ph1[2][kMaxV] = {}, ph2[2][kMaxV] = {};
+    float spd[2][kMaxV] = {};
+    float ph[2][kMaxV] = {};
+    float hpB0 = 1, hpB1 = 0, hpB2 = 0, hpA1 = 0, hpA2 = 0, hpS1[2] = {}, hpS2[2] = {};
 };
 
 class Fx {
@@ -469,6 +481,18 @@ public:
                 eq[b].clear();
             }
         }
+        msAny = false;
+        for (int k = 0; k < 2; k++)
+            for (int b = 0; b < 4; b++) {
+                msOn[k][b] = s.msBand[k][b].type != EQ_OFF;
+                if (msOn[k][b]) {
+                    msEq[k][b].c.set(s.msBand[k][b].type, s.msBand[k][b].hz, s.msBand[k][b].gainDb, s.msBand[k][b].q, sr);
+                    msAny = true;
+                } else {
+                    msEq[k][b].clear();
+                }
+            }
+        eqAny = eqAny || msAny;
         /* A stage still fading out has to keep running, or it would cut off. */
         baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.revMix > 0.0f ||
                     wideCur > 0.0f || delayWetCur > 0.0f || revWetCur > 0.0f || wideRan || delayRan || revRan || mod.active() || hyper.active();
@@ -521,6 +545,7 @@ public:
          * the EQ on, a sample goes through the bands in the same order as before, bit for bit. */
         bool eqAny = false;
         for (int b = 0; b < 4; b++) eqAny = eqAny || eqOn[b];
+        eqAny = eqAny || msAny;
         if (!eqAny) return;
         const float step = 1.0f / (0.010f * sr);
         for (int i = 0; i < n; i++) {
@@ -532,6 +557,14 @@ public:
                 if (!eqOn[b]) continue;
                 l = eq[b].tick(0, l);
                 r = eq[b].tick(1, r);
+            }
+            if (msAny) {                       /* the SplitMS branches: Mid and Side each through their own bands (a split on its own is transparent) */
+                float m = 0.5f * (l + r), sd = 0.5f * (l - r);
+                for (int b = 0; b < 4; b++) {
+                    if (msOn[0][b]) m = msEq[0][b].tick(0, m);
+                    if (msOn[1][b]) sd = msEq[1][b].tick(0, sd);
+                }
+                l = m + sd; r = m - sd;
             }
             if (eqCur >= 1.0f) { L[i] = l; R[i] = r; }
             else               { L[i] = dl + eqCur * (l - dl); R[i] = dr + eqCur * (r - dr); }
@@ -878,6 +911,9 @@ private:
 
     StereoBiquad eq[4];
     bool eqOn[4] = { false, false, false, false };
+    StereoBiquad msEq[2][4];
+    bool msOn[2][4] = {};
+    bool msAny = false;
 
     std::vector<float> chorusBuf;
     int chorusPos = 0;

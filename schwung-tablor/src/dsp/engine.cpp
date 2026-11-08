@@ -333,6 +333,18 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.band[b].gainDb = potEqGain(pots[base + 2]);
         s.band[b].q = potEqQ(type, pots[base + 3]);
     }
+    /* the SplitMS branches' bands: the params are in pairs of bands (type, freq, gain, q of band 1 and 2, then of 3 and 4) */
+    for (int k = 0; k < 2; k++) {
+        const int first = k == 0 ? TB_P_EQM1_TYPE : TB_P_EQS1_TYPE;
+        for (int b = 0; b < 4; b++) {
+            const int at = first + (b / 2) * 8 + (b % 2);
+            const int type = std::clamp((int) pots[at], 0, 5);
+            s.msBand[k][b].type = type;
+            s.msBand[k][b].hz = potEqFreq(pots[at + 2]);
+            s.msBand[k][b].gainDb = potEqGain(pots[at + 4]);
+            s.msBand[k][b].q = potEqQ(type, pots[at + 6]);
+        }
+    }
     return s;
 }
 
@@ -342,13 +354,15 @@ void Engine::refreshFx()
     const float tempoNow = pots[TB_P_DLY_SYNC] >= 1.0f ? hostBpm : 0.0f;
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
-        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0) return;
+        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 &&
+        std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0) return;
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
     std::memcpy(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen);
     compOnSeen = pots[TB_P_COMP_ON];
     std::memcpy(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen);
     std::memcpy(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen);
+    std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
     fxSeenValid = true;
     fx.set(fxSettings(pots));
 }

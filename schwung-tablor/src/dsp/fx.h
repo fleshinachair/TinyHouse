@@ -145,6 +145,7 @@ struct FxSettings {
     int   delayPing = 0;
     float revMix = 0, revT60 = 2.0f, revDampHz = 8000, revLoHz = 20, revWidth = 1.0f;
     struct Band { int type = EQ_OFF; float hz = 1000, gainDb = 0, q = 1; } band[4];
+    Band msBand[2][4];        /* the EQs inside a SplitMS node: [0] the Mid branch, [1] the Side branch (fxmap.ms_branches) */
     bool eqEnable = true;     /* the EQ's own switch: it fades in and out, the bands keep running */
     float distDrive = 0, distMix = 1;       /* distortion: drive 0..1 (0 is off), wet part 0..1 */
     int   distMode = 0;                     /* 0 soft (tanh), 1 asymmetric, 2 hard clip, 3 sine (the calibrated law only) */
@@ -480,6 +481,18 @@ public:
                 eq[b].clear();
             }
         }
+        msAny = false;
+        for (int k = 0; k < 2; k++)
+            for (int b = 0; b < 4; b++) {
+                msOn[k][b] = s.msBand[k][b].type != EQ_OFF;
+                if (msOn[k][b]) {
+                    msEq[k][b].c.set(s.msBand[k][b].type, s.msBand[k][b].hz, s.msBand[k][b].gainDb, s.msBand[k][b].q, sr);
+                    msAny = true;
+                } else {
+                    msEq[k][b].clear();
+                }
+            }
+        eqAny = eqAny || msAny;
         /* A stage still fading out has to keep running, or it would cut off. */
         baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.revMix > 0.0f ||
                     wideCur > 0.0f || delayWetCur > 0.0f || revWetCur > 0.0f || wideRan || delayRan || revRan || mod.active() || hyper.active();
@@ -532,6 +545,7 @@ public:
          * the EQ on, a sample goes through the bands in the same order as before, bit for bit. */
         bool eqAny = false;
         for (int b = 0; b < 4; b++) eqAny = eqAny || eqOn[b];
+        eqAny = eqAny || msAny;
         if (!eqAny) return;
         const float step = 1.0f / (0.010f * sr);
         for (int i = 0; i < n; i++) {
@@ -543,6 +557,14 @@ public:
                 if (!eqOn[b]) continue;
                 l = eq[b].tick(0, l);
                 r = eq[b].tick(1, r);
+            }
+            if (msAny) {                       /* the SplitMS branches: Mid and Side each through their own bands (a split on its own is transparent) */
+                float m = 0.5f * (l + r), sd = 0.5f * (l - r);
+                for (int b = 0; b < 4; b++) {
+                    if (msOn[0][b]) m = msEq[0][b].tick(0, m);
+                    if (msOn[1][b]) sd = msEq[1][b].tick(0, sd);
+                }
+                l = m + sd; r = m - sd;
             }
             if (eqCur >= 1.0f) { L[i] = l; R[i] = r; }
             else               { L[i] = dl + eqCur * (l - dl); R[i] = dr + eqCur * (r - dr); }
@@ -889,6 +911,9 @@ private:
 
     StereoBiquad eq[4];
     bool eqOn[4] = { false, false, false, false };
+    StereoBiquad msEq[2][4];
+    bool msOn[2][4] = {};
+    bool msAny = false;
 
     std::vector<float> chorusBuf;
     int chorusPos = 0;

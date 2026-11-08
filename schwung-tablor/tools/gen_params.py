@@ -360,6 +360,17 @@ def eqband(n):
         q    = pot(f"eq{n}_q",     f"E{n}Q",  f"EQ{n} Q",    64),
     )
 EQ1, EQ2, EQ3, EQ4 = eqband(1), eqband(2), eqband(3), eqband(4)
+# The EQs inside a SplitMS node's two branches (calibration/probe_splitms.py: the first branch is the Mid, the second the Side): four bands each, applied in the
+# mid/side domain at the EQ stage. No page on the device: set by the converter, in the main rack and as "b1." / "b2." keys in a bus rack.
+def msband(side, n):
+    return dict(
+        type = enum(f"eq{side}{n}_type", f"Q{side.upper()}{n}T", f"EQ{side.upper()}{n} Type", EQ_TYPES, 0),
+        freq = pot(f"eq{side}{n}_freq",  f"Q{side.upper()}{n}F", f"EQ{side.upper()}{n} Freq", 64),
+        gain = pot(f"eq{side}{n}_gain",  f"Q{side.upper()}{n}G", f"EQ{side.upper()}{n} Gain", 64),
+        q    = pot(f"eq{side}{n}_q",     f"Q{side.upper()}{n}Q", f"EQ{side.upper()}{n} Q",    64),
+    )
+EQM = [msband("m", n) for n in range(1, 5)]
+EQS = [msband("s", n) for n in range(1, 5)]
 
 GLOBAL = dict(
     mode   = enum("voice_mode", "MODE", "Voice Mode", VOICE_MODES, 0),
@@ -529,6 +540,10 @@ BANKS = [
         row(BUSES["sub_1"], BUSES["sub_2"], BUSES["noise_1"], BUSES["noise_2"], BUSES["smp_1"], BUSES["smp_2"]),
         row(BUSES["flt1_1"], BUSES["flt1_2"], BUSES["flt2_1"], BUSES["flt2_2"], FLTOUT["f1"], FLTOUT["f2"]),
         row(HYD["uni"], HYD["det"], HYD["rate"], HYD["wet"]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[0][k], EQM[1][k])]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[2][k], EQM[3][k])]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[0][k], EQS[1][k])]),
+        row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[2][k], EQS[3][k])]),
     ]),
 ]
 

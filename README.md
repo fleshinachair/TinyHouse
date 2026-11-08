@@ -64,7 +64,7 @@ built on wavetables.
 Two **FX buses** each hold a full copy of this rack. Sources and filter outputs have per-bus sends (`level^3`, as in Serum); the bus output joins the
 main path ahead of the main rack.
 
-**Not carried:** a second distortion or compressor stage, a second delay, SplitMS and band-split branches (EQ inside a Split branch is dropped),
+**Not carried:** a second distortion or compressor stage, a second delay, SplitMS branches holding anything but EQs (EQs in the Mid / Side branches are the engine's mid/side EQs), band-split (Split) branches,
 Bode frequency shifter, Utils width inside a bus rack, a filter placed before the distortion, sends moved by an LFO or envelope.
 
 ## Repo layout
@@ -116,7 +116,7 @@ bash schwung-tablor/scripts/zig-build.sh arm                            # after 
 
 Ordered by how much they matter for the Deep House pack; [docs/ROADMAP.md](docs/ROADMAP.md) has the full list with what each one takes.
 
-- **Effects racks with SplitMS, EQ inside split branches and bus-rack effects** (Keys - Other Side, Lead - Other Side, about 13 presets in all): not carried, the largest gap.
+- **Effects racks with a Comp / Distortion inside a SplitMS branch, band-split (Split) branches and bus-rack Mono-below**: not carried. EQs inside SplitMS branches are carried (mid/side EQ stage).
 - **Formant voice filters** (FormantONE / TWO / TWB) are measured (`calibration/probe_formant.py`, `docs/TRANSLATION_RULES.md`) but not built; the importer drops presets that use them.
 - **Tempo-synced LFOs** are read as Hz (Lead - Loop, Pluck - Deep In The Water); needs a Serum probe of the Rate scale and an engine sync option.
 - Unsupported warps (FM, RM, PD, filter, DLM), non-wavetable oscillator kinds, Bode, a filter before the distortion, and filter-model gaps are the largest groups among the factory presets the importer drops.

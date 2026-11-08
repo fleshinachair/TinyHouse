@@ -178,12 +178,33 @@ def branch_nodes(nodes: list[dict]) -> set[int]:
     return inside
 
 
-def eq_bands(nodes: list[dict]) -> list[dict]:
-    """Every audible band of every master-signal rack-0 EQ, from Serum's stored values."""
+def ms_branches(nodes: list[dict]) -> dict[int, str]:
+    """{node index: "mid" | "side"} for the modules inside the two branches of a SplitMS node (the first ModuleCount1 are the Mid branch, the next ModuleCount2 the Side:
+    calibration/probe_splitms.py). A plain Split is a frequency split and is not in here."""
+    out, skip = {}, 0
+    for i, n in enumerate(nodes):
+        if skip > 0:
+            skip -= 1
+            continue
+        if kind_of(n) in ("Split", "SplitMS") and enabled(n):
+            pp = plain(n)
+            c1, c2 = int(round(pp.get("kParamModuleCount1", 0))), int(round(pp.get("kParamModuleCount2", 0)))
+            if kind_of(n) == "SplitMS":
+                for j in range(i + 1, i + 1 + c1):
+                    out[j] = "mid"
+                for j in range(i + 1 + c1, i + 1 + c1 + c2):
+                    out[j] = "side"
+            skip = c1 + c2
+    return out
+
+
+def eq_bands(nodes: list[dict], which: str | None = None) -> list[dict]:
+    """Every audible band of every master-signal rack-0 EQ, from Serum's stored values; with which = "mid" or "side", of the EQs in that branch of a SplitMS instead."""
     out = []
     inside = branch_nodes(nodes)
+    ms = ms_branches(nodes)
     for i, n in enumerate(nodes):
-        if kind_of(n) != "EQ" or not enabled(n) or i in inside:
+        if kind_of(n) != "EQ" or not enabled(n) or (i in inside if which is None else ms.get(i) != which):
             continue
         pp = plain(n)
         for b in (1, 2):
@@ -709,9 +730,23 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
     if fwhy:
         notes.append("Filter FX not carried: " + "; ".join(sorted(set(fwhy))))
     inside = branch_nodes(nodes)
-    branch_eqs = sum(1 for i in inside if kind_of(nodes[i]) == "EQ" and enabled(nodes[i]))
+    ms = ms_branches(nodes)
+    branch_eqs = sum(1 for i in inside if kind_of(nodes[i]) == "EQ" and enabled(nodes[i]) and i not in ms)
     if branch_eqs:
         notes.append(f"EQ: {branch_eqs} in a Split branch, which only shapes half the signal, not carried")
+    for side, tag in (("mid", "m"), ("side", "s")):
+        sb = eq_bands(nodes, side)
+        for n in range(1, EQ_SLOTS + 1):
+            P.update({f"eq{tag}{n}_type": EQ_OFF, f"eq{tag}{n}_freq": 64, f"eq{tag}{n}_gain": 64, f"eq{tag}{n}_q": 64})
+        if not sb:
+            continue
+        sout, serr = reduce_bands(sb)
+        for n, b in enumerate(sout, 1):
+            P[f"eq{tag}{n}_type"] = KIND_ID[b["kind"]]
+            P[f"eq{tag}{n}_freq"] = pot_freq(b["fc"])
+            P[f"eq{tag}{n}_gain"] = pot_gain(b["gain"])
+            P[f"eq{tag}{n}_q"] = int(round(min(max(reso_from_q(b["kind"], b["q"]) * 1.27, 0), 127)))
+        notes.append(f"EQ: {len(sb)} band(s) in the SplitMS {side} branch carried in the mid/side domain" + (f" ({len(sb)} fitted to {len(sout)}, rms {serr:.1f} dB)" if len(sb) > len(sout) else ""))
     if not bands:
         return P, notes, info
     out, err = reduce_bands(bands)
@@ -1053,10 +1088,20 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
     wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not 25 <= m.get("source", 0) <= 32}
     dry = lambda x: kind_of(x) in DRY_KINDS and float(plain(x).get("kParamWet", 100.0)) < 1.0 and "FX" + kind_of(x) not in wet_mod
+    # A SplitMS whose branches hold nothing but EQs is carried (their bands are the engine's mid / side EQs: map_eq); one with another effect in a branch is not.
+    ms_idx = ms_branches(nodes)
+    ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) for j in ms_idx) and all(
+        kind_of(nodes[j]) != "Split" or not enabled(nodes[j]) for j in branch_nodes(nodes))
     ignored = sorted({kind_of(x) for x in nodes if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x) and not dry(x)
-                      and not (kind_of(x) == "Utils" and carried_utils) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)})
+                      and not (kind_of(x) == "Utils" and carried_utils) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
+                      and not (kind_of(x) == "SplitMS" and ms_plain)})
     if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) for x in nodes) and not info.get("filter_fx_bands") and dynamic_filter(nodes, ctx) is None:
         ignored = sorted(set(ignored) | {"Filter"})
     if ignored:
         notes.append("not carried: " + ", ".join(ignored))
+    if not any(P.get(f"eq{t}{n}_type", 0) for t in "ms" for n in range(1, EQ_SLOTS + 1)):
+        for t in "ms":                               # no SplitMS branch EQ: leave the keys out, so a preset without one is saved as it was
+            for n in range(1, EQ_SLOTS + 1):
+                for f in ("type", "freq", "gain", "q"):
+                    P.pop(f"eq{t}{n}_{f}", None)
     return P, notes, info

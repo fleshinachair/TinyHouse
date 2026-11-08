@@ -120,6 +120,28 @@ static void testEq()
     CHECK(std::isfinite(top) && top < 12.5, "a 20 kHz, high-Q band stays stable (%.2f dB)", top);
 }
 
+/* The EQs inside a SplitMS node's branches work in the mid / side domain: a bell on the Side leaves a mono (mid) signal alone and lifts a pure side signal. */
+static void testMidSideEq()
+{
+    printf("== mid / side EQ ==\n");
+    auto gain = [](int branch, bool side) {
+        FxSettings s;
+        s.msBand[branch][0].type = EQ_BELL; s.msBand[branch][0].hz = 1000; s.msBand[branch][0].gainDb = 12; s.msBand[branch][0].q = 1.25f;
+        Fx fx(SR);
+        fx.set(s);
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) { L[(size_t) i] = (float) (0.1 * std::sin(6.283185307 * 1000.0 * i / SR)); R[(size_t) i] = side ? -L[(size_t) i] : L[(size_t) i]; }
+        run(fx, L, R);
+        double a = 0, b = 0;
+        for (int i = n / 2; i < n; i++) { a += 0.01 * 0.5; b += (double) L[(size_t) i] * L[(size_t) i]; }
+        return 10.0 * std::log10(b / a);
+    };
+    const double sideOnSide = gain(1, true), sideOnMid = gain(1, false), midOnMid = gain(0, false), midOnSide = gain(0, true);
+    CHECK(std::fabs(sideOnSide - 12.0) < 0.3 && std::fabs(sideOnMid) < 0.2, "a Side bell lifts a side signal by its gain and leaves a mid one alone (%.2f / %.2f dB)", sideOnSide, sideOnMid);
+    CHECK(std::fabs(midOnMid - 12.0) < 0.3 && std::fabs(midOnSide) < 0.2, "a Mid bell lifts a mid signal and leaves a side one alone (%.2f / %.2f dB)", midOnMid, midOnSide);
+}
+
 static void testDelay()
 {
     printf("== delay ==\n");
@@ -1095,6 +1117,7 @@ int main()
 {
     testBypass();
     testEq();
+    testMidSideEq();
     testDelay();
     testReverb();
     testWide();

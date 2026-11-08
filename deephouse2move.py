@@ -1389,7 +1389,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     # whenever another preset is chosen. A stage that is Off here has no mix or no bands, so the sound is
     # the same either way (params_sig leaves them out for that reason).
     P["fx_on"] = 1
-    P["eq_on"] = int(any(P[f"eq{n}_type"] for n in range(1, 5)))
+    P["eq_on"] = int(any(P[f"eq{n}_type"] for n in range(1, 5)) or any(P.get(f"eq{t}{n}_type", 0) for t in "ms" for n in range(1, 5)))
     P["wide_on"] = int(P["fx_wide"] > 0)
     P["dly_on"] = int(P["dly_mix"] > 0)
     P["rev_on"] = int(P["rev_mix"] > 0)
@@ -1452,7 +1452,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
             if voice_env is None and not P.get("fxf_on"):
                 P.update({k: v for k, v in scratch.items() if k in ("flt_a", "flt_d", "flt_s", "flt_r")})      # no voice filter uses the envelope: the stage takes the Filter FX's
             notes += [f"FX bus {b}: {n}" for n in fnotes]
-        fx_p["eq_on"] = int(any(fx_p.get(f"eq{n}_type", 0) for n in range(1, 5)))
+        fx_p["eq_on"] = int(any(fx_p.get(f"eq{n}_type", 0) for n in range(1, 5)) or any(fx_p.get(f"eq{t}{n}_type", 0) for t in "ms" for n in range(1, 5)))
         fx_p["wide_on"] = int(fx_p.get("fx_wide", 0) > 0)
         fx_p["dly_on"] = int(fx_p.get("dly_mix", 0) > 0)
         fx_p["rev_on"] = int(fx_p.get("rev_mix", 0) > 0)

@@ -142,7 +142,7 @@ def aux_curve(slot: dict):
     return [curve_value(cv["xVals"], cv["yVals"], cv.get("curveVals") or [], k / 32.0) for k in range(33)]
 
 
-def aux_scale(aux: int, curve, macros: list) -> float:
+def aux_scale(aux: int, curve, macros: list, inverted: bool = False) -> float:
     """The factor a route's aux source gives its depth in a static preset: the aux's value x (a macro at its saved value, velocity VELOCITY_NOMINAL / 127, note 60 / 127, a random aux or an
     envelope / LFO gate at its mean) through the route's aux curve when it has one (probe_aux_curve.py), else x itself."""
     if 25 <= aux <= 32:
@@ -153,6 +153,8 @@ def aux_scale(aux: int, curve, macros: list) -> float:
         x = 60 / 127.0
     else:
         x = None                                         # random per note (21, 22) or an envelope / LFO gate: the mean over x
+    if inverted and x is not None:
+        x = 1.0 - x                                      # kParamAuxInverted: the aux works as 1 - x (calibration/probe_aux_inverted.py: macro 0 / .5 / 1 gave -29 / -41 / silent dB, the plain route the reverse)
     if curve is None:
         return 0.5 if x is None else x
     if x is None:
@@ -215,7 +217,8 @@ def physical(tree: dict, header: dict) -> dict:
                          # Out 38-46 routes render the same in Serum with or without it, and the scale made the engine's match worse).
                          "amount_pct": _pp(s).get("kParamAmount", 0.0) * (1.0 if (s["source"][1:] or [0])[0] in (16, 17) else _pp(s).get("kParamOut", 100.0) / 100.0),
                          "bipolar": bool(_pp(s).get("kParamBipolar", 0.0)),
-                         "curve": route_curve(s), "aux_curve": aux_curve(s)})
+                         "curve": route_curve(s), "aux_curve": aux_curve(s),
+                         "aux_inverted": bool(_pp(s).get("kParamAuxInverted", 0.0))})
     macros = [_pp(tree.get(f"Macro{i}", {})).get("kParamValue", 0.0) for i in range(8)]
     # A route's second source (source = [main, aux]) scales its depth by the aux's value x: a macro at its saved value (a route gated by a macro at 0 does nothing: Pad - MIND's filter
     # envelope, which left its filter closed in Serum while the engine opened it), velocity (x = velocity / 127) and note number (x = note / 127) at their nominal values
@@ -229,7 +232,7 @@ def physical(tree: dict, header: dict) -> dict:
         elif 25 <= aux <= 32 or aux in (16, 17, 21, 22) or 2 <= aux <= 15:
             # a macro at its saved value, velocity / note at their nominal values, a random aux or an envelope / LFO gate at its mean (two vibrato routes: Keys - Billboard's
             # random-gated vibrato was carried at full depth), each through the route's aux curve when it has one (aux_scale)
-            m["amount_pct"] *= aux_scale(aux, m.get("aux_curve"), macros)
+            m["amount_pct"] *= aux_scale(aux, m.get("aux_curve"), macros, m.get("aux_inverted", False))
     # An envelope's Sustain is a plain 0..1 knob, so a macro, velocity or note route into it is folded in at the saved macro value or the nominal velocity / note
     # (Bass - Let It Go: velocity into the filter envelope's sustain, +73 %, which at velocity 100 holds the filter at 0.57 where the preset's own value is 0).
     # The attack, decay and release knobs are logarithmic times and are left as stored.

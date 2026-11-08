@@ -419,3 +419,13 @@ Banks: a bank is a folder under `/data/UserData/schwung/presets/tinyhouse/`; loo
 - A Filter FX that is partly wet (1-50 %) is carried instead of silently skipped: the filtered part mixed with the dry one by Serum's Wet smoothstep (`calibration/probe_fxfilter_wet.py`: MgL24 / MgL12 at Wet 25 / 50 / 75 fit it to 0.4-1.0 dB, a linear mix is 2-3 dB off), fitted by a few EQ bands. A filter whose cutoff is out of the audible band (low-pass over 19 kHz, high-pass under 25 Hz) no longer reads "not carried: Filter".
 - Factory presets (626): importable by the converter's own verdict 109 -> 122. The importer's render gate (level <= 3 dB, bands <= 14 dB rms) on the 13 newly freed ones keeps 6 (Trombones Attack Blast, Rolling Over, Phase Mistress, String Layer, Vibey Jive, Pan Flute) and drops 7: 808 - Simple Electro (bands 60 dB), Office Telephone (silent in the engine: every oscillator knob is 0 and the level comes from routes), Piano Quiet Ridge (-35 dB, a multisample piano), Reese Square (-10.5 dB), Twelve String Guitar (19.4), Smack My Reese Up (16.6), Space Choir (23.7): open diagnoses.
 - Deep House: no preset's parameters change (the notes do: three false "not carried: Filter" lines go). Every stored loudness fit was stale again after the LFO Smooth parameter (25 presets) and was refit; check "level fit not applied" is 0 after any parameter change, and refit by file stem (Lead - Zerb's stem has two spaces).
+
+## Inverted aux source (kParamAuxInverted)
+
+A route's second source (aux) scales its depth by x; with `kParamAuxInverted` it scales by 1 - x (`calibration/probe_aux_inverted.py`: on FX - Office
+Telephone, Osc A volume from LFO2 gated by Macro 3, macro 0 / 50 / 100 % gave -29 / -41 / silent dB inverted and the reverse plain). Before this the
+converter ignored the flag, so an inverted macro-gated route was taken at x instead of 1 - x: Office Telephone's only level route came out as 0 and the
+engine was silent. 45 of the 626 factory presets have an inverted aux; none of Deep House's 70 changed. The aux curve case (inversion before or after the
+curve) is not measured. Factory import gate on those 45: 7 pass, all already imported before, so the importable count is unchanged. Office Telephone still
+fails the gate (-41 dB): its Conv is a 169-frame speaker IR (a filter, not a reverb) that the converter reads as a reverb; only 15 factory presets have a
+short IR, so that is not a cheap fix.

@@ -1019,6 +1019,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     keyfold = Counter()                          # a note-number route to a filter's cutoff, as semitones of cutoff per semitone of pitch
     routes = []                                  # envelope routes
     other = []                                   # LFO/velocity/etc: not representable
+    mod_wheel_idle = 0
     for m in ph["mods"]:
         src, a = m["source"], m["amount_pct"] / 100.0
         key = (m["dest_type"], m["dest_param"], m["dest_id"])
@@ -1035,12 +1036,19 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             fold[key] += a * ((x - 0.5) if m.get("bipolar") else x)
             if src == 17 and key[:2] == ("VoiceFilter", "kParamFreq"):
                 keyfold[key[2]] += a / 127.0 * CUTOFF_NOTES          # notes of cutoff per semitone of pitch (the same slope unipolar or bipolar)
+        elif src == 1:
+            # The mod wheel rests at 0 (the Move has none): a unipolar route adds nothing at rest, a bipolar one sits half its depth below the base.
+            if m.get("bipolar"):
+                fold[key] += a * -0.5
+            mod_wheel_idle += 1
         elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/probe_venv.py)
             routes.append((src - 2, key, a))
         else:
             other.append((src, key, a, bool(m.get("bipolar"))))
     if fold:
         note.append(f"{len(fold)} macro-driven target(s) folded in at the saved macro position")
+    if mod_wheel_idle:
+        note.append(f"{mod_wheel_idle} mod-wheel route(s) rest at the wheel's zero (no wheel on the Move)")
 
     # ---- oscillators --------------------------------------------------------
     # Many of these presets store an oscillator's level as 0 and supply all of it

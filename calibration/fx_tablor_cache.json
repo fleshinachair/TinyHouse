@@ -4024,5 +4024,1062 @@
    ],
    "reverb_wet": 0.67
   }
+ },
+ "[Infinity, 0, 0.0, 1.0, 1.0]": {
+  "params": {
+   "rev_mix": 116,
+   "rev_decay": 126,
+   "rev_damp": 110,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: the tail is too quiet to read its colour from, left at the default"
+  ],
+  "info": {
+   "reverb_rt60": [
+    Infinity,
+    19.2
+   ],
+   "reverb_centroid": [
+    0,
+    1239
+   ],
+   "reverb_level_db": [
+    1.0,
+    1.2
+   ],
+   "reverb_wet": 0.911
+  }
+ },
+ "[0.73, 8340, -0.1, 0.086, -0.6]": {
+  "params": {
+   "rev_mix": 16,
+   "rev_decay": 34,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    0.73,
+    0.72
+   ],
+   "reverb_centroid": [
+    8340,
+    5828
+   ],
+   "reverb_level_db": [
+    -0.6,
+    5.2
+   ],
+   "reverb_wet": 0.127
+  }
+ },
+ "[0.54, 3792, -13.7, 0.959, -4.1]": {
+  "params": {
+   "rev_mix": 64,
+   "rev_decay": 27,
+   "rev_damp": 119,
+   "rev_width": 26
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    0.54,
+    0.54
+   ],
+   "reverb_centroid": [
+    3792,
+    3905
+   ],
+   "reverb_level_db": [
+    -4.1,
+    1.4
+   ],
+   "reverb_wet": 0.504
+  }
+ },
+ "[5.31, 2554, -0.1, 0.128, -12.3]": {
+  "params": {
+   "rev_mix": 14,
+   "rev_decay": 88,
+   "rev_damp": 120,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: Serum's level is -17 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    5.31,
+    5.2
+   ],
+   "reverb_centroid": [
+    2554,
+    2609
+   ],
+   "reverb_level_db": [
+    -12.3,
+    4.6
+   ],
+   "reverb_wet": 0.108
+  }
+ },
+ "[0.43, 6303, -0.3, 0.096, -1.0]": {
+  "params": {
+   "rev_mix": 17,
+   "rev_decay": 20,
+   "rev_damp": 126,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    0.43,
+    0.4
+   ],
+   "reverb_centroid": [
+    6303,
+    5846
+   ],
+   "reverb_level_db": [
+    -1.0,
+    4.6
+   ],
+   "reverb_wet": 0.136
+  }
+ },
+ "[1.13, 4428, 0.3, 0.099, -6.0]": {
+  "params": {
+   "rev_mix": 13,
+   "rev_decay": 46,
+   "rev_damp": 125,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.13,
+    1.1
+   ],
+   "reverb_centroid": [
+    4428,
+    4821
+   ],
+   "reverb_level_db": [
+    -6.0,
+    4.9
+   ],
+   "reverb_wet": 0.1
+  }
+ },
+ "wide:-1.8": {
+  "params": {
+   "fx_wide": 96
+  },
+  "notes": [],
+  "info": {
+   "wide_side_added_db": [
+    -1.8,
+    -1.8
+   ]
+  }
+ },
+ "[NaN, 0, 0.0, 0.303, -5.5]": {
+  "params": {
+   "rev_mix": 30,
+   "rev_decay": 126,
+   "rev_damp": 110,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: the tail is too quiet to read its colour from, left at the default"
+  ],
+  "info": {
+   "reverb_rt60": [
+    NaN,
+    19.3
+   ],
+   "reverb_centroid": [
+    0,
+    1299
+   ],
+   "reverb_level_db": [
+    -5.5,
+    1.2
+   ],
+   "reverb_wet": 0.235
+  }
+ },
+ "[4.18, 3499, -13.2, 0.05, 5.2]": {
+  "params": {
+   "rev_mix": 20,
+   "rev_decay": 82,
+   "rev_damp": 124,
+   "rev_width": 29
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    4.18,
+    4.28
+   ],
+   "reverb_centroid": [
+    3499,
+    3498
+   ],
+   "reverb_level_db": [
+    5.2,
+    2.8
+   ],
+   "reverb_wet": 0.157
+  }
+ },
+ "[5.86, 3723, 0.2, 0.387, -1.0]": {
+  "params": {
+   "rev_mix": 34,
+   "rev_decay": 91,
+   "rev_damp": 125,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.86,
+    5.96
+   ],
+   "reverb_centroid": [
+    3723,
+    3749
+   ],
+   "reverb_level_db": [
+    -1.0,
+    5.8
+   ],
+   "reverb_wet": 0.267
+  }
+ },
+ "[4.09, 2756, -0.5, 0.458, 0.1]": {
+  "params": {
+   "rev_mix": 43,
+   "rev_decay": 81,
+   "rev_damp": 121,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    4.09,
+    4.04
+   ],
+   "reverb_centroid": [
+    2756,
+    2781
+   ],
+   "reverb_level_db": [
+    0.1,
+    4.9
+   ],
+   "reverb_wet": 0.336
+  }
+ },
+ "[1.13, 3278, -3.7, 0.024, -3.1]": {
+  "params": {
+   "rev_mix": 8,
+   "rev_decay": 47,
+   "rev_damp": 121,
+   "rev_width": 83
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.13,
+    1.15
+   ],
+   "reverb_centroid": [
+    3278,
+    3573
+   ],
+   "reverb_level_db": [
+    -3.1,
+    2.9
+   ],
+   "reverb_wet": 0.065
+  }
+ },
+ "[1.12, 3199, -3.8, 0.083, -3.2]": {
+  "params": {
+   "rev_mix": 16,
+   "rev_decay": 46,
+   "rev_damp": 120,
+   "rev_width": 82
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.12,
+    1.1
+   ],
+   "reverb_centroid": [
+    3199,
+    3270
+   ],
+   "reverb_level_db": [
+    -3.2,
+    2.7
+   ],
+   "reverb_wet": 0.124
+  }
+ },
+ "[1.42, 1764, -0.1, 0.224, -2.4]": {
+  "params": {
+   "rev_mix": 28,
+   "rev_decay": 53,
+   "rev_damp": 112,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.42,
+    1.42
+   ],
+   "reverb_centroid": [
+    1764,
+    1798
+   ],
+   "reverb_level_db": [
+    -2.4,
+    2.7
+   ],
+   "reverb_wet": 0.22
+  }
+ },
+ "[0.63, 1837, -141.1, 0.072, -13.1]": {
+  "params": {
+   "rev_mix": 10,
+   "rev_decay": 30,
+   "rev_damp": 109,
+   "rev_width": 0
+  },
+  "notes": [
+   "Reverb: Serum's level is -13 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    0.63,
+    0.61
+   ],
+   "reverb_centroid": [
+    1837,
+    1787
+   ],
+   "reverb_level_db": [
+    -13.1,
+    -0.5
+   ],
+   "reverb_wet": 0.08
+  }
+ },
+ "[4.44, 4431, 0.1, 0.253, -0.3]": {
+  "params": {
+   "rev_mix": 28,
+   "rev_decay": 83,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    4.44,
+    4.4
+   ],
+   "reverb_centroid": [
+    4431,
+    4466
+   ],
+   "reverb_level_db": [
+    -0.3,
+    6.1
+   ],
+   "reverb_wet": 0.217
+  }
+ },
+ "[NaN, 3550, -0.1, 0.286, -1.4]": {
+  "params": {
+   "rev_mix": 29,
+   "rev_decay": 126,
+   "rev_damp": 124,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    NaN,
+    19.23
+   ],
+   "reverb_centroid": [
+    3550,
+    3406
+   ],
+   "reverb_level_db": [
+    -1.4,
+    5.0
+   ],
+   "reverb_wet": 0.232
+  }
+ },
+ "[3.14, 1875, -0.1, 0.095, -3.5]": {
+  "params": {
+   "rev_mix": 16,
+   "rev_decay": 74,
+   "rev_damp": 115,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    3.14,
+    3.06
+   ],
+   "reverb_centroid": [
+    1875,
+    1901
+   ],
+   "reverb_level_db": [
+    -3.5,
+    3.5
+   ],
+   "reverb_wet": 0.124
+  }
+ },
+ "[Infinity, 0, 0.0, 1.0, 5.0]": {
+  "params": {
+   "rev_mix": 127,
+   "rev_decay": 125,
+   "rev_damp": 110,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: the tail is too quiet to read its colour from, left at the default",
+   "Reverb: Serum's is 3.8 dB louder than the engine's maximum, so the tail is that much quieter"
+  ],
+  "info": {
+   "reverb_rt60": [
+    Infinity,
+    18.49
+   ],
+   "reverb_centroid": [
+    0,
+    1301
+   ],
+   "reverb_level_db": [
+    5.0,
+    1.2
+   ],
+   "reverb_wet": 1.0
+  }
+ },
+ "[10.26, 3285, -0.0, 0.375, -0.3]": {
+  "params": {
+   "rev_mix": 35,
+   "rev_decay": 106,
+   "rev_damp": 124,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    10.26,
+    10.52
+   ],
+   "reverb_centroid": [
+    3285,
+    3278
+   ],
+   "reverb_level_db": [
+    -0.3,
+    5.8
+   ],
+   "reverb_wet": 0.277
+  }
+ },
+ "[5.7, 3454, 0.1, 0.285, -2.5]": {
+  "params": {
+   "rev_mix": 27,
+   "rev_decay": 90,
+   "rev_damp": 124,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.7,
+    5.71
+   ],
+   "reverb_centroid": [
+    3454,
+    3403
+   ],
+   "reverb_level_db": [
+    -2.5,
+    5.4
+   ],
+   "reverb_wet": 0.211
+  }
+ },
+ "[11.62, 3897, -0.1, 0.302, -1.4]": {
+  "params": {
+   "rev_mix": 28,
+   "rev_decay": 109,
+   "rev_damp": 126,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    11.62,
+    11.51
+   ],
+   "reverb_centroid": [
+    3897,
+    4011
+   ],
+   "reverb_level_db": [
+    -1.4,
+    6.2
+   ],
+   "reverb_wet": 0.222
+  }
+ },
+ "[5.94, 3225, 0.1, 0.261, -2.5]": {
+  "params": {
+   "rev_mix": 26,
+   "rev_decay": 91,
+   "rev_damp": 123,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.94,
+    5.87
+   ],
+   "reverb_centroid": [
+    3225,
+    3307
+   ],
+   "reverb_level_db": [
+    -2.5,
+    5.3
+   ],
+   "reverb_wet": 0.202
+  }
+ },
+ "[11.55, 4504, 0.0, 0.266, 0.4]": {
+  "params": {
+   "rev_mix": 29,
+   "rev_decay": 109,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    11.55,
+    11.56
+   ],
+   "reverb_centroid": [
+    4504,
+    4441
+   ],
+   "reverb_level_db": [
+    0.4,
+    6.4
+   ],
+   "reverb_wet": 0.229
+  }
+ },
+ "[7.05, 4977, -0.0, 0.541, -0.7]": {
+  "params": {
+   "rev_mix": 40,
+   "rev_decay": 95,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    7.05,
+    6.85
+   ],
+   "reverb_centroid": [
+    4977,
+    4528
+   ],
+   "reverb_level_db": [
+    -0.7,
+    6.6
+   ],
+   "reverb_wet": 0.315
+  }
+ },
+ "wide:-5.7": {
+  "params": {
+   "fx_wide": 61
+  },
+  "notes": [],
+  "info": {
+   "wide_side_added_db": [
+    -5.7,
+    -5.7
+   ]
+  }
+ },
+ "[5.76, 3213, 0.0, 0.266, -2.4]": {
+  "params": {
+   "rev_mix": 26,
+   "rev_decay": 90,
+   "rev_damp": 123,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.76,
+    5.74
+   ],
+   "reverb_centroid": [
+    3213,
+    3156
+   ],
+   "reverb_level_db": [
+    -2.4,
+    5.3
+   ],
+   "reverb_wet": 0.206
+  }
+ },
+ "[10.06, 3432, 0.1, 0.358, -0.2]": {
+  "params": {
+   "rev_mix": 35,
+   "rev_decay": 105,
+   "rev_damp": 124,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    10.06,
+    9.94
+   ],
+   "reverb_centroid": [
+    3432,
+    3418
+   ],
+   "reverb_level_db": [
+    -0.2,
+    5.7
+   ],
+   "reverb_wet": 0.272
+  }
+ },
+ "[19.13, 437, -0.1, 0.55, -4.2]": {
+  "params": {
+   "rev_mix": 62,
+   "rev_decay": 125,
+   "rev_damp": 91,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    19.13,
+    16.34
+   ],
+   "reverb_centroid": [
+    437,
+    433
+   ],
+   "reverb_level_db": [
+    -4.2,
+    -3.2
+   ],
+   "reverb_wet": 0.491
+  }
+ },
+ "[19.77, 1594, 0.2, 0.137, 7.2]": {
+  "params": {
+   "rev_mix": 40,
+   "rev_decay": 126,
+   "rev_damp": 115,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    19.77,
+    19.55
+   ],
+   "reverb_centroid": [
+    1594,
+    1711
+   ],
+   "reverb_level_db": [
+    7.2,
+    2.5
+   ],
+   "reverb_wet": 0.315
+  }
+ },
+ "[1.38, 916, -0.3, 0.258, -2.6]": {
+  "params": {
+   "rev_mix": 35,
+   "rev_decay": 51,
+   "rev_damp": 101,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.38,
+    1.31
+   ],
+   "reverb_centroid": [
+    916,
+    867
+   ],
+   "reverb_level_db": [
+    -2.6,
+    0.4
+   ],
+   "reverb_wet": 0.274
+  }
+ },
+ "wide:-3.1": {
+  "params": {
+   "fx_wide": 82
+  },
+  "notes": [],
+  "info": {
+   "wide_side_added_db": [
+    -3.1,
+    -3.2
+   ]
+  }
+ },
+ "[NaN, 0, 0.0, 0.078, 1.0]": {
+  "params": {
+   "rev_mix": 22,
+   "rev_decay": 126,
+   "rev_damp": 110,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: the tail is too quiet to read its colour from, left at the default"
+  ],
+  "info": {
+   "reverb_rt60": [
+    NaN,
+    19.51
+   ],
+   "reverb_centroid": [
+    0,
+    1173
+   ],
+   "reverb_level_db": [
+    1.0,
+    1.1
+   ],
+   "reverb_wet": 0.17
+  }
+ },
+ "[6.69, 5400, 0.2, 0.135, 4.5]": {
+  "params": {
+   "rev_mix": 26,
+   "rev_decay": 94,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    6.69,
+    6.54
+   ],
+   "reverb_centroid": [
+    5400,
+    4548
+   ],
+   "reverb_level_db": [
+    4.5,
+    6.3
+   ],
+   "reverb_wet": 0.206
+  }
+ },
+ "[1.87, 3603, 0.4, 0.276, -2.3]": {
+  "params": {
+   "rev_mix": 27,
+   "rev_decay": 60,
+   "rev_damp": 123,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.87,
+    1.85
+   ],
+   "reverb_centroid": [
+    3603,
+    3540
+   ],
+   "reverb_level_db": [
+    -2.3,
+    5.0
+   ],
+   "reverb_wet": 0.216
+  }
+ },
+ "[1.91, 3316, 0.2, 0.271, -2.3]": {
+  "params": {
+   "rev_mix": 27,
+   "rev_decay": 61,
+   "rev_damp": 122,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.91,
+    1.91
+   ],
+   "reverb_centroid": [
+    3316,
+    3311
+   ],
+   "reverb_level_db": [
+    -2.3,
+    4.8
+   ],
+   "reverb_wet": 0.216
+  }
+ },
+ "[1.94, 3632, 0.1, 0.275, -2.2]": {
+  "params": {
+   "rev_mix": 27,
+   "rev_decay": 61,
+   "rev_damp": 124,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.94,
+    1.91
+   ],
+   "reverb_centroid": [
+    3632,
+    3849
+   ],
+   "reverb_level_db": [
+    -2.2,
+    5.1
+   ],
+   "reverb_wet": 0.215
+  }
+ },
+ "[5.04, 5022, -0.0, 0.51, 9.5]": {
+  "params": {
+   "rev_mix": 85,
+   "rev_decay": 86,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.04,
+    4.92
+   ],
+   "reverb_centroid": [
+    5022,
+    4547
+   ],
+   "reverb_level_db": [
+    9.5,
+    6.3
+   ],
+   "reverb_wet": 0.668
+  }
+ },
+ "[3.03, 4364, -0.0, 0.243, 0.7]": {
+  "params": {
+   "rev_mix": 29,
+   "rev_decay": 73,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    3.03,
+    3.02
+   ],
+   "reverb_centroid": [
+    4364,
+    4448
+   ],
+   "reverb_level_db": [
+    0.7,
+    6.0
+   ],
+   "reverb_wet": 0.227
+  }
+ },
+ "[3.06, 4373, -0.0, 0.195, 0.5]": {
+  "params": {
+   "rev_mix": 25,
+   "rev_decay": 73,
+   "rev_damp": 126,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    3.06,
+    3.03
+   ],
+   "reverb_centroid": [
+    4373,
+    4232
+   ],
+   "reverb_level_db": [
+    0.5,
+    5.9
+   ],
+   "reverb_wet": 0.2
+  }
+ },
+ "[3.06, 4222, 0.1, 0.283, 1.5]": {
+  "params": {
+   "rev_mix": 34,
+   "rev_decay": 73,
+   "rev_damp": 126,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    3.06,
+    3.05
+   ],
+   "reverb_centroid": [
+    4222,
+    4156
+   ],
+   "reverb_level_db": [
+    1.5,
+    5.8
+   ],
+   "reverb_wet": 0.264
+  }
+ },
+ "[3.08, 4200, 0.2, 0.252, 0.5]": {
+  "params": {
+   "rev_mix": 30,
+   "rev_decay": 74,
+   "rev_damp": 126,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    3.08,
+    3.09
+   ],
+   "reverb_centroid": [
+    4200,
+    4352
+   ],
+   "reverb_level_db": [
+    0.5,
+    5.8
+   ],
+   "reverb_wet": 0.233
+  }
+ },
+ "[2.2, 4121, 0.1, 0.153, -0.8]": {
+  "params": {
+   "rev_mix": 21,
+   "rev_decay": 64,
+   "rev_damp": 125,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    2.2,
+    2.16
+   ],
+   "reverb_centroid": [
+    4121,
+    3908
+   ],
+   "reverb_level_db": [
+    -0.8,
+    5.6
+   ],
+   "reverb_wet": 0.166
+  }
+ },
+ "[1.21, 2812, -2.5, 0.34, -0.7]": {
+  "params": {
+   "rev_mix": 36,
+   "rev_decay": 49,
+   "rev_damp": 119,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.21,
+    1.24
+   ],
+   "reverb_centroid": [
+    2812,
+    2835
+   ],
+   "reverb_level_db": [
+    -0.7,
+    4.2
+   ],
+   "reverb_wet": 0.281
+  }
+ },
+ "[7.66, 5043, 0.0, 0.596, 3.8]": {
+  "params": {
+   "rev_mix": 58,
+   "rev_decay": 98,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    7.66,
+    7.74
+   ],
+   "reverb_centroid": [
+    5043,
+    4272
+   ],
+   "reverb_level_db": [
+    3.8,
+    6.5
+   ],
+   "reverb_wet": 0.456
+  }
  }
 }

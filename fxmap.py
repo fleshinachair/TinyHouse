@@ -550,8 +550,13 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
             continue
         pp = plain(n)
         pre_post = int(round(pp.get("kParamPrePost", 0.0)))
-        if pre_post == 2 and pp.get("kParamWet", 100.0) >= 1.0:
-            why.append("Distortion filter before the distortion")
+        # A filter before the distorting is the engine's own pre-filter when this is the node the engine's distortion carries (dist_params); a drive-0 node distorts
+        # nothing, so its filter is the same filter before or after and goes to the EQ like the one after; any other node with drive is not carried.
+        pre_engine = pre_post == 2 and float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) > 0.5
+        if pre_post == 2 and not pre_engine:
+            pre_post = 1
+        if pre_engine and pp.get("kParamWet", 100.0) >= 1.0 and i != dist_chosen(nodes):
+            why.append("Distortion filter before the distortion (a second distortion)")
         if pre_post != 1 or pp.get("kParamWet", 100.0) < 1.0:
             continue
         t = float(pp.get("kParamLPHP", 0.0)) / 100.0
@@ -597,13 +602,8 @@ def smoothstep(w: float) -> float:
     return w * w * (3.0 - 2.0 * w)
 
 
-def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
-    """The first Distortion on the master signal as the engine's distortion stage: mode, drive and wet mix."""
-    scales = json.loads(DIST_SCALES_FILE.read_text(encoding="utf-8"))
+def dist_candidates(nodes: list[dict]) -> list:
     inside = branch_nodes(nodes)
-    # The engine has one distortion stage: the master Distortion that does the most, wet part times drive (an unwritten drive is 25; one at 0 is only its own filter). The first
-    # in the rack used to be taken, whatever it did (Bass - SWEDISHMF has a 19 % TapeSat ahead of a 100 % wet drive-72 one; Bass - The Selected a drive-0 filter ahead of a
-    # soft clip at 75); a first node that is off ended the search.
     cands = []
     for i, n in enumerate(nodes):
         if kind_of(n) != "Distortion" or not enabled(n) or i in inside:
@@ -613,6 +613,44 @@ def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
         if wet < 1.0 or str(pp.get("kParamMode", "default")) == "kDownsample":
             continue
         cands.append((wet / 100.0 * float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) / 100.0, -i, n))
+    return cands
+
+
+def dist_chosen(nodes: list[dict]) -> int | None:
+    """The index of the Distortion the engine's one distortion stage carries (the master one that does the most)."""
+    c = dist_candidates(nodes)
+    return -max(c, key=lambda x: (x[0], x[1]))[1] if c else None
+
+
+DIST_PRE_FREQ_LO, DIST_PRE_FREQ_HI = 20.0, 20000.0       # the engine's dist_pre_freq pot range (log); Q 0.3 * 10 ** (pot / 127)
+
+
+def dist_pre_params(n: dict) -> dict:
+    """The engine's pre-filter pots for a Distortion whose own filter sits before the distorting (PrePost 2): only the two ends of LPHP, the 12 dB/octave state-variable filter of
+    dist_filter_bands (cutoff serum_filter_hz, Q 0.5 + 0.55 BW)."""
+    pp = plain(n)
+    if int(round(pp.get("kParamPrePost", 0.0))) != 2:
+        return {}
+    t = float(pp.get("kParamLPHP", 0.0)) / 100.0
+    if 0.2 < t < 0.8:
+        return {}
+    kind = "lp" if t <= 0.2 else "hp"
+    fc = serum_filter_hz(float(pp.get("kParamFreq", 0.5)))
+    if (kind == "lp" and fc > 19000) or (kind == "hp" and fc < 25):
+        return {}
+    q = DIST_FILTER_Q_BASE + DIST_FILTER_Q_PER_BW * float(pp.get("kParamBW", DIST_FILTER_BW_DEFAULT))
+    pot = lambda v, lo, hi: int(round(min(max(127.0 * math.log(v / lo) / math.log(hi / lo), 0.0), 127.0)))
+    return {"dist_pre": 1 if kind == "lp" else 2, "dist_pre_freq": pot(fc, DIST_PRE_FREQ_LO, DIST_PRE_FREQ_HI), "dist_pre_q": pot(q, 0.3, 3.0)}
+
+
+def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
+    """The first Distortion on the master signal as the engine's distortion stage: mode, drive and wet mix."""
+    scales = json.loads(DIST_SCALES_FILE.read_text(encoding="utf-8"))
+    inside = branch_nodes(nodes)
+    # The engine has one distortion stage: the master Distortion that does the most, wet part times drive (an unwritten drive is 25; one at 0 is only its own filter). The first
+    # in the rack used to be taken, whatever it did (Bass - SWEDISHMF has a 19 % TapeSat ahead of a 100 % wet drive-72 one; Bass - The Selected a drive-0 filter ahead of a
+    # soft clip at 75); a first node that is off ended the search.
+    cands = dist_candidates(nodes)
     if not cands:
         down = [n for i, n in enumerate(nodes) if kind_of(n) == "Distortion" and enabled(n) and i not in inside and str(plain(n).get("kParamMode")) == "kDownsample" and plain(n).get("kParamWet", 100.0) >= 1.0]
         return {}, (["Distortion mode Downsample"] if down else [])
@@ -635,6 +673,8 @@ def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
                  "dist_out": int(round(min(max((k_db + 36.0) * 127.0 / 48.0, 0), 127))),
                  "dist_level": int(round(min(max(64.0 + lv_db * 64.0 / 24.0, 0), 127))),
                  "dist_mix": int(round(min(max(127.0 * smoothstep(wet / 100.0), 0), 127)))}
+            if float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) > 0.5:
+                P.update(dist_pre_params(n))
             return P, [f"Distortion carried: Serum {mode} drive {drive:.0f} %, wet {wet:.0f} %, level out {lo:.2f} -> engine {('soft', 'asym', 'hard', 'sine')[P['dist_mode']]} "
                        f"pre-gain {g_db:+.1f} dB, output {k_db:+.1f} dB, level {lv_db:+.1f} dB"]
         sc = scales.get(mode) or scales["default"]
@@ -1139,7 +1179,7 @@ def hyperd_params(nodes: list[dict]) -> tuple[dict, list[str]]:
 def fx_defaults() -> dict:
     P = {"fx_space": 100}
     P.update(map_eq([])[0])
-    P.update({"dist_drive": 0, "dist_mode": 0, "dist_mix": 127, "dist_cal": 0, "dist_out": 64, "dist_level": 64, "fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64, "dly_mix": 0, "dly_sync": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50,
+    P.update({"dist_drive": 0, "dist_mode": 0, "dist_mix": 127, "dist_cal": 0, "dist_out": 64, "dist_level": 64, "dist_pre": 0, "dist_pre_freq": 64, "dist_pre_q": 40, "fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64, "dly_mix": 0, "dly_sync": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50,
               "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0, "rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127,
               "comp_on": 1, "comp_thresh": 127, "comp_ratio": 0, "comp_attack": 40, "comp_release": 60, "comp_makeup": 0, "comp_mix": 0, "comp_knee": 32,
               "comp_multi": 0, "comp_thresh2": 127, "comp_thresh3": 127, "comp_gain1": 64, "comp_gain2": 64, "comp_gain3": 64, "comp_below": 0,

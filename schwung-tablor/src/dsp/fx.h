@@ -153,6 +153,8 @@ struct FxSettings {
     int   distMode = 0;                     /* 0 soft (tanh), 1 asymmetric, 2 hard clip, 3 sine (the calibrated law only) */
     bool  distCal = false;                  /* the calibrated law: out = level (1 - s^2) x + s out curve(gain x), s = distMix */
     float distGain = 1, distOut = 1, distLevel = 1;
+    int   distPre = 0;                      /* a filter before the curve, on the distorted part: 0 off, 1 low-pass, 2 high-pass (the calibrated law only) */
+    float distPreHz = 1000, distPreQ = 1;
     float compMix = 0;                      /* compressor: parallel part 0..1 (0 is off) */
     float compThreshDb = 0, compRatio = 1, compAttackMs = 10, compReleaseMs = 100, compMakeupDb = 0, compKneeDb = 12;
     bool  compMulti = false;                /* three bands, each with its own threshold and gain, and upward compression below */
@@ -458,6 +460,7 @@ public:
     void set(const FxSettings &s)
     {
         st = s;
+        if (s.distPre) distPreBq.c.set(s.distPre == 1 ? EQ_LOPASS : EQ_HIPASS, s.distPreHz, 0.0f, s.distPreQ, sr);
         mod.set(s);
         hyper.set(s);
         eqTarget = s.eqEnable ? 1.0f : 0.0f;
@@ -715,12 +718,13 @@ private:
             float x[2] = { L[i], R[i] }, y[2];
             for (int c = 0; c < 2; c++) {
                 const float v = x[c];
+                const float vf = st.distPre ? distPreBq.tick(c, v) : v;          /* the wet part sees the filtered signal, the dry part does not */
                 float f;
                 switch (st.distMode) {
-                case 1:  f = std::tanh(g * (v + bias)) - biasOut; break;
-                case 2:  f = std::min(std::max(g * v, -1.0f), 1.0f); break;
-                case 3:  f = std::sin(g * v); break;
-                default: f = std::tanh(g * v); break;
+                case 1:  f = std::tanh(g * (vf + bias)) - biasOut; break;
+                case 2:  f = std::min(std::max(g * vf, -1.0f), 1.0f); break;
+                case 3:  f = std::sin(g * vf); break;
+                default: f = std::tanh(g * vf); break;
                 }
                 float o = lv * (dry * v + s * k * f);
                 distDc[c] += dcA * (o - distDc[c]);              /* every curve can leave a DC term on a loud or lopsided input (the bias, a sine fold of an offset): taken out of the sum */
@@ -941,6 +945,7 @@ private:
     bool revRan = false;
     float eqCur = 1.0f, eqTarget = 1.0f;
     float distCur = 0.0f, distTarget = 0.0f, distDc[2] = { 0.0f, 0.0f };
+    StereoBiquad distPreBq;
     MbBq mbLp2[2], mbHp2[2], mbLp1[2], mbHp1[2], mbApLp[2], mbApHp[2];
     float mbMs[3] = { 0, 0, 0 }, mbGain[3] = { 0, 0, 0 };
     float compCur = 0.0f, compTarget = 0.0f, compGrDb = 0.0f, compAtt = 0.0f, compRel = 0.0f, compMk = 1.0f, compDet = 0.0f, compMs = 0.0f;

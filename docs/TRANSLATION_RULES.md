@@ -429,3 +429,17 @@ engine was silent. 45 of the 626 factory presets have an inverted aux; none of D
 curve) is not measured. Factory import gate on those 45: 7 pass, all already imported before, so the importable count is unchanged. Office Telephone still
 fails the gate (-41 dB): its Conv is a 169-frame speaker IR (a filter, not a reverb) that the converter reads as a reverb; only 15 factory presets have a
 short IR, so that is not a cheap fix.
+
+## Distortion filter before the distortion (PrePost 2)
+
+The engine's distortion stage has a pre-filter (`dist_pre` off / LP / HP, `dist_pre_freq` 20 Hz..20 kHz log, `dist_pre_q` 0.3..3 log): a 12 dB/octave biquad ahead of
+the curve, on the wet part only (the dry part, 1 - s^2, is unfiltered; the wet-only placement is the same assumption the post-filter measurement supports and
+is not separately probed). The converter sets it from the Distortion node the engine's one stage carries (`fxmap.dist_chosen`) when its PrePost is 2 and its LPHP is
+at an end, with the same cutoff and Q law as the post-filter (`serum_filter_hz`, Q = 0.5 + 0.55 BW). A drive-0 node distorts nothing, so its filter goes to the EQ
+like a post-filter; a second node with drive is still not carried.
+Measured effect: factory importable by the converter's verdict 122 -> 130; the render gate keeps 3 of the 6 pre-filter presets that are now eligible (Fretless Bass,
+909 Snare, Solo Electric Guitar 1). Deep House: only Bass - AVAION has one (LP 141 Hz, Q 2.1, Overdrive drive 25) and it gets WORSE, 8.6 -> 16.2 (spec 3.2 -> 11.1):
+Serum's output above 1 kHz is at the floor while the engine's hard-clip curve (calibrated on the 2nd and 3rd harmonics only) still makes slowly decaying
+odd harmonics of the filtered bass, which the pre-filter's lower level fit then lifts further. The pre-filter is right in structure; the curve's high-order
+content is the open lead (compare Serum's Overdrive against the engine modes out to the 15th harmonic). 31 Deep House loudness fits went stale with the
+new parameters and were refit (70/70 valid).

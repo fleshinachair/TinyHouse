@@ -265,6 +265,10 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.distOut = std::pow(10.0f, (-36.0f + pots[TB_P_DIST_OUT] * (48.0f / 127.0f)) / 20.0f);
         s.distLevel = std::pow(10.0f, (pots[TB_P_DIST_LEVEL] - 64.0f) * (24.0f / 64.0f) / 20.0f);
         if (!all) s.distMix = 0.0f;
+        /* the filter ahead of the curve: 0 off, 1 low-pass, 2 high-pass; Freq 20 Hz..20 kHz and Q 0.3..3, both log */
+        s.distPre = std::clamp((int) pots[TB_P_DIST_PRE], 0, 2);
+        s.distPreHz = 20.0f * std::pow(1000.0f, pots[TB_P_DIST_PRE_FREQ] / 127.0f);
+        s.distPreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST_PRE_Q] / 127.0f);
     }
     s.compMix = all && pots[TB_P_COMP_ON] >= 1.0f ? pot01(pots[TB_P_COMP_MIX]) : 0.0f;
     s.compThreshDb = -90.0f + 120.0f * pot01(pots[TB_P_COMP_THRESH]);      /* a level at the stage's input, before the master gain */
@@ -361,7 +365,7 @@ void Engine::refreshFx()
     const float tempoNow = pots[TB_P_DLY_SYNC] >= 1.0f ? hostBpm : 0.0f;
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
-        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 &&
+        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 &&
         std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0) return;
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
@@ -370,6 +374,7 @@ void Engine::refreshFx()
     std::memcpy(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen);
     std::memcpy(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen);
     std::memcpy(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen);
+    std::memcpy(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen);
     std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
     fxSeenValid = true;
     fx.set(fxSettings(pots));

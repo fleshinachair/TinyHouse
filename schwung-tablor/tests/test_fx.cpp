@@ -831,6 +831,23 @@ static void testDist()
     CHECK(goertzelDb(sine, 3 * f0) > goertzelDb(sine, f0) - 25.0, "the sine curve folds: odd harmonics (3rd %.1f dB below)", goertzelDb(sine, f0) - goertzelDb(sine, 3 * f0));
     const auto asymC = cal(8.0f, 0.3f, 1.0f, 1.0f, 1, 0.3f);
     CHECK(goertzelDb(asymC, 2 * f0) > goertzelDb(asymC, f0) - 40.0, "the biased curve makes even harmonics (2nd %.1f dB below)", goertzelDb(asymC, f0) - goertzelDb(asymC, 2 * f0));
+
+    /* The pre-filter sits ahead of the curve, on the wet part: a high-pass above the tone leaves the clipper nothing to clip, a low-pass above it changes nothing. */
+    auto preCal = [&](int type, float hz) {
+        FxSettings st;
+        st.distCal = true; st.distGain = 30.0f; st.distOut = 0.3f; st.distLevel = 1.0f; st.distMix = 1.0f; st.distMode = 0;
+        st.distPre = type; st.distPreHz = hz; st.distPreQ = 0.7071f;
+        Fx fx(SR);
+        fx.set(st);
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * f0 * i / SR));
+        run(fx, L, R);
+        return std::vector<float>(L.begin() + n / 2, L.end());
+    };
+    const auto clipped = cal(30.0f, 0.3f, 1.0f, 1.0f, 0, 0.3f), hp = preCal(2, 8.0f * f0), lp = preCal(1, 8.0f * f0);
+    CHECK(goertzelDb(hp, f0) < goertzelDb(clipped, f0) - 15.0, "a pre-filter high-pass above the tone pulls the tone out of the curve (%.1f dB down)", goertzelDb(clipped, f0) - goertzelDb(hp, f0));
+    CHECK(std::fabs(goertzelDb(lp, f0) - goertzelDb(clipped, f0)) < 0.5, "a pre-filter low-pass above the tone leaves it alone (%.2f dB)", goertzelDb(lp, f0) - goertzelDb(clipped, f0));
 }
 
 /* The Filter FX: a filter right after the distortion, its cutoff set from outside each block. */

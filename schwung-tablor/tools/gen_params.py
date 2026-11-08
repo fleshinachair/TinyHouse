@@ -423,6 +423,11 @@ TONE = dict(
     dcal   = enum("dist_cal",  "DCAL", "Distortion Calibrated", ["Off", "On"], 0),
     dout   = pot("dist_out",   "DOUT", "Distortion Wet Gain", 64),
     dlvl   = pot("dist_level", "DLVL", "Distortion Level",    64),
+    # The Distortion effect's own filter when it sits BEFORE the distorting (Serum's PrePost 2): a 12 dB/octave low-pass or high-pass ahead of the
+    # curve, on the distorted part only. Freq is 20 Hz..20 kHz (log), Q 0.3..3 (log, 40 = 1). Calibrated distortion only. Off by default.
+    dpre   = enum("dist_pre",      "DPRE", "Distortion Pre-Filter", ["Off", "LP", "HP"], 0),
+    dprf   = pot("dist_pre_freq",  "DPRF", "Distortion Pre-Filter Freq", 64),
+    dprq   = pot("dist_pre_q",     "DPRQ", "Distortion Pre-Filter Q", 40),
     # Compressor, after the distortion (before width, delay and reverb): a stereo-linked peak compressor with a soft knee. Threshold
     # 0..127 is -90..+30 dB at the stage's input (before the master gain), Ratio 1:1 to 100:1 (exponential), Attack 0.1..100 ms and Release 10..3000 ms (exponential), Makeup 0..24 dB,
     # Mix the parallel part. Mix 0 is off. No page on the device but the Comp Enable switch: the converter sets it from a Serum Comp.
@@ -555,6 +560,7 @@ BANKS = [
         row(HYD["uni"], HYD["det"], HYD["rate"], HYD["wet"]),
         row(DLY2["mix"], DLY2["time"], DLY2["timer"], DLY2["fb"], DLY2["lo"], DLY2["hi"]),
         row(DLY2["mode"]),
+        row(TONE["dpre"], TONE["dprf"], TONE["dprq"]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[0][k], EQM[1][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[2][k], EQM[3][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[0][k], EQS[1][k])]),

@@ -10,17 +10,6 @@
   "limiter_loss_db": 2.576965915324081e-05,
   "kept": true
  },
- "Bass - AVAION": {
-  "sig": "e28bdede3e73eb68a1911012d7bfc74f",
-  "volume": 45,
-  "start_volume": 53,
-  "start_rms_db": -13.207836058012617,
-  "rms_db": -16.128251435316564,
-  "serum_rms_db": -16.372765639241443,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.06711011597285221,
-  "kept": true
- },
  "Bass - INNERVERSE Reese": {
   "sig": "ee097115bb0a65b539454c3fcae48b26",
   "volume": 37,
@@ -43,50 +32,6 @@
   "limiter_loss_db": 0.08450182668700634,
   "kept": true
  },
- "Bass - Let It Go": {
-  "sig": "221d0ba6b81ba0c4c64f9a4b47d9faa3",
-  "volume": 49,
-  "start_volume": 48,
-  "start_rms_db": -13.523949702314157,
-  "rms_db": -13.166689069460611,
-  "serum_rms_db": -13.35586725019028,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 2.573865949706544e-05,
-  "kept": true
- },
- "Bass - NOTSOBAD": {
-  "sig": "dda4e9e477aec397e995b71fc924b41e",
-  "volume": 50,
-  "start_volume": 63,
-  "start_rms_db": -12.826354019327226,
-  "rms_db": -16.68627526290936,
-  "serum_rms_db": -16.714670874980918,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.024452537688024023,
-  "kept": true
- },
- "Bass - A Classic": {
-  "sig": "a2e0d7d38dcb744de66b7d81209d4bf8",
-  "volume": 58,
-  "start_volume": 46,
-  "start_rms_db": -13.243797719519502,
-  "rms_db": -10.664701022753768,
-  "serum_rms_db": -8.5683699466221,
-  "shortfall_db": 2.0963310761316674,
-  "limiter_loss_db": 0.9565836079496677,
-  "kept": true
- },
- "Bass - InDeep": {
-  "sig": "48faf4a1522da7d6c3314f7b5efa1088",
-  "volume": 40,
-  "start_volume": 36,
-  "start_rms_db": -14.576290601881803,
-  "rms_db": -12.791407928615637,
-  "serum_rms_db": -13.088807938800233,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.10348925647251761,
-  "kept": true
- },
  "Bass - Self Control": {
   "sig": "989f499392190aeff55d54069dcfb96b",
   "volume": 65,
@@ -96,50 +41,6 @@
   "serum_rms_db": -10.970798736055986,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.0025933772167494595,
-  "kept": true
- },
- "Bass - Rivo": {
-  "sig": "fd11865093176085312cf7ce2afab400",
-  "volume": 60,
-  "start_volume": 55,
-  "start_rms_db": -14.299664738334304,
-  "rms_db": -13.186392648061776,
-  "serum_rms_db": -12.63962836881634,
-  "shortfall_db": 0.546764279245437,
-  "limiter_loss_db": 0.9043034003078887,
-  "kept": true
- },
- "Bass - The Selected": {
-  "sig": "f55d07629d456584cd4c7b343d140d1e",
-  "volume": 51,
-  "start_volume": 65,
-  "start_rms_db": -10.521806808403351,
-  "rms_db": -14.473691271414067,
-  "serum_rms_db": -14.80237349157827,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.013920297519829816,
-  "kept": true
- },
- "Bass - SWEDISHMF": {
-  "sig": "145b47263362659e27a8ace05067cba3",
-  "volume": 50,
-  "start_volume": 62,
-  "start_rms_db": -8.163752633485698,
-  "rms_db": -11.432304666952234,
-  "serum_rms_db": -11.531401092038134,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.21332625216770396,
-  "kept": true
- },
- "Bass - oskar med k": {
-  "sig": "76d698d969cec435ec2d817cf9b9b92d",
-  "volume": 45,
-  "start_volume": 34,
-  "start_rms_db": -12.384995853500078,
-  "rms_db": -7.731903971391504,
-  "serum_rms_db": -7.929715235011024,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.09134958874558752,
   "kept": true
  },
  "Keys - BUNT": {
@@ -173,17 +74,6 @@
   "serum_rms_db": -15.191925134756044,
   "shortfall_db": 0.0,
   "limiter_loss_db": -0.7381220276239571,
-  "kept": true
- },
- "Bass - Gravity": {
-  "sig": "4d532c794a01ce3f117848c99c65c7ca",
-  "volume": 39,
-  "start_volume": 46,
-  "start_rms_db": -7.964733712919898,
-  "rms_db": -10.800089229276379,
-  "serum_rms_db": -11.00116884530513,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.0037320551221409204,
   "kept": true
  },
  "Keys - Catching Flies": {
@@ -230,17 +120,6 @@
   "limiter_loss_db": -0.6187595817669234,
   "kept": true
  },
- "Keys - Other Side": {
-  "sig": "84526ae61d4d3c2838eb75bce5ed7b45",
-  "volume": 29,
-  "start_volume": 42,
-  "start_rms_db": -10.419357285976478,
-  "rms_db": -15.65952136632392,
-  "serum_rms_db": -16.954271315994617,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.9571236227013866,
-  "kept": true
- },
  "Keys - Vintage Culture": {
   "sig": "0b889e6e5ebf1218accc73fb0dd75e5a",
   "volume": 20,
@@ -250,17 +129,6 @@
   "serum_rms_db": -15.748008738246766,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.4514563458850862,
-  "kept": true
- },
- "Lead - HotLap": {
-  "sig": "21d63803bfff2c1853f5220ce94b74bc",
-  "volume": 55,
-  "start_volume": 64,
-  "start_rms_db": -11.320795369761388,
-  "rms_db": -13.87470316635628,
-  "serum_rms_db": -14.127223649201433,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.015245435107164695,
   "kept": true
  },
  "Lead - Let It Go": {
@@ -318,61 +186,6 @@
   "limiter_loss_db": -0.929441284131233,
   "kept": true
  },
- "Lead - Rollin": {
-  "sig": "6161bfb9af615ad760942eeb5013123c",
-  "volume": 35,
-  "start_volume": 40,
-  "start_rms_db": -10.846901683931954,
-  "rms_db": -13.56373871145892,
-  "serum_rms_db": -13.456447525521684,
-  "shortfall_db": 0.10729118593723541,
-  "limiter_loss_db": 0.5828842330108177,
-  "kept": true
- },
- "Lead - The Selected": {
-  "sig": "24a9b8cf1bd2191acc5d291cb785a756",
-  "volume": 31,
-  "start_volume": 46,
-  "start_rms_db": -14.178210381369077,
-  "rms_db": -21.204543218844773,
-  "serum_rms_db": -21.657652120357778,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.27288723379779967,
-  "kept": true
- },
- "Lead - Sleepless": {
-  "sig": "e1750efd07188c5e91b6b834cc5083d6",
-  "volume": 64,
-  "start_volume": 59,
-  "start_rms_db": -16.141743901421503,
-  "rms_db": -14.368168870459641,
-  "serum_rms_db": -15.444286946448912,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -1.2481802974316807,
-  "kept": true
- },
- "Lead - Space & Time": {
-  "sig": "39ec1adbc944e7237f6aeb1972d06871",
-  "volume": 45,
-  "start_volume": 34,
-  "start_rms_db": -15.315081922465252,
-  "rms_db": -11.393490472242163,
-  "serum_rms_db": -11.596669748798291,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.8708056557833572,
-  "kept": true
- },
- "Lead - Tonic Walter": {
-  "sig": "4bf82d476410723be974511e9c793043",
-  "volume": 53,
-  "start_volume": 72,
-  "start_rms_db": -13.472650747969023,
-  "rms_db": -18.41416623535534,
-  "serum_rms_db": -18.425825379474748,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.3396510931608958,
-  "kept": true
- },
  "Pad - MOBY": {
   "sig": "b266ba6f5bd2b3ddee5f470a6ebd69d0",
   "volume": 22,
@@ -393,28 +206,6 @@
   "serum_rms_db": -15.232535457787161,
   "shortfall_db": 0.2996310667895816,
   "limiter_loss_db": 0.7205885467440876,
-  "kept": true
- },
- "Pad - Small Town Kid": {
-  "sig": "6f15c5b7f105a2a6e766532d0187deae",
-  "volume": 52,
-  "start_volume": 52,
-  "start_rms_db": -20.362324372407468,
-  "rms_db": -20.268638720202176,
-  "serum_rms_db": -20.650552684906902,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.06971680564931404,
-  "kept": true
- },
- "Pluck - Movement": {
-  "sig": "70731816894b76f468cea2fe5b149a02",
-  "volume": 68,
-  "start_volume": 70,
-  "start_rms_db": -17.00386958309644,
-  "rms_db": -17.44850753297121,
-  "serum_rms_db": -17.037369704444167,
-  "shortfall_db": 0.4111378285270426,
-  "limiter_loss_db": 1.9376004048701283,
   "kept": true
  },
  "Lead - Self Control": {
@@ -450,17 +241,6 @@
   "limiter_loss_db": 0.44631555924482846,
   "kept": true
  },
- "Lead - Other Side": {
-  "sig": "a3be227d1b469b4813ef51461bff379e",
-  "volume": 51,
-  "start_volume": 49,
-  "start_rms_db": -13.647999483973138,
-  "rms_db": -13.014102409414502,
-  "serum_rms_db": -13.156404214192223,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.21517658782982707,
-  "kept": true
- },
  "Keys - Abelon": {
   "sig": "4cd963b36dae3f08e3ac8ba639d8edd8",
   "volume": 48,
@@ -481,39 +261,6 @@
   "serum_rms_db": -19.6064853831875,
   "shortfall_db": 0.0,
   "limiter_loss_db": -0.18215464829010486,
-  "kept": true
- },
- "Keys - Lynnic": {
-  "sig": "5f267749c436dc43a3007dcc060b2d6d",
-  "volume": 37,
-  "start_volume": 57,
-  "start_rms_db": -12.017269918554394,
-  "rms_db": -18.31251239544344,
-  "serum_rms_db": -18.51864597450551,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.19071860677900787,
-  "kept": true
- },
- "Keys - Loop": {
-  "sig": "92b04792c8698ac107f691f7214c3acf",
-  "volume": 43,
-  "start_volume": 51,
-  "start_rms_db": -7.195700121225119,
-  "rms_db": -9.792725113227025,
-  "serum_rms_db": -9.704887852600248,
-  "shortfall_db": 0.08783726062677744,
-  "limiter_loss_db": 0.11163020235872168,
-  "kept": true
- },
- "Bass - Black Out": {
-  "sig": "9c0a3e87ca2179c1c5e234b5ddef104a",
-  "volume": 44,
-  "start_volume": 35,
-  "start_rms_db": -11.09052706307688,
-  "rms_db": -7.058026811128397,
-  "serum_rms_db": -7.435136044418215,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.5537306307532832,
   "kept": true
  },
  "Keys - Why U So": {
@@ -538,17 +285,6 @@
   "limiter_loss_db": -0.38734463967400323,
   "kept": true
  },
- "Keys - Atlantic": {
-  "sig": "e0f8106d1a44cd5f0a1a68ab1910359f",
-  "volume": 64,
-  "start_volume": 46,
-  "start_rms_db": -18.701891144347133,
-  "rms_db": -13.100809011267714,
-  "serum_rms_db": -13.008012128426415,
-  "shortfall_db": 0.09279688284129861,
-  "limiter_loss_db": 0.29105828134952816,
-  "kept": true
- },
  "Lead - Kisaya": {
   "sig": "20bd5dbdbe6b708f32ba29d1bd413224",
   "volume": 50,
@@ -558,17 +294,6 @@
   "serum_rms_db": -15.445310949264268,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.03976399564725952,
-  "kept": true
- },
- "Lead - Oskar Med": {
-  "sig": "c5dcaab942737e67fef1d7fe0bd6447d",
-  "volume": 29,
-  "start_volume": 57,
-  "start_rms_db": -6.862738793946669,
-  "rms_db": -17.05540193781563,
-  "serum_rms_db": -17.67581966685806,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.6742474145209272,
   "kept": true
  },
  "Lead - Lynnic": {
@@ -593,17 +318,6 @@
   "limiter_loss_db": -0.09694133807298044,
   "kept": true
  },
- "Pad - Nu Aspect 2": {
-  "sig": "434e7dc1c674255916c5416b7d2985ce",
-  "volume": 44,
-  "start_volume": 75,
-  "start_rms_db": -7.932912219881255,
-  "rms_db": -15.725252036072298,
-  "serum_rms_db": -14.80684830679751,
-  "shortfall_db": 0.9184037292747878,
-  "limiter_loss_db": 1.3661316648690374,
-  "kept": true
- },
  "Pad - Aquatiq": {
   "sig": "f967acd2583a962025d97ddfcc19d66d",
   "volume": 68,
@@ -624,17 +338,6 @@
   "serum_rms_db": -23.12023047837176,
   "shortfall_db": 0.0,
   "limiter_loss_db": -0.1713688357403882,
-  "kept": true
- },
- "Pluck - all things break": {
-  "sig": "c83f0120ec2bb20c3323a08ff448c1a6",
-  "volume": 50,
-  "start_volume": 69,
-  "start_rms_db": -12.066497175795085,
-  "rms_db": -16.839954821300537,
-  "serum_rms_db": -17.260747306274766,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.06637481333071094,
   "kept": true
  },
  "Pad - Origins": {
@@ -681,17 +384,6 @@
   "limiter_loss_db": 0.6617731991641556,
   "kept": true
  },
- "Pluck - London Topaz": {
-  "sig": "ae04a8a899ea1569aee8080519802665",
-  "volume": 70,
-  "start_volume": 61,
-  "start_rms_db": -25.62664320828548,
-  "rms_db": -23.919627316743988,
-  "serum_rms_db": -23.490924843045452,
-  "shortfall_db": 0.42870247369853587,
-  "limiter_loss_db": 0.33791864792707216,
-  "kept": true
- },
  "Keys -  Zerb": {
   "sig": "8f87e220883a5f145c39ca36fee19464",
   "volume": 66,
@@ -701,17 +393,6 @@
   "serum_rms_db": -13.513080269763085,
   "shortfall_db": 0.1224429661638311,
   "limiter_loss_db": 0.24626617498297598,
-  "kept": true
- },
- "Pluck - NOTSOBAD": {
-  "sig": "aa364ed5367b3fdbedd525a595182f92",
-  "volume": 73,
-  "start_volume": 84,
-  "start_rms_db": -21.832005178531247,
-  "rms_db": -24.076175550894344,
-  "serum_rms_db": -24.656608898022764,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.4574972559561026,
   "kept": true
  },
  "Pluck - Scorpios": {
@@ -736,28 +417,6 @@
   "limiter_loss_db": 0.6919107172367873,
   "kept": true
  },
- "Pluck - Nu Aspect": {
-  "sig": "2b22068b392b4af79f996524f6865914",
-  "volume": 72,
-  "start_volume": 62,
-  "start_rms_db": -26.570264757729785,
-  "rms_db": -24.144770166910053,
-  "serum_rms_db": -24.38574891320515,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.129555711957817,
-  "kept": true
- },
- "Pluck - Selected": {
-  "sig": "ad89e4dd515b8a3940ae0537f9be2aef",
-  "volume": 63,
-  "start_volume": 84,
-  "start_rms_db": -18.217911009904427,
-  "rms_db": -23.22175685807125,
-  "serum_rms_db": -23.694734542194244,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": -0.5814756066859523,
-  "kept": true
- },
  "Pluck - Deep In The Water": {
   "sig": "0cc05b0ca8c26f4f554ac2f11bf1e578",
   "volume": 29,
@@ -767,6 +426,347 @@
   "serum_rms_db": -22.698594951818436,
   "shortfall_db": 0.0,
   "limiter_loss_db": 1.1864415674650495,
+  "kept": true
+ },
+ "Bass - AVAION": {
+  "sig": "2aa9d07b4efb37d2841e5192f748f57e",
+  "volume": 41,
+  "start_volume": 53,
+  "start_rms_db": -11.450985852184383,
+  "rms_db": -15.715999136649337,
+  "serum_rms_db": -16.372765639241443,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.1496046235295907,
+  "kept": true
+ },
+ "Bass - Rivo": {
+  "sig": "0ce714e7a1a7b92910023624f93971b8",
+  "volume": 63,
+  "start_volume": 55,
+  "start_rms_db": -14.961936365301414,
+  "rms_db": -10.984452247915222,
+  "serum_rms_db": -12.63962836881634,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.10976367965731981,
+  "kept": true
+ },
+ "Bass - NOTSOBAD": {
+  "sig": "dfb3475a0254f4c05973cc3bd2b5ba57",
+  "volume": 50,
+  "start_volume": 63,
+  "start_rms_db": -12.721861186666008,
+  "rms_db": -16.666839921912615,
+  "serum_rms_db": -16.714670874980918,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.02141079746725083,
+  "kept": true
+ },
+ "Bass - Let It Go": {
+  "sig": "ed861c2c69a15deefa0ffd1eced8e386",
+  "volume": 49,
+  "start_volume": 48,
+  "start_rms_db": -13.523270596023707,
+  "rms_db": -13.165847423840248,
+  "serum_rms_db": -13.35586725019028,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.00010321401636304017,
+  "kept": true
+ },
+ "Bass - InDeep": {
+  "sig": "f8dbe11bcf53146662e389053ca420b8",
+  "volume": 40,
+  "start_volume": 36,
+  "start_rms_db": -14.350544902039175,
+  "rms_db": -12.754560887075492,
+  "serum_rms_db": -13.088807938800233,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.6125514269615238,
+  "kept": true
+ },
+ "Bass - The Selected": {
+  "sig": "2177f96bb478565dbab356337f3af289",
+  "volume": 50,
+  "start_volume": 65,
+  "start_rms_db": -10.488115550343686,
+  "rms_db": -14.738466260634713,
+  "serum_rms_db": -14.80237349157827,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.03573739950960331,
+  "kept": true
+ },
+ "Bass - A Classic": {
+  "sig": "0e4f0d3ed5c0274718777e34d7fba818",
+  "volume": 51,
+  "start_volume": 46,
+  "start_rms_db": -12.851252542177093,
+  "rms_db": -10.58406869116797,
+  "serum_rms_db": -8.5683699466221,
+  "shortfall_db": 2.015698744545869,
+  "limiter_loss_db": 1.154031080225968,
+  "kept": true
+ },
+ "Keys - Other Side": {
+  "sig": "5da731cce3e57f15b52c0eab3d95cfe0",
+  "volume": 27,
+  "start_volume": 42,
+  "start_rms_db": -9.87254980807679,
+  "rms_db": -16.93510059778244,
+  "serum_rms_db": -16.954271315994617,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.1734864422595912,
+  "kept": true
+ },
+ "Bass - SWEDISHMF": {
+  "sig": "136ef193cf510c1cc3323930147dc76a",
+  "volume": 50,
+  "start_volume": 62,
+  "start_rms_db": -8.120278788271902,
+  "rms_db": -11.313193744037909,
+  "serum_rms_db": -11.531401092038134,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.03900963620563225,
+  "kept": true
+ },
+ "Lead - HotLap": {
+  "sig": "ebd375f19afaf1f6363e912b317e3586",
+  "volume": 55,
+  "start_volume": 64,
+  "start_rms_db": -11.287843650562131,
+  "rms_db": -13.857428850550523,
+  "serum_rms_db": -14.127223649201433,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.015661944663602156,
+  "kept": true
+ },
+ "Lead - The Selected": {
+  "sig": "f22192829d4cb266342cf975db10e5b5",
+  "volume": 30,
+  "start_volume": 46,
+  "start_rms_db": -14.340963915477488,
+  "rms_db": -22.279999795641,
+  "serum_rms_db": -21.657652120357778,
+  "shortfall_db": 0.6223476752832227,
+  "limiter_loss_db": 0.5624958271771696,
+  "kept": true
+ },
+ "Bass - oskar med k": {
+  "sig": "a37c01c169c5ddcf69caa6372719beea",
+  "volume": 45,
+  "start_volume": 34,
+  "start_rms_db": -12.207288501809481,
+  "rms_db": -7.788011494873696,
+  "serum_rms_db": -7.929715235011024,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.15490910768861976,
+  "kept": true
+ },
+ "Lead - Sleepless": {
+  "sig": "456bfb5615ff56397c0cf6a2bec0b5a3",
+  "volume": 65,
+  "start_volume": 59,
+  "start_rms_db": -16.319256401876277,
+  "rms_db": -14.758931322351192,
+  "serum_rms_db": -15.444286946448912,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.13436515786034064,
+  "kept": true
+ },
+ "Lead - Rollin": {
+  "sig": "5e8f0d78afa50075d1ceceba7a4e481d",
+  "volume": 35,
+  "start_volume": 40,
+  "start_rms_db": -11.023284512806327,
+  "rms_db": -13.15574656665046,
+  "serum_rms_db": -13.456447525521684,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.11316990624704104,
+  "kept": true
+ },
+ "Lead - Space & Time": {
+  "sig": "d3db094d95e538d163d49e45bebaae94",
+  "volume": 42,
+  "start_volume": 34,
+  "start_rms_db": -15.912028148427273,
+  "rms_db": -12.037027914864682,
+  "serum_rms_db": -11.596669748798291,
+  "shortfall_db": 0.44035816606639067,
+  "limiter_loss_db": 0.09660169927212259,
+  "kept": true
+ },
+ "Lead - Tonic Walter": {
+  "sig": "4f1f2c79a7c37da332695dd10cdf5d15",
+  "volume": 52,
+  "start_volume": 72,
+  "start_rms_db": -13.545680782866391,
+  "rms_db": -18.87637436895917,
+  "serum_rms_db": -18.425825379474748,
+  "shortfall_db": 0.450548989484421,
+  "limiter_loss_db": -0.11565564506159376,
+  "kept": true
+ },
+ "Pluck - Movement": {
+  "sig": "5fa52aacc0792c77fafaa8ff44f92d4d",
+  "volume": 71,
+  "start_volume": 70,
+  "start_rms_db": -17.135636075778468,
+  "rms_db": -16.781471611610044,
+  "serum_rms_db": -17.037369704444167,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 1.3998445128444388,
+  "kept": true
+ },
+ "Pad - Small Town Kid": {
+  "sig": "480aa9ed54212b30221a378695d48db4",
+  "volume": 51,
+  "start_volume": 52,
+  "start_rms_db": -20.262161225542542,
+  "rms_db": -20.63728162626909,
+  "serum_rms_db": -20.650552684906902,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.1929934889363345,
+  "kept": true
+ },
+ "Bass - Gravity": {
+  "sig": "8df7f08e8c4f6085caedb3263e476cec",
+  "volume": 39,
+  "start_volume": 46,
+  "start_rms_db": -7.967795832947915,
+  "rms_db": -10.799910862560647,
+  "serum_rms_db": -11.00116884530513,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.0056365111656155875,
+  "kept": true
+ },
+ "Keys - Loop": {
+  "sig": "e7194e967a998bdb6914b3b3c6bcc6e7",
+  "volume": 44,
+  "start_volume": 51,
+  "start_rms_db": -7.054953642088012,
+  "rms_db": -9.650797634771514,
+  "serum_rms_db": -9.704887852600248,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.22377058104652292,
+  "kept": true
+ },
+ "Bass - Black Out": {
+  "sig": "4c5cbae2a061fec8189072161983cd6f",
+  "volume": 42,
+  "start_volume": 35,
+  "start_rms_db": -10.609508061722607,
+  "rms_db": -7.441817711563941,
+  "serum_rms_db": -7.435136044418215,
+  "shortfall_db": 0.0066816671457257115,
+  "limiter_loss_db": -0.024291855059546563,
+  "kept": true
+ },
+ "Lead - Other Side": {
+  "sig": "92ff82d473b2fe46eee1618827f05cc7",
+  "volume": 51,
+  "start_volume": 49,
+  "start_rms_db": -13.649369856242346,
+  "rms_db": -13.014039251772916,
+  "serum_rms_db": -13.156404214192223,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.2135321813169444,
+  "kept": true
+ },
+ "Keys - Lynnic": {
+  "sig": "6b963436eae1125c4d13c6305514b6f1",
+  "volume": 36,
+  "start_volume": 57,
+  "start_rms_db": -11.750051289595556,
+  "rms_db": -19.589092584013297,
+  "serum_rms_db": -18.51864597450551,
+  "shortfall_db": 1.070446609507787,
+  "limiter_loss_db": 1.4483777019066686,
+  "kept": true
+ },
+ "Lead - Oskar Med": {
+  "sig": "8322223e8f1f978f0932b7dd212f1836",
+  "volume": 30,
+  "start_volume": 57,
+  "start_rms_db": -6.984513813980695,
+  "rms_db": -17.209632035852017,
+  "serum_rms_db": -17.67581966685806,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.18407970375201899,
+  "kept": true
+ },
+ "Keys - Atlantic": {
+  "sig": "d46731a7313ef3ce69bed861daee9fc9",
+  "volume": 64,
+  "start_volume": 46,
+  "start_rms_db": -18.88382456941201,
+  "rms_db": -13.022127449941056,
+  "serum_rms_db": -13.008012128426415,
+  "shortfall_db": 0.01411532151464101,
+  "limiter_loss_db": 0.14949330364299485,
+  "kept": true
+ },
+ "Pad - Nu Aspect 2": {
+  "sig": "b9e28c234d376df855fa3c3806cb9b0d",
+  "volume": 49,
+  "start_volume": 75,
+  "start_rms_db": -6.881812976475271,
+  "rms_db": -14.00446467353045,
+  "serum_rms_db": -14.80684830679751,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.5379490504519708,
+  "kept": true
+ },
+ "Pluck - all things break": {
+  "sig": "b42bca64842b1ecfc35f64eec03e58be",
+  "volume": 51,
+  "start_volume": 69,
+  "start_rms_db": -11.956425954300355,
+  "rms_db": -17.180518260998426,
+  "serum_rms_db": -17.260747306274766,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.572903386231495,
+  "kept": true
+ },
+ "Pluck - London Topaz": {
+  "sig": "cd55eb6b5392ca9a52b3e84ff8b14b34",
+  "volume": 71,
+  "start_volume": 61,
+  "start_rms_db": -25.577031356949938,
+  "rms_db": -23.242764903765778,
+  "serum_rms_db": -23.490924843045452,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.08457505526665798,
+  "kept": true
+ },
+ "Pluck - NOTSOBAD": {
+  "sig": "3c32271a7395ce25aa44b1d816d55ce0",
+  "volume": 72,
+  "start_volume": 84,
+  "start_rms_db": -22.21989387278942,
+  "rms_db": -24.202292243686614,
+  "serum_rms_db": -24.656608898022764,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.05085228903243433,
+  "kept": true
+ },
+ "Pluck - Selected": {
+  "sig": "006e7458300d207fa289067da8dc783c",
+  "volume": 62,
+  "start_volume": 84,
+  "start_rms_db": -18.51634402313914,
+  "rms_db": -23.784909917281798,
+  "serum_rms_db": -23.694734542194244,
+  "shortfall_db": 0.09017537508755424,
+  "limiter_loss_db": -0.015384412041353102,
+  "kept": true
+ },
+ "Pluck - Nu Aspect": {
+  "sig": "54c68b2abf22f8e84c9927f90894d975",
+  "volume": 70,
+  "start_volume": 62,
+  "start_rms_db": -26.369221684176317,
+  "rms_db": -24.245232844272422,
+  "serum_rms_db": -24.38574891320515,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.37940115589541534,
   "kept": true
  }
 }

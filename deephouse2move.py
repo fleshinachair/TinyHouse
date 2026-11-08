@@ -155,6 +155,7 @@ def physical(tree: dict, header: dict) -> dict:
             "detune_wid": p.get("kParamDetuneWid"),      # how far the stack spreads, not stereo
             "stereo_pct": p.get("kParamUnisonStereo"),
             "table": wt.get("relativePathToWT"),
+            "embedded": wt.get("embeddedWTData") if not wt.get("relativePathToWT") else None,        # a table edited in Serum and stored in the preset (no file)
             "table_pos": wtp.get("kParamTablePos", 1.0),            # 1..256
             "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0)}
                      for m, a in (("kParamWarpMenu", "kParamWarp"),
@@ -244,6 +245,24 @@ def physical(tree: dict, header: dict) -> dict:
                 b = int(m["dest_param"][-6]) - 1
                 bus[m["dest_id"]][b] = _clamp(bus[m["dest_id"]][b] + m["amount_pct"] * ((x - 0.5) if m["bipolar"] else x), 0.0, 100.0)
     flt2 = _pp(tree.get("VoiceFilter1", {}))
+    # A voice filter's Wet (percent, an unwritten one is fully wet) is a dry / wet mix of the filter: at 0 the signal goes past it untouched (calibration scratch
+    # vf_wet_ab.py: Serum with such a filter on against the same render with it disabled, octave bands within 2 dB; the Factory's "filter on / off" macros store Wet 0
+    # and a +100 % macro route). The routes into it are folded at the saved macro position, the nominal velocity and note, and the mod wheel at 0; an envelope or LFO route
+    # leaves the filter as it is (dynamic). Only a filter whose Wet ends under 1 % and stays there is treated as off.
+    def vf_wet(i, node):
+        wet, dynamic = float(node.get("kParamWet", 100.0)), False
+        for m in mods:
+            if m["dest_type"] == "VoiceFilter" and m["dest_param"] == "kParamWet" and m["dest_id"] == i:
+                src = m["source"]
+                x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else 0.0 if src == 1 else None)
+                if x is None:
+                    dynamic = True
+                else:
+                    wet += m["amount_pct"] * ((x - 0.5) if m["bipolar"] else x)
+        return _clamp(wet, 0.0, 100.0), dynamic
+    wet1, dyn1 = vf_wet(0, flt)
+    wet2, dyn2 = vf_wet(1, flt2)
+    off1, off2 = wet1 < 1.0 and not dyn1, wet2 < 1.0 and not dyn2
     fx = [k[2:] for r in (tree.get("FXRack0", {}).get("FX", []) or [])
           for k in r if k.startswith("FX")]
     # The main rack's nodes as stored, for fxmap.py. The two bus racks are the sources' sends (bus_nodes below).
@@ -269,7 +288,7 @@ def physical(tree: dict, header: dict) -> dict:
                   "type": (_pp(noise_node.get("NoiseOsc3", {})) or {}).get("kParamNoiseType") if isinstance(noise_node.get("NoiseOsc3"), dict) else None,
                   "color": (_pp(noise_node.get("NoiseOsc3", {})) or {}).get("kParamColor") if isinstance(noise_node.get("NoiseOsc3"), dict) else None,
                   "level": _pp(noise_node).get("kParamVolume", DEFAULTS["osc_level"])},
-        "filter": {"enabled": bool(flt.get("kParamEnable", 0)),
+        "filter": {"enabled": bool(flt.get("kParamEnable", 0)) and not off1, "wet": wet1,
                    "model": flt.get("kParamType", DEFAULT_VOICE_FILTER),
                    "cutoff_norm": flt.get("kParamFreq", DEFAULTS["cutoff"]),
                    "cutoff_hz": serum_cutoff_hz(flt.get("kParamFreq", DEFAULTS["cutoff"])),
@@ -277,8 +296,8 @@ def physical(tree: dict, header: dict) -> dict:
                    "drive_pct": flt.get("kParamDrive", 0.0),
                    "keytrack": flt.get("kParamKeyTrack", 0.0),
                    "var": flt.get("kParamVar")},
-        "filter2_enabled": bool(flt2.get("kParamEnable", 0)),
-        "filter2": {"enabled": bool(flt2.get("kParamEnable", 0)),
+        "filter2_enabled": bool(flt2.get("kParamEnable", 0)) and not off2,
+        "filter2": {"enabled": bool(flt2.get("kParamEnable", 0)) and not off2, "wet": wet2,
                     "model": flt2.get("kParamType", DEFAULT_VOICE_FILTER),
                     "cutoff_norm": flt2.get("kParamFreq", DEFAULTS["cutoff"]),
                     "reso_pct": flt2.get("kParamReso", DEFAULTS["reso"]),
@@ -766,6 +785,29 @@ def resolve_table(ref, pack: dict[str, Path], serum_tables: Path | None,
     return f"{MOVE_WT_ROOT}/{subdir}/{Path(dest_rel).as_posix()}", rel
 
 
+# A wavetable edited in Serum is stored inside the preset (WTOsc `embeddedWTData`, a flat list of 2048-sample frames) and the oscillator has no table path; 34 oscillators of the
+# 626 factory presets (BA - 303 Reality's saw, ...) did, and played the engine's "Init" table (a pulse) instead. It is written out as a float WAV in Serum's own layout (a `clm `
+# chunk, frame size 2048, stepped: the interpolation digit of Serum's Default Shapes) and loaded like any other table.
+EMBEDDED_FRAME = 2048
+
+
+def write_embedded_table(data: list, wt_out: Path, subdir: str) -> str:
+    arr = [float(x) for x in data]
+    n = len(arr) // EMBEDDED_FRAME * EMBEDDED_FRAME
+    arr = arr[:n] if n else arr
+    digest = hashlib.md5(struct.pack(f"<{len(arr)}f", *arr)).hexdigest()[:12]
+    name = f"embedded_{digest}.wav"
+    dest = wt_out / subdir / "embedded" / name
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        clm = b"<!>2048 01000000 wavetable (www.xferrecords.com)"
+        pcm = struct.pack(f"<{len(arr)}f", *arr)
+        fmt = struct.pack("<HHIIHH", 3, 1, 44100, 44100 * 4, 4, 32)
+        body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"clm " + struct.pack("<I", len(clm)) + clm + (bytes(1) if len(clm) % 2 else b"") + b"data" + struct.pack("<I", len(pcm)) + pcm
+        dest.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    return f"{MOVE_WT_ROOT}/{subdir}/embedded/{name}"
+
+
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 
@@ -1079,6 +1121,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             else:
                 crit.append(f"{k} warp {w['mode'][1:]} unsupported (no FM/RM/fold in Tablor)")
         path, ref = resolve_table(o["table"], pack, serum_tables, wt_out, subdir)
+        if path is None and not ref and o.get("embedded"):
+            path = write_embedded_table(o["embedded"], wt_out, subdir)
+            note.append(f"{k}: the preset's own embedded wavetable ({len(o['embedded']) // EMBEDDED_FRAME} frames)")
         paths[f"{k}_table"] = path or "Init"
         if path is None and ref:
             missing.append(ref)
@@ -1132,6 +1177,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     f = ph["filter"]
     # Each source goes where Serum sends it: through the filter or direct to the amp (the engine's per-source Route).
     bypassed = f["enabled"] and through == 0 and around > 0
+    for fl, label in ((f, "filter"), (ph["filter2"], "filter 2")):
+        if fl["enabled"] and 1.0 <= fl.get("wet", 100.0) < 99.0:
+            appr.append(f"{label} Wet {fl['wet']:.0f} %: Serum mixes the unfiltered signal back in, the engine's voice filter is fully wet")
     if bypassed:
         appr.append("every source bypasses the filter in Serum, so Tablor's is left open")
     for oid, slot in slot_of.items():

@@ -3,7 +3,7 @@
 
   fit_filter_model.py MODEL [MODEL ...]
 
-For each model a held saw goes through Serum's filter at several cutoffs (no resonance); the engine's six filter types are searched
+For each model a held saw goes through Serum's filter at several cutoffs (no resonance); the engine's eight filter types (LP, HP, BP, notch; 12 and 24 dB) are searched
 (cutoff pot, resonance 0) for the one whose harmonic transfer is closest; the best type and, per cutoff, the best pot (as an offset to the
 converter's closed-form cutoff) are written to calibration/filter_models.json, which the converter reads. A model whose best match is
 still more than 6 dB off is recorded as poor and the converter flags the preset. Serum renders are cached.
@@ -24,7 +24,7 @@ import test_render_calibration as H
 OUT = ROOT / "calibration/filter_models.json"
 CACHE = ROOT / "calibration/fit_filter_model_serum.json"
 CUTOFFS = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
-TYPES = {0: "LP12", 1: "LP24", 2: "HP12", 3: "HP24", 4: "BP12", 5: "BP24"}
+TYPES = {0: "LP12", 1: "LP24", 2: "HP12", 3: "HP24", 4: "BP12", 5: "BP24", 6: "N12", 7: "N24"}
 V.NH = 60
 
 

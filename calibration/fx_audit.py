@@ -169,7 +169,7 @@ def compare(kind, s, e):
 def preset_nodes(tree, header):
     """{kind: node}: the node the converter carries for each kind (the loudest, macros folded), with its stored params."""
     ph = d2m.physical(tree, header)
-    nodes = fxmap.fold_macro_wets(ph["fx_nodes"], ph["mods"], ph["macros"])
+    nodes = fxmap.fold_macro_knobs(fxmap.fold_macro_wets(ph["fx_nodes"], ph["mods"], ph["macros"]), ph["mods"], ph["macros"])
     inside = fxmap.branch_nodes(nodes)
     best, every = {}, []
     # the engine's EQ stage also carries the static low-pass / high-pass Filter effects (fxmap.filter_bands), so Serum gets those with the EQs

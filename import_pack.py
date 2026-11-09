@@ -97,12 +97,20 @@ def finalize_level(m, it, serum=None, bank=""):
     return cap_limiter(d2m.blob(m), it)
 
 
+def as_played(renders):
+    """Serum's renders as the engine would put them out: rounded to 16 bits with TPDF dither (+-1 LSB), like engine.cpp's output stage. The engine's renders are 16-bit, Serum's are
+    float, so in a band where Serum is clean (a bass filtered below a few kHz) the engine's dither floor read as a 30-100 dB error in an octave band nobody can hear: 7 of 88 presets
+    the gate had dropped passed before this, 16 after. The same noise floor on both sides; nothing is tuned."""
+    rng = np.random.default_rng(7)
+    return [np.clip(np.rint(x * 32767.0 + (rng.random(x.shape) - rng.random(x.shape))), -32768, 32767) / 32767.0 for x in renders]
+
+
 def quality(state, it):
     """How close the finished preset is to Serum's own render of it: the level gap (engine - Serum, dB, over the sounding part) and the octave-band error (rms of the engine's
     band levels re its loudest minus Serum's, dB). A gate on the result, not a fit: a preset the converter has not carried well (a silent filter, a missing oscillator kind) shows here."""
     ren = [H.run_cli(state, it["notes"], C.DUR, C.HOLD) for _ in range(2)]
     gap = L.rms_db(ren, it["end"]) - L.rms_db(it["refs"], it["end"])
-    eb, sb = np.mean([VS.bands(x) for x in ren], axis=0), np.mean([VS.bands(x) for x in it["refs"]], axis=0)
+    eb, sb = np.mean([VS.bands(x) for x in ren], axis=0), np.mean([VS.bands(x) for x in as_played(it["refs"])], axis=0)
     return float(gap), float(np.sqrt(np.mean(np.square((eb - eb.max()) - (sb - sb.max())))))
 
 INAUDIBLE_KINDS = ("Filter", "Bode", "Split", "SplitMS", "Comp", "Distortion", "Utils")

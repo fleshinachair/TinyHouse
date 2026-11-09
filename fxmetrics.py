@@ -58,7 +58,13 @@ def rt60(a, t_burst_end=0.25):
     tail = e[i0:]
     if len(tail) < 20:
         return float("nan")
-    start = tail[:5].max()
+    # The tail starts where it peaks, not at a fixed offset: a convolution reverb whose impulse response begins 0.3 s in (OR - Thermite) has nothing in the first 50 ms, and a
+    # start read from there made every later level "under it" by nothing, so the decay read as infinite.
+    pk = int(np.argmax(tail[:150]))
+    start = tail[pk]
+    if start < -85.0:
+        return 0.0                                   # nothing above the floor: no tail
+    tail = tail[pk:]
     lo = np.where(tail < start - 5)[0]
     hi = np.where(tail < start - 25)[0]
     if not lo.size:
@@ -88,9 +94,13 @@ def tail_window(a, t0=0.3, longest=1.0, shortest=0.1, drop=35.0, floor_db=-85.0,
     i0 = int(t0 / 0.01)
     if len(e) <= i0 + 2:
         return t0, None
-    start = float(e[i0:i0 + 3].max())
-    if start < floor_db:
+    # from where the tail starts (its first stretch above the floor, up to 1.5 s in): a late impulse response is a tail too
+    late = np.where(e[i0:i0 + 150] >= floor_db)[0]
+    if not late.size:
         return t0, None
+    i0 += int(late[0])
+    t0 = i0 * 0.01
+    start = float(e[i0:i0 + 3].max())
     below = np.where(e[i0:] < max(start - drop, end_db))[0]
     span = below[0] * 0.01 if below.size else longest
     return t0, t0 + min(max(span, shortest), longest)

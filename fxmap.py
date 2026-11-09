@@ -197,7 +197,7 @@ def foldable_source(m: dict, macros: list) -> bool:
 def macro_value(m: dict, macros: list) -> float:
     """The value 0..1 a macro (or velocity / the note, at their nominal values) gives a route: the source's position, through the route's own curve when it has one."""
     s = m["source"]
-    x = macros[s - 25] / 100.0 if 25 <= s <= 32 else VELOCITY_NOMINAL / 127.0 if s == 16 else 0.0 if s == 1 else NOTE_NOMINAL / 127.0
+    x = macros[s - 25] / 100.0 if 25 <= s <= 32 else VELOCITY_NOMINAL / 127.0 if s == 16 else (macros[8] / 100.0 if len(macros) > 8 else 0.0) if s == 1 else NOTE_NOMINAL / 127.0
     lut = m.get("curve")
     return float(np.interp(x, np.linspace(0.0, 1.0, len(lut)), lut)) if lut else x
 
@@ -1161,7 +1161,9 @@ def map_reverb(fp: dict | None, cache: dict, cli: Path = CLI) -> tuple[dict, lis
     r = fp["reverb"]
     colour = math.isfinite(r["centroid"]) and math.isfinite(r["side_mid"])         # a tail too quiet to read a colour from (fxmetrics.tail_window)
     if not colour:
-        r = r | {"centroid": 0.0, "side_mid": 0.0}
+        # Serum's reverb at Wet 100 leaves nothing above -85 dB after the burst: it has no tail to match (a short Vintage reverb, Basist's: its engine tail ran at the 30 s fallback and kept
+        # sounding after the note, where Serum's stops). The wet ratio read from two silent windows is a ratio of floors, so it is not used either: the reverb is left off.
+        return P, ["Reverb: Serum's tail is below -85 dB (nothing to match), left off"], {}
     key = json.dumps([round(r["rt60"], 2), round(r["centroid"]), round(r["side_mid"], 1), round(r["wet_ratio"], 3), round(r["level100_db"], 1)])
     if key in cache:
         return P | cache[key]["params"], cache[key]["notes"], cache[key]["info"]
@@ -1171,21 +1173,19 @@ def map_reverb(fp: dict | None, cache: dict, cli: Path = CLI) -> tuple[dict, lis
         b = noise_patch({"rev_mix": 127, "rev_decay": decay, "rev_damp": damp, "rev_width": width})
         return M.reverb_tail(render_cli(b, 5.0, 0.12, cli))
 
-    rt_t = r["rt60"] if math.isfinite(r["rt60"]) and r["rt60"] > 0 else 30.0
+    # rt60 nan = the tail fell 20 dB in under 50 ms (a very short reverb), inf = it never fell: only that one is a 30 s tail
+    rt_t = r["rt60"] if math.isfinite(r["rt60"]) and r["rt60"] > 0 else (0.1 if math.isnan(r["rt60"]) else 30.0)
     cen_t = min(max(r["centroid"], 250.0), 9000.0)
-    if not colour:
-        notes.append("Reverb: the tail is too quiet to read its colour from, left at the default")
-    elif r["centroid"] < 250:
+    if r["centroid"] < 250:
         notes.append(f"Reverb: the measured tail is nearly all bass (centroid {r['centroid']:.0f} Hz), matched as dark as it goes")
     decay, damp = 70, 110
     for _ in range(2):
         decay = bisect(lambda d: finite(tail(d, damp)["rt60"]), 0, 127, min(rt_t, 30.0))
-        if colour:
-            damp = bisect(lambda p: finite(tail(decay, p)["centroid"], 1e5), 20, 127, cen_t)
+        damp = bisect(lambda p: finite(tail(decay, p)["centroid"], 1e5), 20, 127, cen_t)
     got = tail(decay, damp)
     base_sm = got["side_mid"]
     width = 127
-    if colour and r["side_mid"] < base_sm - 3:
+    if r["side_mid"] < base_sm - 3:
         width = int(round(min(max(127 * 10 ** ((r["side_mid"] - base_sm) / 20), 0), 127)))
     # the level: the engine's wet-100 steady level at these settings against Serum's
     ref = render_cli(noise_patch({}), 3.0, 2.9, cli)

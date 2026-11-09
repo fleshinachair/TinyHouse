@@ -105,13 +105,27 @@ def as_played(renders):
     return [np.clip(np.rint(x * 32767.0 + (rng.random(x.shape) - rng.random(x.shape))), -32768, 32767) / 32767.0 for x in renders]
 
 
-def quality(state, it):
+def quality(state, it, band_floor=None):
+    band_floor = BAND_FLOOR_DB if band_floor is None else band_floor
     """How close the finished preset is to Serum's own render of it: the level gap (engine - Serum, dB, over the sounding part) and the octave-band error (rms of the engine's
     band levels re its loudest minus Serum's, dB). A gate on the result, not a fit: a preset the converter has not carried well (a silent filter, a missing oscillator kind) shows here."""
     ren = [H.run_cli(state, it["notes"], C.DUR, C.HOLD) for _ in range(2)]
     gap = L.rms_db(ren, it["end"]) - L.rms_db(it["refs"], it["end"])
     eb, sb = np.mean([VS.bands(x) for x in ren], axis=0), np.mean([VS.bands(x) for x in as_played(it["refs"])], axis=0)
-    return float(gap), float(np.sqrt(np.mean(np.square((eb - eb.max()) - (sb - sb.max())))))
+    return float(gap), floored_band_error(eb, sb, band_floor)
+
+
+BAND_FLOOR_DB = 40.0          # default for the gate's masking floor (see floored_band_error); 0 turns it off
+
+
+def floored_band_error(eb, sb, floor=BAND_FLOOR_DB):
+    """The gate's octave-band error: rms over the bands of (engine level re its loudest band) minus (Serum's re its loudest), dB, with every level first held at `floor` dB under that
+    render's loudest band (floor 0 = no floor). A band more than ~40 dB under the dominant one is masked by it and inaudible on a speaker, but unfloored it counts in full: a bass that is one
+    clean 311 Hz tone in Serum (its 31 Hz band at -105 dB) against the engine's residual -72 dB read as a 33 dB error. One constant for every preset, nothing fitted to any."""
+    e, s = eb - eb.max(), sb - sb.max()
+    if floor and floor > 0:
+        e, s = np.maximum(e, -floor), np.maximum(s, -floor)
+    return float(np.sqrt(np.mean(np.square(e - s))))
 
 INAUDIBLE_KINDS = ("Filter", "Bode", "Split", "SplitMS", "Comp", "Distortion", "Utils")
 AB_SLACK_BANDS = 1.5          # dB above Serum's own render-to-render noise (same band metric) that the effect-off render may differ by and still count as inaudible
@@ -219,6 +233,7 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("out_import"))
     ap.add_argument("--limit", type=int, default=0, help="stop after this many kept presets")
     ap.add_argument("--max-level-gap", type=float, default=3.0, help="drop a preset whose finished level is further than this from Serum's (dB)")
+    ap.add_argument("--band-floor", type=float, default=BAND_FLOOR_DB, help="hold each octave band at this many dB under the loudest band before the gate compares them (masked bands are inaudible); 0 = off")
     ap.add_argument("--max-band-rms", type=float, default=14.0, help="drop a preset whose octave-band levels are further than this (rms dB) from Serum's")
     ap.add_argument("--no-ab-ignore", action="store_true", help="do not test whether the effects the converter leaves out are inaudible in Serum itself; skip those presets")
     ap.add_argument("--no-level", action="store_true", help="skip the Serum render and the loudness fit (the converter's own volume)")
@@ -320,7 +335,7 @@ def main():
             except RuntimeError as e:                # the voice-only reference (effects stripped) can be silent for a preset whose sound is its effects
                 skipped.append((name, [f"Serum made no sound for the voice reference: {str(e)[:50]}"]))
                 continue
-            gap, berr = quality(state, it)
+            gap, berr = quality(state, it, a.band_floor)
             if abs(gap) > a.max_level_gap or berr > a.max_band_rms:
                 skipped.append((name, [f"too far from Serum after the fit: level {gap:+.1f} dB, octave bands {berr:.1f} dB rms"]))
                 print(f"  dropped {name}: level {gap:+.1f} dB, bands {berr:.1f} dB rms", flush=True)

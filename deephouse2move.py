@@ -147,21 +147,26 @@ def aux_scale(aux: int, curve, macros: list, inverted: bool = False) -> float:
     envelope / LFO gate at its mean) through the route's aux curve when it has one (probe_aux_curve.py), else x itself."""
     if 25 <= aux <= 32:
         x = macros[aux - 25] / 100.0
+    elif aux == 1:
+        x = macros[8] / 100.0 if len(macros) > 8 else 0.0         # the mod wheel at its saved position
     elif aux == 16:
         x = VELOCITY_NOMINAL / 127.0
     elif aux == 17:
         x = 60 / 127.0
     else:
         x = None                                         # random per note (21, 22) or an envelope / LFO gate: the mean over x
-    if inverted and x is not None:
-        x = 1.0 - x                                      # kParamAuxInverted: the aux works as 1 - x (calibration/probe_aux_inverted.py: macro 0 / .5 / 1 gave -29 / -41 / silent dB, the plain route the reverse)
+    # kParamAuxInverted: the aux works as 1 - its value (calibration/probe_aux_inverted.py: macro 0 / .5 / 1 gave -29 / -41 / silent dB, the plain route the reverse). With an aux curve
+    # as well the curve comes first and the inversion after it, scale = 1 - curve(x) (BA - Analog Classics 3: macro 0 / 50 / 100 on a curve 0 -> 0.72 inverted gave the full depth /
+    # 0.64 / 0.28, matched against plain routes of those depths; inverting x first gave 0.72 / 0.36 / 0 and held its filter route 14 dB too shut).
     if curve is None:
-        return 0.5 if x is None else x
-    if x is None:
-        return (sum(curve) - 0.5 * (curve[0] + curve[-1])) / (len(curve) - 1)
-    pos = _clamp(x, 0.0, 1.0) * 32.0
-    i = min(int(pos), 31)
-    return curve[i] + (curve[i + 1] - curve[i]) * (pos - i)
+        scale = 0.5 if x is None else x
+    elif x is None:
+        scale = (sum(curve) - 0.5 * (curve[0] + curve[-1])) / (len(curve) - 1)
+    else:
+        pos = _clamp(x, 0.0, 1.0) * 32.0
+        i = min(int(pos), 31)
+        scale = curve[i] + (curve[i + 1] - curve[i]) * (pos - i)
+    return 1.0 - scale if inverted else scale
 
 
 def physical(tree: dict, header: dict) -> dict:
@@ -220,6 +225,14 @@ def physical(tree: dict, header: dict) -> dict:
                          "curve": route_curve(s), "aux_curve": aux_curve(s),
                          "aux_inverted": bool(_pp(s).get("kParamAuxInverted", 0.0))})
     macros = [_pp(tree.get(f"Macro{i}", {})).get("kParamValue", 0.0) for i in range(8)]
+    # The mod wheel is stored in the preset (Global0 kParamModWheel, percent) and Serum plays the preset with it where it was saved (calibration scratch: BA - Donk's wheel at 97 % drives
+    # Macro 7 by +100 %, and that macro drives the amp envelope's Sustain; with the route dropped Serum's note died away, with it the note held). It rides at macros[8] so every consumer of
+    # `macros` sees it as the source 1. A route from the wheel into a macro moves that macro (unipolar by amount x wheel, bipolar by amount x (wheel - 0.5), in macro percent).
+    wheel = _clamp(float(_pp(tree.get("Global0", {})).get("kParamModWheel", 0.0)) / 100.0, 0.0, 1.0)
+    for m in mods:
+        if m["source"] == 1 and not m["aux"] and m["dest_type"] == "Macro" and isinstance(m["dest_id"], int) and 0 <= m["dest_id"] < 8:
+            macros[m["dest_id"]] = _clamp(macros[m["dest_id"]] + m["amount_pct"] * ((wheel - 0.5) if m["bipolar"] else wheel), 0.0, 100.0)
+    macros.append(wheel * 100.0)
     # A route's second source (source = [main, aux]) scales its depth by the aux's value x: a macro at its saved value (a route gated by a macro at 0 does nothing: Pad - MIND's filter
     # envelope, which left its filter closed in Serum while the engine opened it), velocity (x = velocity / 127) and note number (x = note / 127) at their nominal values
     # (calibration/probe_aux_source.py), a random aux (21, 22: uniform per note) at its mean, and when the slot has an aux curve (kParamAuxCurveData) the curve's value in place
@@ -227,21 +240,29 @@ def physical(tree: dict, header: dict) -> dict:
     # old fix left every velocity / note aux at full depth). 1 (the mod wheel), 18, 19 and 24 are closed at rest (the route is off), 20 and 23 constant (left).
     for m in mods:
         aux = m.get("aux") or 0
-        if aux == 1 or aux in (18, 19, 24):
-            m["amount_pct"] = 0.0                  # the mod wheel (1) and the sources closed at rest (probe_aux_source.py): the route does nothing in a static preset
-        elif 25 <= aux <= 32 or aux in (16, 17, 21, 22) or 2 <= aux <= 15:
+        if aux in (18, 19, 24):
+            m["amount_pct"] = 0.0                  # the sources closed at rest (probe_aux_source.py): the route does nothing in a static preset
+        elif 25 <= aux <= 32 or aux in (1, 16, 17, 21, 22) or 2 <= aux <= 15:
             # a macro at its saved value, velocity / note at their nominal values, a random aux or an envelope / LFO gate at its mean (two vibrato routes: Keys - Billboard's
             # random-gated vibrato was carried at full depth), each through the route's aux curve when it has one (aux_scale)
             m["amount_pct"] *= aux_scale(aux, m.get("aux_curve"), macros, m.get("aux_inverted", False))
     # An envelope's Sustain is a plain 0..1 knob, so a macro, velocity or note route into it is folded in at the saved macro value or the nominal velocity / note
     # (Bass - Let It Go: velocity into the filter envelope's sustain, +73 %, which at velocity 100 holds the filter at 0.57 where the preset's own value is 0).
-    # The attack, decay and release knobs are logarithmic times and are left as stored.
+    # Attack, Decay and Release are stored in seconds but a route moves them in the knob's own domain, norm = (seconds / 32) ** 0.2 (the loader's time law): measured in
+    # calibration/probe_env_route.py (a 0.3 s decay with a macro at 100 % routed at +10 / +20 / -20 %: 0.9 / 2.4 / 0.009 s, the norm 0.395 + amount). 49 of the 91 factory presets
+    # in the trial set route something into an envelope time; before this they were left as stored.
     for m in mods:
-        if m["dest_type"] == "Env" and m["dest_param"] == "kParamSustain" and isinstance(m["dest_id"], int) and 0 <= m["dest_id"] < len(envs):
+        if m["dest_type"] == "Env" and isinstance(m["dest_id"], int) and 0 <= m["dest_id"] < len(envs) and m["dest_param"] in ("kParamSustain", "kParamAttack", "kParamDecay", "kParamRelease"):
             src = m["source"]
-            x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else None)
+            x = (fxmap.macro_value(m, macros) if (25 <= src <= 32 or src == 1) else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else None)
             if x is not None:
-                envs[m["dest_id"]]["sustain"] = min(max(envs[m["dest_id"]]["sustain"] + m["amount_pct"] / 100.0 * ((x - 0.5) if m["bipolar"] else x), 0.0), 1.0)
+                d = m["amount_pct"] / 100.0 * ((x - 0.5) if m["bipolar"] else x)
+                key = m["dest_param"][6:].lower()
+                if key == "sustain":
+                    envs[m["dest_id"]][key] = min(max(envs[m["dest_id"]][key] + d, 0.0), 1.0)
+                else:
+                    norm = min(max((max(envs[m["dest_id"]][key], 0.0) / 32.0) ** 0.2 + d, 0.0), 1.0)
+                    envs[m["dest_id"]][key] = 32.0 * norm ** 5
     lfos = []
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
@@ -288,7 +309,7 @@ def physical(tree: dict, header: dict) -> dict:
         for m in mods:
             if m["dest_type"] == "VoiceFilter" and m["dest_param"] == "kParamWet" and m["dest_id"] == i:
                 src = m["source"]
-                x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else 0.0 if src == 1 else None)
+                x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else macros[8] / 100.0 if src == 1 else None)
                 if x is None:
                     dynamic = True
                 else:
@@ -1109,9 +1130,10 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if src == 17 and key[:2] == ("VoiceFilter", "kParamFreq"):
                 keyfold[key[2]] += a / 127.0 * CUTOFF_NOTES          # notes of cutoff per semitone of pitch (the same slope unipolar or bipolar)
         elif src == 1:
-            # The mod wheel rests at 0 (the Move has none): a unipolar route adds nothing at rest, a bipolar one sits half its depth below the base.
-            if m.get("bipolar"):
-                fold[key] += a * -0.5
+            # The mod wheel sits where the preset saved it (ph["macros"][8], percent; 0 when unwritten, the wheel at rest): a unipolar route adds depth x wheel, a bipolar one
+            # depth x (wheel - 0.5). The Move has none, so the saved position is folded in like a macro.
+            w = ph["macros"][8] / 100.0 if len(ph["macros"]) > 8 else 0.0
+            fold[key] += a * ((w - 0.5) if m.get("bipolar") else w)
             mod_wheel_idle += 1
         elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/probe_venv.py)
             routes.append((src - 2, key, a))
@@ -1127,7 +1149,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     if bip_env:
         note.append(f"{bip_env} bipolar envelope route(s) to the cutoff: the base sits half their depth lower")
     if mod_wheel_idle:
-        note.append(f"{mod_wheel_idle} mod-wheel route(s) rest at the wheel's zero (no wheel on the Move)")
+        note.append(f"{mod_wheel_idle} mod-wheel route(s) folded in at the wheel's saved position {ph['macros'][8] if len(ph['macros']) > 8 else 0:.0f} % (no wheel on the Move)")
 
     # ---- oscillators --------------------------------------------------------
     # Many of these presets store an oscillator's level as 0 and supply all of it
@@ -1369,6 +1391,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 P[f"{fk}_out"] = d
             for b in (0, 1):
                 P[f"{fk}_bus{b + 1}"] = int(round(127.0 * (_clamp(bus_of.get(slot, [0.0, 0.0])[b], 0.0, 100.0) / 100.0) ** 3))
+    under = {}                                                    # voice filter key id -> how far (knob units) its base sits below zero once the static routes are folded in
     flat_filters = set()                                          # voice filters (by key id) whose model leaves the harmonics' levels alone: left open
     def voice_filter_pots(fl, key_id, prefix, label):
         """The engine pots for one Serum voice filter (cutoff law, model, resonance, drive, key tracking)."""
@@ -1395,7 +1418,10 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         elif not exact and fkey not in FILTER_MODELS:
             appr.append(f"{label} {fl['model']} approximated by {['LP12','LP24','HP12','HP24','BP12','BP24'][idx]}")
         P[f"{prefix}_type"] = idx
-        cut = _clamp(fl["cutoff_norm"] + fold[("VoiceFilter", "kParamFreq", key_id)], 0, 1)
+        cut_raw = fl["cutoff_norm"] + fold[("VoiceFilter", "kParamFreq", key_id)]
+        cut = _clamp(cut_raw, 0, 1)
+        if cut_raw < 0:
+            under[key_id] = -cut_raw          # the knob sits below zero before the envelope lifts it (a bipolar route's half-depth offset): see the envelope stage
         # A stored key track of 1.0 is full tracking. Serum's filter pivots near the bottom of
         # the keyboard and Tablor's at note 60, so the base cutoff has to move to match.
         key = _clamp(abs(fl["keytrack"]), 0, 1) * CAL["key_scale"]
@@ -1434,6 +1460,20 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             note.append("second voice filter is on but no source is sent to it")
 
     # ---- envelopes ----------------------------------------------------------
+    def under_fold(key_id, depth, env):
+        """cutoff(t) = max(0, depth * env(t) - u) where the folded base sits u below zero (a bipolar route's half-depth offset on a low knob: Synth Bass, cutoff 0.20,
+        Env2 +100 % bipolar). The engine's base cannot go below zero, so the offset moves into the envelope: depth' = depth - u and every level of the envelope is
+        (level - u/depth) / (1 - u/depth), which is exact for the exponential decay to the sustain (the time constant is unchanged); the sustain pot follows."""
+        u = under.get(key_id, 0.0)
+        if u <= 0 or depth <= 0:
+            return depth, env
+        if depth <= u:
+            note.append(f"filter {key_id + 1}: the envelope never lifts the cutoff above zero (base {-u:.2f} + depth {depth:.2f})")
+            return 0.0, env
+        r = u / depth
+        note.append(f"filter {key_id + 1}: the cutoff base is {-u:.2f} below the knob's range, taken out of the envelope (depth {depth:.2f} -> {depth - u:.2f}, sustain {env['sustain']:.2f} -> {max(0.0, (env['sustain'] - r) / (1 - r)):.2f})")
+        return depth - u, dict(env, sustain=max(0.0, (env["sustain"] - r) / (1 - r)))
+
     P["vca_a"], P["vca_d"], P["vca_s"], P["vca_r"] = pot_env(ph["envs"][0])
     flt_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 0) and 0 not in flat_filters]
     if flt_routes and not bypassed:
@@ -1441,8 +1481,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         for e, _, a in flt_routes:
             tot[e] += a
         feg = max(tot, key=lambda e: abs(tot[e]))
-        P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(ph["envs"][feg], CAL.get("flt_decay_mult", 1.0))
-        P["flt_env"] = round(_clamp(64 + 63 * tot[feg] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
+        depth, env_u = under_fold(0, tot[feg], ph["envs"][feg])
+        P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(env_u, CAL.get("flt_decay_mult", 1.0))
+        P["flt_env"] = round(_clamp(64 + 63 * depth * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
         if len(tot) > 1:
             appr.append("only the strongest of several envelope->cutoff routes kept")
     else:
@@ -1454,9 +1495,10 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         for e, _, a in f2_routes:
             tot2[e] += a
         e2 = max(tot2, key=lambda e: abs(tot2[e]))
-        P["flt2_env"] = round(_clamp(64 + 63 * tot2[e2] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
+        depth2, env2_u = under_fold(1, tot2[e2], ph["envs"][e2])
+        P["flt2_env"] = round(_clamp(64 + 63 * depth2 * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
         if not flt_routes:
-            P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(ph["envs"][e2], CAL.get("flt_decay_mult", 1.0))     # the one filter envelope is Filter 2's
+            P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(env2_u, CAL.get("flt_decay_mult", 1.0))     # the one filter envelope is Filter 2's
             feg = e2
         elif e2 != feg:
             # Filter 2 has its own envelope: a spare modulation envelope pointed at "Filter 2 Freq" (same units as flt2_env, its own ADSR); if it loses its place below,

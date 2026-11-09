@@ -433,6 +433,60 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
     return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "envs": envs, "ignored": ignored}
 
 
+FX_MODEL_FILE = Path(__file__).resolve().parent / "calibration/fxfilter_models_probe.json"
+FX_MODEL_FIXED = {"HEQ6", "HEQ12", "LB12"}      # their shape does not scale with the cutoff (probe_fxfilter_models.py: 4-7 dB between Freq 0.4, 0.55 and 0.7; the rest scale to within 1.7 dB): read at the
+#                                                 stated Freq between the three measured cutoffs in absolute Hz, only inside 0.4 .. 0.7 and at Reso 0
+FX_MODEL_FIT_MAX_DB = 4.0                       # a model whose three-band fit is further than this (rms dB, floored at -40) from Serum's curve is not carried
+_fx_models = None
+
+
+def fx_models() -> dict:
+    """The Filter FX models other than the ladders, as magnitude curves measured on Serum (calibration/probe_fxfilter_models.py): {model: {reso: dB on the probe grid}} at Freq 0.55."""
+    global _fx_models
+    if _fx_models is None:
+        d = json.loads(FX_MODEL_FILE.read_text(encoding="utf-8")) if FX_MODEL_FILE.exists() else {}
+        _fx_models = {"grid": np.array(d.get("grid", []), float)}
+        for k, v in d.items():
+            if k != "grid":
+                ty, fr, r = k.split("|")
+                if ty in FX_MODEL_FIXED:
+                    if r == "r0":
+                        _fx_models.setdefault(ty, {}).setdefault("fixed", {})[float(fr[1:])] = np.array(v, float)
+                elif fr == "f0.55":
+                    _fx_models.setdefault(ty, {})[int(r[1:])] = np.array(v, float)
+    return _fx_models
+
+
+def fx_model_target(ty: str, norm: float, reso: float, wet: float, drive: float = 0.0) -> np.ndarray:
+    """dB over FGRID of Filter FX model `ty` at the stated Freq `norm`, Reso and Wet: the measured curve (Freq 0.55) read at the same position relative to the cutoff, resonance
+    interpolated between the measured 0 / 50 / 100, a curve whose peak is under -3 dB lifted so the peak is at 0 (the loudness fit takes the level), a partial Wet as (1 - s^2) + s h
+    like the ladders (magnitude only: the phase of the filtered and the dry part is not carried)."""
+    m = fx_models()
+    g, c = m["grid"], m[ty]
+    if "fixed" in c:                                  # a model whose shape does not scale: the three measured curves, blended in dB by the stated Freq
+        frs = sorted(c["fixed"])
+        w = (min(max(norm, frs[0]), frs[-1]) - frs[0]) / (frs[-1] - frs[0])
+        k = min(int(w * (len(frs) - 1)), len(frs) - 2)
+        t = w * (len(frs) - 1) - k
+        a, b = (np.interp(np.log(FGRID), np.log(g), np.maximum(c["fixed"][frs[j]], -40.0)) for j in (k, k + 1))
+        db = a + (b - a) * t
+        s_w = smoothstep(min(max(wet, 0.0), 100.0) / 100.0)
+        if s_w < 0.99:
+            return 20.0 * np.log10(np.maximum((1.0 - s_w ** 2) + s_w * 10 ** (db / 20.0), 1e-6))
+        return db - db.max() if db.max() < -3.0 else db
+    x = FGRID / serum_filter_hz(norm) * serum_filter_hz(0.55)
+    at = lambda r: np.interp(np.log(x), np.log(g), np.maximum(c[r], -40.0))
+    reso = min(max(reso, 0.0), 100.0)
+    db = at(0) + (at(50) - at(0)) * reso / 50.0 if reso <= 50 else at(50) + (at(100) - at(50)) * (reso - 50.0) / 50.0
+    s_w = smoothstep(min(max(wet, 0.0), 100.0) / 100.0)
+    if s_w < 0.99:        # the dry part stays, so the filtered part keeps its level; Drive is a plain gain on it (probe_fxfilter_modeldrive.py: B24 +14 dB at 50, +23.5 at 100, as the ladders)
+        gain = float(np.interp(drive, [d for d, _ in FX_FILTER_DRIVE_DB], [g_ for _, g_ in FX_FILTER_DRIVE_DB]))
+        return 20.0 * np.log10(np.maximum((1.0 - s_w ** 2) + s_w * 10 ** ((db + gain) / 20.0), 1e-6))
+    if db.max() < -3.0:
+        db = db - db.max()
+    return db
+
+
 def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None) -> tuple[list[dict], list[str]]:
     """The static low-pass / high-pass Filter FX nodes of the master rack as EQ bands, and why any were left out. `handled` collects the indices of the nodes dealt
     with: carried as bands, or open (a low-pass above 19 kHz or a high-pass under 25 Hz changes nothing) or dry."""
@@ -459,7 +513,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
         # low-pass with its -3 dB point at the stated cutoff.
         ty = str(pp.get("kParamType", "default"))
         kind = "lp" if (ty in FX_FILTER_LP or ty == "default") else "hp" if ty in FX_FILTER_HP else None
-        if kind is None:
+        if kind is None and ty not in fx_models():
             why.append(f"Filter model {ty}")
             continue
         wet = float(pp.get("kParamWet", 100.0))
@@ -474,6 +528,20 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             if m.get("dest_param") == "kParamFreq" and foldable_source(m, macros):
                 mv = macro_value(m, macros)
                 norm += m["amount_pct"] / 100.0 * ((mv - 0.5) if m.get("bipolar") else mv)
+        if kind is None:                                # a measured model (bandpass, notch, band-reject, low + high ...): its curve, fitted by up to three EQ bands
+            if "fixed" in fx_models()[ty] and (not 0.4 <= norm <= 0.7 or float(pp.get("kParamReso", 0.0)) > 1.0 or float(pp.get("kParamDrive", 0.0)) > 0.5):
+                why.append(f"Filter model {ty} outside the measured Freq {0.4}-{0.7} / Reso 0")
+                continue
+            target = fx_model_target(ty, norm, float(pp.get("kParamReso", 0.0)), wet, float(pp.get("kParamDrive", 0.0)))
+            fcm = serum_filter_hz(norm)
+            bands = fit_filter_curve(target, fcm, n=3)
+            err = float(np.sqrt(np.mean((np.maximum(curve(bands), -40.0) - np.maximum(target, -40.0)) ** 2))) if bands else float(np.sqrt(np.mean(np.maximum(target, -40.0) ** 2)))
+            if err > FX_MODEL_FIT_MAX_DB:
+                why.append(f"Filter model {ty} (three bands follow it to {err:.1f} dB only)")
+                continue
+            handled.add(i)
+            out += bands
+            continue
         # The stated cutoff is not where the filter is 3 dB down. Measured on Serum (probe_filterfx.py), the -3 dB point as a
         # fraction of the stated cutoff is 0.47 for the 24 dB ladders, 0.53 for 18 dB, 0.67 for 12 dB; the engine's biquad has
         # its -3 dB point at its own frequency, so that is where it goes. The 6 dB/octave default is matched by a critically

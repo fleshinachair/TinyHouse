@@ -4,8 +4,9 @@
 A Serum preset's Sample oscillator names one audio file (relative to Serum's Samples folder); its Multisample oscillator names an SFZ file
 (relative to the Multisamples folder) that maps key ranges to files. Either becomes one .tbs file the engine's sample oscillator loads:
 
-  "TBS1" | u32 regions | per region: u8 lokey, u8 hikey, u8 root key, u8 flags (1 = loops), f32 loop start, f32 loop end (both as a
-  fraction of the region's length), f32 sample rate, f32 tune in cents, u32 frames, u8 channels (1 or 2), then the samples as int16.
+  "TBS2" | u32 regions | per region: u8 lokey, u8 hikey, u8 root key, u8 flags (1 = loops), u8 lovel, u8 hivel, f32 loop start, f32 loop end
+  (both as a fraction of the region's length), f32 sample rate, f32 tune in cents, f32 volume in dB, u32 frames, u8 channels (1 or 2), then the
+  samples as int16. (TBS1, still read by the engine, has neither the velocity layer nor the volume: it played the first layer of a key at any velocity.)
 
 These are Serum's own factory sounds (or a pack's): the .tbs files go beside the wavetables in the working folders under out/ and are not
 to be committed or redistributed. The converter passes the sample set's path to the module as the `smp_set` parameter.
@@ -54,7 +55,8 @@ def parse_sfz(path: Path) -> list[dict]:
         hi = int(r.get("hikey", key if key is not None else 127))
         root = int(r.get("pitch_keycenter", key if key is not None else 60))
         loops = r.get("loop_mode", "no_loop") in ("loop_continuous", "loop_sustain")
-        out.append({"lo": lo, "hi": hi, "root": root, "loops": loops, "tune": float(r.get("tune", 0)) + 100.0 * float(r.get("transpose", 0)),
+        out.append({"lovel": int(float(r.get("lovel", 0))), "hivel": int(float(r.get("hivel", 127))), "volume": float(r.get("volume", 0)),
+                    "lo": lo, "hi": hi, "root": root, "loops": loops, "tune": float(r.get("tune", 0)) + 100.0 * float(r.get("transpose", 0)),
                     "loop_start": _sfz_num(r.get("loop_start", 0)), "loop_end": _sfz_num(r.get("loop_end", 0)),
                     "file": (path.parent / default_path / r["sample"].replace("\\", "/")).resolve()})
     return out
@@ -63,7 +65,8 @@ def parse_sfz(path: Path) -> list[dict]:
 MAX_ONESHOT_S = 4.0                  # a sample that does not loop is cut at 4 s: the longest note a preset is played for here
 
 
-def _region(audio: np.ndarray, rate: float, lo: int, hi: int, root: int, loop: tuple[float, float] | None, tune: float) -> bytes:
+def _region(audio: np.ndarray, rate: float, lo: int, hi: int, root: int, loop: tuple[float, float] | None, tune: float,
+            lovel: int = 0, hivel: int = 127, volume_db: float = 0.0) -> bytes:
     if audio.ndim == 1:
         audio = audio[:, None]
     audio = audio[:, :2]
@@ -76,14 +79,14 @@ def _region(audio: np.ndarray, rate: float, lo: int, hi: int, root: int, loop: t
     pcm = np.clip(audio[:keep], -1.0, 1.0)
     data = (pcm * 32767.0).astype("<i2").tobytes()
     ls, le = loop if loop else (0.0, 0.0)
-    head = struct.pack("<BBBBffffIB", lo, hi, root, 1 if loop else 0, ls, le, rate, tune, keep, ch)
+    head = struct.pack("<BBBBBBfffffIB", lo, hi, root, 1 if loop else 0, lovel, hivel, ls, le, rate, tune, volume_db, keep, ch)
     return head + data
 
 
 def write_set(regions: list[bytes], dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "wb") as f:
-        f.write(b"TBS1" + struct.pack("<I", len(regions)))
+        f.write(b"TBS2" + struct.pack("<I", len(regions)))
         for r in regions:
             f.write(r)
     return dest
@@ -106,7 +109,7 @@ def export_multisample(sfz_rel: str, dest: Path, loop_pct: tuple[float, float] |
             loop = (loop_pct[0] / 100.0, loop_pct[1] / 100.0)
         elif r["loops"] and r["loop_end"] > r["loop_start"]:
             loop = (r["loop_start"] / n, min(r["loop_end"] / n, 1.0))
-        out.append(_region(audio, rate, r["lo"], r["hi"], r["root"], loop, r["tune"]))
+        out.append(_region(audio, rate, r["lo"], r["hi"], r["root"], loop, r["tune"], r["lovel"], r["hivel"], r["volume"]))
     return write_set(out, dest) if out else None
 
 
@@ -174,6 +177,11 @@ def export_for(tree: dict, i: int, out_dir: Path) -> tuple[Path, dict] | None:
     return export_info(info, out_dir)
 
 
+def _magic(path: Path) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(4)
+
+
 def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
     if not info or not info["file"]:
         return None
@@ -181,7 +189,7 @@ def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
     if info["loop"]:
         stem += "_L%d_%d" % (round(info["loop"][0]), round(info["loop"][1]))
     dest = out_dir / f"{stem}.tbs"
-    if not dest.exists():
+    if not dest.exists() or _magic(dest) != b"TBS2":                # a set exported before the velocity layers were read is exported again
         made = (export_multisample(info["file"], dest, info["loop"]) if info["multi"] else export_sample(info["file"], dest, info["base_note"], info["loop"]))
         if made is None:
             return None

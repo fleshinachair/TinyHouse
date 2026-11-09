@@ -721,6 +721,36 @@ static void testSampleSetOutlivesItsEngineShare()
     CHECK(!p.on && weak2.expired(), "a one-shot that reaches its end lets the set go");
 }
 
+/* A multisample holds a key several times at different dynamics (SFZ lovel/hivel). The engine used to read only the key range and always played the first region of a key:
+ * the softest recording, at any velocity (Baby Grand Piano: 4 layers, the first 13 dB under the loudest). */
+static void testSampleVelocityLayers()
+{
+    printf("\n== sample velocity layers ==\n");
+    tb::SampleSet set;
+    const int vl[4][2] = { {0, 41}, {42, 69}, {70, 100}, {101, 127} };
+    for (int i = 0; i < 4; i++) {
+        tb::SampleRegion r;
+        r.lo = 48; r.hi = 50; r.root = 48; r.vlo = vl[i][0]; r.vhi = vl[i][1]; r.gain = 1.0f + (float) i;
+        r.frames = 8; r.pcm.assign(8, 1000);
+        set.regions.push_back(std::move(r));
+    }
+    tb::SampleRegion other;
+    other.lo = 51; other.hi = 53; other.root = 51; other.frames = 8; other.pcm.assign(8, 1000);
+    set.regions.push_back(std::move(other));
+    CHECK(set.pick(49, 20)->vlo == 0 && set.pick(49, 41)->vlo == 0, "velocity 20 and 41 play the softest layer");
+    CHECK(set.pick(49, 42)->vlo == 42 && set.pick(49, 69)->vlo == 42, "42 and 69 the second");
+    CHECK(set.pick(49, 100)->vlo == 70, "100 the third");
+    CHECK(set.pick(49, 127)->vlo == 101, "127 the loudest");
+    CHECK(set.pick(52, 127)->root == 51, "a key with one region plays it at any velocity");
+    CHECK(set.pick(60, 127)->root == 51, "a key outside every range falls to the nearest key");
+    tb::SampleSet gap;
+    tb::SampleRegion g; g.lo = 0; g.hi = 127; g.vlo = 0; g.vhi = 60; g.frames = 8; g.pcm.assign(8, 1);
+    gap.regions.push_back(g);
+    g.vlo = 90; g.vhi = 127; gap.regions.push_back(g);
+    CHECK(gap.pick(60, 80)->vlo == 90 || gap.pick(60, 80)->vlo == 0, "a velocity in no layer takes a layer, not nothing");
+    CHECK(gap.pick(60, 70)->vlo == 0 && gap.pick(60, 85)->vlo == 90, "the nearer layer");
+}
+
 static void testHardSync()
 {
     printf("== hard sync ==\n");
@@ -847,6 +877,7 @@ int main()
     testWarpShaper();
     testHardSync();
     testSampleSetOutlivesItsEngineShare();
+    testSampleVelocityLayers();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

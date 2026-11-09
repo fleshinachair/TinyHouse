@@ -158,7 +158,7 @@ public:
         fastKill = false;
 
         for (int o = 0; o < kOscs; o++) osc[o].setWavetable(c.table[o]);
-        smp.start(c.sample, note);
+        smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
 
         const float *P = c.pots;
         const int glideMode = (int) P[TB_P_GLIDE_MODE];
@@ -211,7 +211,7 @@ public:
         const float *P = c.pots;
         midiNote = note;
         velocity = vel;
-        smp.start(c.sample, note);
+        smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
         if (glissando || portamento) {
             noteSmoother.setTime(potGlideTime(P[TB_P_GLIDE]));
             noteSmoother.setValue((float) note / 127.0f);
@@ -436,8 +436,9 @@ public:
             }
         }
 
-        if (adsr.getState() == AnalogADSR::State::idle)
+        if (adsr.getState() == AnalogADSR::State::idle) {
             active = false; smp.release();
+        }
 
         for (int i = 0; i < n; i++) {
             outL[i] += postL[i];

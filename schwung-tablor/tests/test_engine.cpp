@@ -811,9 +811,34 @@ static void testFxFilterLfo()
     CHECK(opened > closed + 10.0, "an LFO route to FX Filter Freq opens a closed Filter FX low-pass (%.1f dB against %.1f)", opened, closed);
 }
 
+/* A sample voice plays for as long as its sample. A dangling-if in Voice::process ran smp.release() on every block, not only when the voice ended: every sample
+ * preset played its first 128 samples (3 ms) and nothing after, and the brass and strings multisamples, which fade in, were silent. */
+static void testSampleVoicePlaysThrough()
+{
+    printf("\n== sample voice plays through ==\n");
+    auto set = std::make_shared<SampleSet>();
+    SampleRegion r;
+    r.rate = 44100.0f; r.root = 60; r.frames = 44100 * 2;
+    r.pcm.resize((size_t) r.frames);
+    for (int i = 0; i < r.frames; i++) r.pcm[(size_t) i] = (int16_t) (12000.0 * std::sin(2.0 * M_PI * 261.63 * i / 44100.0));
+    set->regions.push_back(std::move(r));
+    Engine e;
+    e.pots[TB_P_WT1_LEVEL] = 0;
+    e.pots[TB_P_VCA_A] = 0;
+    e.pots[TB_P_VCA_S] = 127;
+    e.pots[TB_P_SMP_LEVEL] = 110;
+    e.setSample(set);
+    note(e, 60);
+    auto a = render(e, 600);
+    std::vector<int16_t> head(a.begin(), a.begin() + 256 * 100), tail(a.end() - 256 * 100, a.end());
+    CHECK(rms(head) > 500.0, "the first 100 blocks are audible (rms %.0f)", rms(head));
+    CHECK(rms(tail) > 0.5 * rms(head), "and so are blocks 500-600, a second and a half in (rms %.0f against %.0f)", rms(tail), rms(head));
+}
+
 int main()
 {
     testThirdOscillator();
+    testSampleVoicePlaysThrough();
     testDestinationOrder();
     testStreamBudget();
     testTuneRange();

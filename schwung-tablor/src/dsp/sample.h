@@ -17,6 +17,8 @@ namespace tb {
 
 struct SampleRegion {
     int   lo = 0, hi = 127, root = 60;
+    int   vlo = 0, vhi = 127;                   /* the velocity layer: a multisample holds several recordings of a key at different dynamics */
+    float gain = 1.0f;                          /* the region's own volume (SFZ volume, as a factor) */
     bool  loops = false;
     float loopStart = 0.0f, loopEnd = 0.0f;     /* fractions of the region's length */
     float rate = 44100.0f;
@@ -29,15 +31,17 @@ struct SampleRegion {
 struct SampleSet {
     std::vector<SampleRegion> regions;
 
-    /* The region for a note: the one whose key range holds it, else the nearest root. */
-    const SampleRegion *pick(int note) const
+    /* The region for a note played at a velocity (1..127): the one whose key range and velocity layer hold them; failing that the nearest key, then the nearest layer. The first
+     * of equals wins. Before the layers were read every note played the first layer of its key: the softest recording, at any velocity. */
+    const SampleRegion *pick(int note, int vel = 100) const
     {
         const SampleRegion *best = nullptr;
-        int bestD = 1 << 20;
+        int bestN = 1 << 20, bestV = 1 << 20;
         for (const auto &r : regions) {
-            if (note >= r.lo && note <= r.hi) return &r;
-            const int d = std::min(std::abs(note - r.lo), std::abs(note - r.hi));
-            if (d < bestD) { bestD = d; best = &r; }
+            const int dn = note < r.lo ? r.lo - note : (note > r.hi ? note - r.hi : 0);
+            const int dv = vel < r.vlo ? r.vlo - vel : (vel > r.vhi ? vel - r.vhi : 0);
+            if (dn < bestN || (dn == bestN && dv < bestV)) { bestN = dn; bestV = dv; best = &r; }
+            if (dn == 0 && dv == 0) break;
         }
         return best;
     }
@@ -49,18 +53,21 @@ inline bool sampleLoad(const char *path, SampleSet &out)
     if (!f) return false;
     char magic[4];
     uint32_t n = 0;
-    bool ok = std::fread(magic, 4, 1, f) == 1 && !std::memcmp(magic, "TBS1", 4) && std::fread(&n, 4, 1, f) == 1 && n > 0 && n < 512;
+    /* TBS1: key range only. TBS2: also the velocity layer and a volume (dB) per region (sample_export.py). */
+    bool ok = std::fread(magic, 4, 1, f) == 1 && (!std::memcmp(magic, "TBS1", 4) || !std::memcmp(magic, "TBS2", 4)) && std::fread(&n, 4, 1, f) == 1 && n > 0 && n < 512;
+    const bool v2 = ok && magic[3] == '2';
     out.regions.clear();
     for (uint32_t i = 0; ok && i < n; i++) {
-        uint8_t h[4];
-        float lf[4];
+        uint8_t h[6] = { 0, 0, 0, 0, 0, 127 };
+        float lf[4], volDb = 0.0f;
         uint32_t frames = 0;
         uint8_t ch = 1;
         SampleRegion r;
-        ok = std::fread(h, 4, 1, f) == 1 && std::fread(lf, 16, 1, f) == 1 && std::fread(&frames, 4, 1, f) == 1 && std::fread(&ch, 1, 1, f) == 1 &&
+        ok = std::fread(h, v2 ? 6 : 4, 1, f) == 1 && std::fread(lf, 16, 1, f) == 1 && (!v2 || std::fread(&volDb, 4, 1, f) == 1) && std::fread(&frames, 4, 1, f) == 1 && std::fread(&ch, 1, 1, f) == 1 &&
              (ch == 1 || ch == 2) && frames > 0 && frames < (1u << 24);
         if (!ok) break;
-        r.lo = h[0]; r.hi = h[1]; r.root = h[2]; r.loops = h[3] != 0;
+        r.lo = h[0]; r.hi = h[1]; r.root = h[2]; r.loops = h[3] != 0; r.vlo = h[4]; r.vhi = h[5];
+        r.gain = std::pow(10.0f, volDb / 20.0f);
         r.loopStart = lf[0]; r.loopEnd = lf[1]; r.rate = lf[2]; r.tuneCents = lf[3];
         r.channels = ch; r.frames = (int) frames;
         r.pcm.resize((size_t) frames * ch);
@@ -83,10 +90,10 @@ struct SamplePlayer {
     float  fade = 0.0f;                         /* attack ramp 0..1 */
     bool   on = false;
 
-    void start(const std::shared_ptr<const SampleSet> &set, int note)
+    void start(const std::shared_ptr<const SampleSet> &set, int note, int vel = 100)
     {
         own = set;
-        r = set ? set->pick(note) : nullptr;
+        r = set ? set->pick(note, vel) : nullptr;
         pos = 0.0; fade = 0.0f;
         on = r != nullptr;
     }
@@ -101,7 +108,7 @@ struct SamplePlayer {
         const int fr = r->frames, ch = r->channels;
         const double ls = r->loops ? (double) r->loopStart * fr : 0.0, le = r->loops ? (double) r->loopEnd * fr : (double) fr;
         const float fadeStep = 1.0f / (0.010f * sr);
-        const float k = gain * (1.0f / 32768.0f);
+        const float k = gain * r->gain * (1.0f / 32768.0f);
         for (int i = 0; i < n; i++) {
             if (pos >= le) {
                 if (r->loops && le > ls + 1.0) pos = ls + std::fmod(pos - ls, le - ls);

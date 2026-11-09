@@ -105,6 +105,66 @@ def quality(state, it):
     eb, sb = np.mean([VS.bands(x) for x in ren], axis=0), np.mean([VS.bands(x) for x in it["refs"]], axis=0)
     return float(gap), float(np.sqrt(np.mean(np.square((eb - eb.max()) - (sb - sb.max())))))
 
+INAUDIBLE_KINDS = ("Filter", "Bode", "Split", "SplitMS", "Comp", "Distortion", "Utils")
+AB_SLACK_BANDS = 1.5          # dB above Serum's own render-to-render noise (same band metric) that the effect-off render may differ by and still count as inaudible
+AB_MAX_LEVEL = 1.0            # dB: the effect-off render's level against the full one (a bigger gap is an effect that matters, whatever the bands say)
+
+
+def ignored_effects_off(tree, header, name, why):
+    """When the only thing besides a missing fingerprint that stops a preset is effects the converter leaves out (a Filter FX with a model or a modulator, a Bode, a Split with
+    its branch modules, a Comp / Distortion / Utils it has no stage for): the tree with exactly those nodes switched off (a Split takes its branch modules with it), else None.
+    A Distortion's own filter, a bus rack's effects and every other reason are not this case."""
+    kinds = set()
+    for w in why:
+        if "no Serum fingerprint" in w or "in a Split branch" in w:
+            continue
+        if w.startswith("not carried: "):
+            kinds |= set(w[len("not carried: "):].split(", "))
+        elif w.startswith("Filter FX not carried: ") and "Distortion filter" not in w:
+            kinds.add("Filter")
+        else:
+            return None
+    if not kinds or not kinds <= set(INAUDIBLE_KINDS):
+        return None
+    ph = d2m.physical(tree, header)
+    nodes = ph.get("fx_nodes", [])
+    _, _, info = fxmap.map_fx(name, nodes, ctx={"mods": ph["mods"], "macros": ph["macros"]})
+    handled = set(info.get("filter_fx_handled", ()))
+    off = set()
+    for i, n in enumerate(nodes):
+        k = fxmap.kind_of(n)
+        if k in kinds and fxmap.enabled(n) and not (k == "Filter" and i in handled):
+            off.add(i)
+            if k in ("Split", "SplitMS"):
+                pp = fxmap.plain(n)
+                off |= set(range(i + 1, min(i + 1 + int(round(pp.get("kParamModuleCount1", 0))) + int(round(pp.get("kParamModuleCount2", 0))), len(nodes))))
+    if not off:
+        return None
+    t2 = copy.deepcopy(tree)
+    for i in off:
+        n = t2["FXRack0"]["FX"][i]
+        k = fxmap.kind_of(n)
+        if not isinstance(n[f"FX{k}"].get("plainParams"), dict):
+            n[f"FX{k}"]["plainParams"] = {}
+        n[f"FX{k}"]["plainParams"]["kParamEnable"] = 0.0
+    return t2
+
+
+def band_gap_db(a, b):
+    """The gate's octave-band measure between two sets of renders: rms of (band level re the loudest) differences, dB."""
+    ea, eb = np.mean([VS.bands(x) for x in a], axis=0), np.mean([VS.bands(x) for x in b], axis=0)
+    return float(np.sqrt(np.mean(np.square((ea - ea.max()) - (eb - eb.max())))))
+
+
+def effects_inaudible(serum, bank, name, tree, tree_off, notes, refs, end):
+    """Is Serum's own render of this preset with those effects off as close to the full one as Serum is to itself? (noise: the two full renders against each other, the same
+    metric.) Returns (verdict, band gap, noise, level gap)."""
+    refs_off = H.reference(serum, f"{bank}_{name}_ab", tree_off, notes, 2, 4.0, 1.0)
+    noise = band_gap_db(refs[:1], refs[1:2]) if len(refs) > 1 else 0.0
+    gap = band_gap_db(refs, refs_off)
+    lvl = L.rms_db(refs_off, end) - L.rms_db(refs, end)
+    return (gap <= noise + AB_SLACK_BANDS and abs(lvl) <= AB_MAX_LEVEL), gap, noise, lvl
+
 
 def measure_fingerprints(name, tree, meas):
     """Serum's own reverb, delay and width for this preset's main rack and for each FX bus rack that has effects (under '<name>#bus1' / '#bus2'), measured on a noise burst
@@ -137,6 +197,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="stop after this many kept presets")
     ap.add_argument("--max-level-gap", type=float, default=3.0, help="drop a preset whose finished level is further than this from Serum's (dB)")
     ap.add_argument("--max-band-rms", type=float, default=14.0, help="drop a preset whose octave-band levels are further than this (rms dB) from Serum's")
+    ap.add_argument("--no-ab-ignore", action="store_true", help="do not test whether the effects the converter leaves out are inaudible in Serum itself; skip those presets")
     ap.add_argument("--no-level", action="store_true", help="skip the Serum render and the loudness fit (the converter's own volume)")
     a = ap.parse_args()
 
@@ -181,7 +242,8 @@ def main():
             continue
         why = d2m.unsupported_reasons(m)
         needs_fx = [w for w in why if "no Serum fingerprint" in w]
-        if needs_fx and len(needs_fx) == len(why):          # the effects are the only thing missing: measure them in Serum, then convert again
+        off_tree = ignored_effects_off(tree, header, name, why) if (len(needs_fx) < len(why) and not a.no_ab_ignore and not a.no_level) else None
+        if needs_fx and (len(needs_fx) == len(why) or off_tree is not None):          # the effects are the only thing missing: measure them in Serum, then convert again
             try:
                 fingerprint(name, tree)
             except RuntimeError as e:
@@ -193,7 +255,7 @@ def main():
                 skipped.append((name, [f"cannot convert: {str(e)[:60]}"]))
                 continue
             why = d2m.unsupported_reasons(m)
-        if why:
+        if why and off_tree is None:
             skipped.append((name, why))
             continue
         state = d2m.blob(m)
@@ -206,6 +268,18 @@ def main():
                 skipped.append((name, [f"Serum made no sound: {str(e)[:50]}"]))
                 continue
             it = {"name": name, "header": header, "tree": tree, "notes": notes, "refs": refs, "end": F.sounding_end(refs)}
+            ab_note = ""
+            if why:                  # effects the engine has no stage for: carried as nothing only when Serum itself cannot tell them from their absence
+                try:
+                    ok, gap_b, noise_b, lvl_b = effects_inaudible(serum, a.bank, name, tree, off_tree, notes, refs, it["end"])
+                except RuntimeError as e:
+                    skipped.append((name, [f"Serum made no sound with the effects off: {str(e)[:50]}"]))
+                    continue
+                print(f"  A/B {name}: effects off vs on: bands {gap_b:.1f} dB (Serum against itself {noise_b:.1f}), level {lvl_b:+.1f} dB -> {'inaudible' if ok else 'audible'}", flush=True)
+                if not ok:
+                    skipped.append((name, why + [f"and Serum's own render changes with them off: bands {gap_b:.1f} dB (noise {noise_b:.1f}), level {lvl_b:+.1f} dB"]))
+                    continue
+                ab_note = f"; left out, inaudible in Serum: {'; '.join(w for w in why if 'no Serum fingerprint' not in w)[:70]}"
             C.mapped = lambda *args, _m=m, **kw: copy.deepcopy(_m)         # fit_item maps the preset itself; hand it ours
             try:
                 state = finalize_level(m, it, serum, a.bank)
@@ -219,7 +293,7 @@ def main():
                 continue
         (bank_dir / f"{name}.json").write_text(json.dumps({"name": name, "module": "tinyhouse", "version": 1, "state": state}) + "\n", encoding="utf-8")
         kept.append(name)
-        print(f"  kept {name}" + ("" if a.no_level else f"  (volume {int(PF.getk(state, 'volume', 0))}, {m['tier']}, level {gap:+.1f} dB, bands {berr:.1f} dB rms)"), flush=True)
+        print(f"  kept {name}" + ("" if a.no_level else f"  (volume {int(PF.getk(state, 'volume', 0))}, {m['tier']}, level {gap:+.1f} dB, bands {berr:.1f} dB rms{ab_note})"), flush=True)
         if a.limit and len(kept) >= a.limit:
             break
     lines = [f"# {a.bank}: {len(kept)} imported, {len(skipped)} skipped", ""] + [f"- {n}: {'; '.join(w)}" for n, w in skipped]

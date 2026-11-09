@@ -43,7 +43,7 @@ VoiceContext Engine::makeContext(const Tables &t)
     VoiceContext c;
     c.pots = pots;
     for (int o = 0; o < kOscs; o++) c.table[o] = t.t[o].get();
-    c.sample = t.s.get();
+    c.sample = t.s;
 
     /* The share comes from the Voices control, so a chord cannot change a held
      * note's unison. More voices than that can only be sounding just after the

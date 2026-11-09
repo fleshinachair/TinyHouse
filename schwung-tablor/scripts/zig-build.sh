@@ -26,6 +26,7 @@ arm)
     $CXX $SRC -fPIC -shared -s $PLUGIN -lm -lpthread -o "$OUT/dsp.so"
     $CXX $SRC "$ROOT/tools/loadtest.cpp" -ldl -lm -o "$OUT/tablor_loadtest"
     $CXX $SRC "$ROOT/tools/tailbench.cpp" -ldl -lm -o "$OUT/tailbench"
+    $CXX $SRC "$ROOT/tools/soak.cpp" -ldl -lm -o "$OUT/tablor_soak"
     $CXX $SRC "$ROOT/tests/test_dsp.cpp" "$ROOT/src/ported/wavetable.cpp" "$ROOT/src/ported/audiofilter/ParametricCreator.cpp" -lm -o "$OUT/tablor_test"
     $CXX $SRC "$ROOT/tests/test_engine.cpp" $ENGINE -lm -o "$OUT/tablor_engine_test"
     $CXX $SRC "$ROOT/tests/test_fx.cpp" $ENGINE -lm -o "$OUT/tablor_fx_test"

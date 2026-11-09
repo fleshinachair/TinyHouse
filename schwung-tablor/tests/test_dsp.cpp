@@ -17,6 +17,7 @@
 #include "../src/ported/analog_tables.h"
 #include "../src/ported/wt_oscillator.h"
 #include "../src/ported/wav.h"
+#include "../src/dsp/sample.h"
 
 using namespace tb;
 
@@ -690,6 +691,36 @@ static double inharmonicDb(const std::vector<float> &x, float f0)
     return 10.0 * std::log10(off / total + 1e-20);
 }
 
+/* A new preset replaces the engine's sample set while the old preset's notes still ring. A voice must keep the set it plays from alive
+ * (the player's region pointer is into it), or the next block reads freed memory: the crash that took the Move down playing Factory presets. */
+static void testSampleSetOutlivesItsEngineShare()
+{
+    printf("\n== sample set lifetime ==\n");
+    auto set = std::make_shared<tb::SampleSet>();
+    tb::SampleRegion r;
+    r.frames = 4410; r.pcm.assign(4410, 1000);
+    set->regions.push_back(std::move(r));
+    std::weak_ptr<tb::SampleSet> weak = set;
+    tb::SamplePlayer p;
+    p.start(set, 60);
+    set.reset();                                   /* the engine loads another preset and drops its share */
+    CHECK(!weak.expired(), "a voice still playing from a sample set keeps it alive");
+    float l[64] = {}, rr[64] = {};
+    p.processAdding(0.0f, 1.0f, 44100.0f, l, rr, 64);
+    CHECK(l[63] > 0.0f, "and it still plays from it (%.4f)", l[63]);
+    p.release();
+    CHECK(weak.expired(), "the set goes when the voice lets go");
+    auto set2 = std::make_shared<tb::SampleSet>();
+    tb::SampleRegion r2;
+    r2.frames = 8; r2.pcm.assign(8, 1000);
+    set2->regions.push_back(std::move(r2));
+    std::weak_ptr<tb::SampleSet> weak2 = set2;
+    p.start(set2, 60);
+    set2.reset();
+    for (int i = 0; i < 4 && p.on; i++) p.processAdding(0.0f, 1.0f, 44100.0f, l, rr, 64);
+    CHECK(!p.on && weak2.expired(), "a one-shot that reaches its end lets the set go");
+}
+
 static void testHardSync()
 {
     printf("== hard sync ==\n");
@@ -815,6 +846,7 @@ int main()
     testUnisonKeepsTheBass();
     testWarpShaper();
     testHardSync();
+    testSampleSetOutlivesItsEngineShare();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

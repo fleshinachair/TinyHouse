@@ -74,17 +74,24 @@ inline bool sampleLoad(const char *path, SampleSet &out)
 
 /* One voice's playback of a region. */
 struct SamplePlayer {
+    /* The voice owns a share of its set for as long as it plays from it. `r` points into the set, and a new preset replaces the engine's
+     * set while the old preset's notes still ring (held keys, release tails): without this share the set was freed under them and the
+     * next block read freed memory. The last share goes when the voice ends or starts another note. */
+    std::shared_ptr<const SampleSet> own;
     const SampleRegion *r = nullptr;
     double pos = 0.0;                           /* in frames */
     float  fade = 0.0f;                         /* attack ramp 0..1 */
     bool   on = false;
 
-    void start(const SampleSet *set, int note)
+    void start(const std::shared_ptr<const SampleSet> &set, int note)
     {
+        own = set;
         r = set ? set->pick(note) : nullptr;
         pos = 0.0; fade = 0.0f;
         on = r != nullptr;
     }
+
+    void release() { on = false; r = nullptr; own.reset(); }
 
     /* Adds n samples to l/r. semis: the pitch offset from the region's root key (note - root, plus the oscillator's own tuning and bend). */
     void processAdding(float semis, float gain, float sr, float *l, float *rt, int n)
@@ -98,7 +105,7 @@ struct SamplePlayer {
         for (int i = 0; i < n; i++) {
             if (pos >= le) {
                 if (r->loops && le > ls + 1.0) pos = ls + std::fmod(pos - ls, le - ls);
-                else { on = false; return; }
+                else { release(); return; }
             }
             const int i0 = (int) pos;
             const float fr1 = (float) (pos - i0);

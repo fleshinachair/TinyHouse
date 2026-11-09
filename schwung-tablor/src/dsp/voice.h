@@ -74,7 +74,7 @@ inline constexpr int kModEnvs = 2;
 struct VoiceContext {
     const float *pots = nullptr;            /* TB_PARAM_COUNT raw values   */
     const Wavetable *table[kOscs] = {};
-    const SampleSet *sample = nullptr;       /* the sample oscillator's set, if one is loaded */
+    std::shared_ptr<const SampleSet> sample; /* the sample oscillator's set, if one is loaded; a voice keeps a share while it plays from it (sample.h) */
     int streamBudget = kStreamBudget;       /* this voice's share, see kStreamBudget */
     AnalogTables *analog = nullptr;
     float modWheel = 0.0f;                  /* 0..1  */
@@ -234,7 +234,7 @@ public:
         filterADSR.noteOff();
         for (auto &e : modEnv) e.noteOff();
         if (!allowTail) {
-            active = false;
+            active = false; smp.release();
         }
     }
 
@@ -437,7 +437,7 @@ public:
         }
 
         if (adsr.getState() == AnalogADSR::State::idle)
-            active = false;
+            active = false; smp.release();
 
         for (int i = 0; i < n; i++) {
             outL[i] += postL[i];

@@ -98,7 +98,7 @@ def osc(n):
         bend   = pot(f"wt{n}_bend",    f"BND{n}",  f"WT{n} Bend", 64),
         formant= pot(f"wt{n}_formant", f"FRM{n}",  f"WT{n} Formant", 64),
         sync   = pot(f"wt{n}_sync",    f"SYN{n}",  f"WT{n} Sync", 0),
-        shape  = enum(f"wt{n}_shape",  f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic"], 0),
+        shape  = enum(f"wt{n}_wshape", f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic"], 0),
         sgain  = pot(f"wt{n}_sgain",   f"SGN{n}",  f"WT{n} Shaper Gain", 64),
         sout   = pot(f"wt{n}_sout",    f"SOT{n}",  f"WT{n} Shaper Out", 64),
     )

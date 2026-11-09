@@ -581,7 +581,7 @@ def WARP_SHAPERS() -> dict:
 
 
 def warp_shaper_pots(k: str, mode: str, amount: float) -> dict:
-    """The engine's per-oscillator shaper pots (wtN_shape / _sgain / _sout) for a Dist* warp at an amount: G and K interpolated in the log between the measured amounts
+    """The engine's per-oscillator shaper pots (wtN_wshape / _sgain / _sout) for a Dist* warp at an amount: G and K interpolated in the log between the measured amounts
     (an amount of 0 is an identity for every mode but SoftSat, whose first row already shapes), pots the inverse of voice.h's G = 0.02 * 15000^(pot/127), K = 0.5 * 120^(pot/127)."""
     c = WARP_SHAPERS()[mode]
     am = c["amounts"]
@@ -590,7 +590,7 @@ def warp_shaper_pots(k: str, mode: str, amount: float) -> dict:
     lg = (1 - f) * math.log(c["G"][j - 1]) + f * math.log(c["G"][j])
     lk = (1 - f) * math.log(c["K"][j - 1]) + f * math.log(c["K"][j])
     pot = lambda v, lo, span: int(round(_clamp(127.0 * (v - math.log(lo)) / math.log(span), 0, 127)))
-    return {f"{k}_shape": int(c["engine_curve"]), f"{k}_sgain": pot(lg, 0.02, 15000.0), f"{k}_sout": pot(lk, 0.5, 120.0)}
+    return {f"{k}_wshape": int(c["engine_curve"]), f"{k}_sgain": pot(lg, 0.02, 15000.0), f"{k}_sout": pot(lk, 0.5, 120.0)}
 
 
 def pot_time(t: float) -> int:        # Tablor potEnvTime inverse: 1 ms .. 10 s

@@ -2,6 +2,7 @@
 #include "../src/dsp/engine.h"
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <vector>
 using namespace tb;
@@ -22,6 +23,7 @@ static void run(const Patch &p){
     e.pots[TB_P_SUB_LEVEL]=90;  e.pots[TB_P_NOISE_LEVEL]=60;
     e.pots[TB_P_FLT_RES]=80;    e.pots[TB_P_FLT_FREQ]=90;
     e.pots[TB_P_FLT_DRIVE]=p.drive;
+    if (getenv("BENCH_SHAPE")) { const int sh=atoi(getenv("BENCH_SHAPE")); e.pots[TB_P_WT1_WSHAPE]=sh; e.pots[TB_P_WT2_WSHAPE]=sh; e.pots[TB_P_WT3_WSHAPE]=sh; /* warp shaper on every oscillator */ }
     if (p.fx) {   /* everything the FX block has, at once: a long reverb, ping-pong delay, width, four EQ bands */
         e.pots[TB_P_REV_MIX]=80;  e.pots[TB_P_REV_DECAY]=100; e.pots[TB_P_REV_DAMP]=100;
         e.pots[TB_P_DLY_MIX]=70;  e.pots[TB_P_DLY_MODE]=1;    e.pots[TB_P_DLY_FB]=80;

@@ -73,3 +73,8 @@ calibration/fx_audit_serum.json
 calibration/probe_vfilter_serum.json
 calibration/shipped_scores.log
 calibration/shipped_scores_raw.log
+# census, classify and import-run outputs: rebuilt by calibration/census.py, classify_pack.py and import_pack.py, kept local
+calibration/census_*.json
+calibration/classify_*.json
+calibration/import_*.log
+calibration/dh_convert_*.log

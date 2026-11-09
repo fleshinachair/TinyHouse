@@ -150,6 +150,21 @@ def ignored_effects_off(tree, header, name, why):
     return t2
 
 
+def zero_unsupported_warps(tree, m):
+    """The tree with each oscillator warp the converter has no stage for (FM / RM / AM / PD from another source ...) set to amount 0: Serum's own render of the preset without it,
+    to test whether it is audible. None when the preset has none."""
+    ws = m.get("unsupported_warps") or []
+    if not ws:
+        return None
+    t2 = copy.deepcopy(tree)
+    for w in ws:
+        node = t2[f"Oscillator{w['osc']}"][f"WTOsc{w['osc']}"]
+        if not isinstance(node.get("plainParams"), dict):
+            node["plainParams"] = {}
+        node["plainParams"]["kParamWarp2" if w["index"] else "kParamWarp"] = 0.0
+    return t2
+
+
 def band_gap_db(a, b):
     """The gate's octave-band measure between two sets of renders: rms of (band level re the loudest) differences, dB."""
     ea, eb = np.mean([VS.bands(x) for x in a], axis=0), np.mean([VS.bands(x) for x in b], axis=0)
@@ -240,9 +255,20 @@ def main():
         except Exception as e:
             skipped.append((name, [f"cannot convert: {str(e)[:60]}"]))
             continue
-        why = d2m.unsupported_reasons(m)
-        needs_fx = [w for w in why if "no Serum fingerprint" in w]
-        off_tree = ignored_effects_off(tree, header, name, why) if (len(needs_fx) < len(why) and not a.no_ab_ignore and not a.no_level) else None
+        def plan(m):
+            """What stops the preset, and the tree to test its absence against in Serum (None if something that stops it is not left-out-able): the effects the converter leaves
+            out, and the oscillator warps no stage carries, switched off."""
+            why = d2m.unsupported_reasons(m)
+            warp_why = [w for w in why if " warp " in w and w.endswith("unsupported (no FM/RM/fold in Tablor)")]
+            fx_why = [w for w in why if w not in warp_why]
+            needs_fx = [w for w in fx_why if "no Serum fingerprint" in w]
+            can_ab = not a.no_ab_ignore and not a.no_level
+            fx_off = ignored_effects_off(tree, header, name, fx_why) if (len(needs_fx) < len(fx_why) and can_ab) else None
+            off = fx_off
+            if warp_why and can_ab and (len(needs_fx) == len(fx_why) or fx_off is not None):
+                off = zero_unsupported_warps(fx_off or tree, m)
+            return why, [w for w in why if "no Serum fingerprint" in w], off
+        why, needs_fx, off_tree = plan(m)
         if needs_fx and (len(needs_fx) == len(why) or off_tree is not None):          # the effects are the only thing missing: measure them in Serum, then convert again
             try:
                 fingerprint(name, tree)
@@ -254,7 +280,7 @@ def main():
             except Exception as e:
                 skipped.append((name, [f"cannot convert: {str(e)[:60]}"]))
                 continue
-            why = d2m.unsupported_reasons(m)
+            why, needs_fx, off_tree = plan(m)
         if why and off_tree is None:
             skipped.append((name, why))
             continue

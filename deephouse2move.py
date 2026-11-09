@@ -1200,6 +1200,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 f"osc {'ABC'[o['id']]} unison {o['unison']} fits as {got} "
                 f"({P['voices']} voices share {STREAM_BUDGET} streams)")
 
+    unsup_warps = []           # the warps no stage carries: which oscillator (Serum's id) and which of its two warp slots, for the importer's audibility test
     for n, o in enumerate(keep, 1):
         k = f"wt{n}"
         pos = _clamp((o["table_pos"] - 1) / 255 + fold[("WTOsc", "kParamTablePos", o["id"])], 0, 1)
@@ -1218,7 +1219,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{k}_spread"] = (round(_clamp(stereo / 100 * CAL["width_scale"], 0, 1) * 127)
                             if P[f"{k}_uni"] > 1 else 0)
         P[f"{k}_pan"] = round(_clamp(64 + 63 * o["pan"] / 100, 0, 127))
-        for w in o["warp"]:
+        for wi, w in enumerate(o["warp"]):
             if w["amount"] < WARP_NOISE_FLOOR:
                 continue
             if w["mode"] == "kEvenOdd" and w["amount"] >= 0.9:
@@ -1240,6 +1241,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                     appr.append(f"{k} warp {w['mode'][1:]} approximated with Tablor Bend")
             else:
                 crit.append(f"{k} warp {w['mode'][1:]} unsupported (no FM/RM/fold in Tablor)")
+                unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
         path, ref = resolve_table(o["table"], pack, serum_tables, wt_out, subdir)
         if path is None and not ref and o.get("embedded"):
             path = write_embedded_table(o["embedded"], wt_out, subdir)
@@ -1567,7 +1569,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         note.append(f"{ph['bus_fx']} FX in the two bus racks not carried")
     tier = "C" if crit else "B" if appr else "A"
     return {"name": ph["name"], "tier": tier, "critical": crit, "approx": appr, "notes": note,
-            "missing_tables": sorted(set(missing)), "fx": ph["fx"], "fx_info": fx_info, "params": P, "paths": paths}
+            "missing_tables": sorted(set(missing)), "fx": ph["fx"], "fx_info": fx_info, "params": P, "paths": paths, "unsupported_warps": unsup_warps}
 
 
 BUS_KEYS = [k for k in fxmap.fx_defaults() if k != "fx_space"]

@@ -34,6 +34,7 @@ log = H.log
 d2m, SR = H.d2m, H.SR
 OUT = H.OUT / "level_fits.json"
 LIMITER_CAP_DB = 2.0
+LIMITER_KNEE = 0.7                                     # saturate.h kLimiterKnee
 TOLERANCE_DB = 0.4
 LOCK = threading.Lock()
 
@@ -55,7 +56,15 @@ def fit_item(it):
         blob = d2m.blob(q)
         return rms_db([H.run_cli(blob, it["notes"], C.DUR, C.HOLD) for _ in range(runs)], end)
 
+    def peak_at(v):
+        q = copy.deepcopy(m)
+        q["params"]["volume"] = int(v)
+        x = H.run_cli(d2m.blob(q), it["notes"], C.DUR, C.HOLD)
+        return float(np.abs(x[:, int(0.01 * H.SR):int(end * H.SR)]).max())
+
     def limiter_loss(v, r_v):
+        if peak_at(v) <= LIMITER_KNEE:                 # nothing reaches the shoulder: no limiter loss. (The check below renders at v/8 gain, which for a quiet preset is
+            return 0.0                                  # under the 16-bit dither floor: its rms was noise, the loss read as huge and the volume was driven to 1: Quiet Ridge, Cookies)
         k2 = max(1, int(round(v / 8.0)))
         lin = at(k2, 3) - 20 * math.log10((k2 / v) ** 2)
         return lin - r_v

@@ -472,7 +472,12 @@ void Engine::renderBlock(int16_t *out, int frames)
             for (auto &v : voices)
                 if (v.isActive()) env = std::max(env, v.filterEnvelope());
             const float filterWidth = 12.0f * std::log2(20000.0f / 440.0f) + 69.0f;
-            const float note = potFilterNote(pots[TB_P_FXF_FREQ]) + env * potBipolar(pots[TB_P_FXF_ENV]) * filterWidth;
+            /* an LFO (or spare envelope) route to the Filter FX cutoff lives in the voices' modulation; the effect is shared, so it follows the newest voice */
+            float fxfMod = 0.0f;
+            uint32_t newest = 0;
+            for (auto &v : voices)
+                if (v.isActive() && v.serialNumber() >= newest) { newest = v.serialNumber(); fxfMod = v.fxfCutoffMod(); }
+            const float note = potFilterNote(pots[TB_P_FXF_FREQ]) + env * potBipolar(pots[TB_P_FXF_ENV]) * filterWidth + fxfMod * filterWidth;
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
             fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f));

@@ -450,7 +450,7 @@ def noise_type_for(sample: str | None) -> tuple[int, str | None]:
 
 ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune": 5, "WT2 Tune": 6, "WT1 Pan": 11, "WT2 Pan": 12,
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
-          "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23}
+          "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24}
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -909,7 +909,7 @@ LFO_SCALE: dict = json.loads(LFO_SCALES.read_text(encoding="utf-8")) if LFO_SCAL
 def lfo_class(dest_name: str) -> str:
     """Which engine calibration constant governs a destination: a route's depth is converted from Serum's fraction of the
     destination's range into the engine's units, and the units differ by kind."""
-    if dest_name in ("Filter Freq", "Filter 2 Freq"):
+    if dest_name in ("Filter Freq", "Filter 2 Freq", "FX Filter Freq"):
         return "cutoff"
     if dest_name.endswith("Level"):
         return "level"
@@ -970,6 +970,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
     """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried."""
     def dest(key):
         slot = slot_of.get(key[2])
+        if key[0] == "FXFilter" and key[1] == "kParamFreq":              # the effects block's Filter FX (fxmap.dynamic_filter): same cutoff units as the voice filter
+            return "FX Filter Freq", CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "VoiceFilter" and key[1] == "kParamFreq":
             return ("Filter 2 Freq" if key[2] == 1 else "Filter Freq"), CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "WTOsc" and key[1] == "kParamTablePos" and slot:
@@ -1085,9 +1087,13 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     other = []                                   # LFO/velocity/etc: not representable
     mod_wheel_idle = 0
     bip_env = 0
+    fxf_dyn = fxmap.dynamic_filter(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     for m in ph["mods"]:
         src, a = m["source"], m["amount_pct"] / 100.0
         key = (m["dest_type"], m["dest_param"], m["dest_id"])
+        if fxf_dyn and fxf_dyn["lfos"] and m["dest_type"] == "FXFilter" and m["dest_param"] == "kParamFreq" and 6 <= src <= 15:
+            other.append((src, ("FXFilter", "kParamFreq", 0), a, bool(m.get("bipolar"))))
+            continue
         if m["dest_type"].startswith("FX") or m["dest_type"] in ("Env", "Global", "LFOPointModBus"):
             continue
         if 25 <= src <= 32:
@@ -1521,7 +1527,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     note += apply_filter_fit(ph["name"], P)
     note += apply_width_fit(ph["name"], P)
     # ---- FX block -------------------------------------------------------------
-    fx_p, fx_notes, fx_info = fxmap.map_fx(ph["name"], ph.get("fx_nodes", []), ctx={"mods": ph["mods"], "macros": ph["macros"]})
+    fx_p, fx_notes, fx_info = fxmap.map_fx(ph["name"], ph.get("fx_nodes", []), ctx={"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     t_out = fx_p.pop("comp_thresh_out_db", None)
     fx_p_extra = {k: fx_p.pop(k) for k in ("comp_thresh2_out_db", "comp_thresh3_out_db") if k in fx_p}
     P.update(fx_p)
@@ -1537,7 +1543,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if k in fx_p_extra:
                 P[key] = int(round(_clamp((fx_p_extra[k] + m_db - g_db + 90.0) / 120.0, 0.0, 1.0) * 127))
     note += fx_notes
-    dyn = fxmap.dynamic_filter(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"]})
+    dyn = fxmap.dynamic_filter(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     if dyn:
         note += apply_filter2(P, dyn, ph, feg if (flt_routes and not bypassed) else None)
     note += apply_chain_fit(ph["name"], P)
@@ -1639,15 +1645,18 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
     P["fxf_type"] = idx
     P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut), 0, 127))
     P["fxf_res"] = filter_res_pot(model, dyn["reso"])
-    e = max(dyn["envs"], key=lambda k: abs(dyn["envs"][k]))
-    P["fxf_env"] = round(_clamp(64 + 63 * dyn["envs"][e] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
-    out = [f"Filter FX carried as the effects block's filter: {model}, envelope {e + 1} x{dyn['envs'][e]:.2f}"]
-    if feg1 is None:
-        P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(ph["envs"][e], CAL.get("flt_decay_mult", 1.0))
-    elif feg1 != e:
-        out.append("the Filter FX follows the voice filter's envelope, not the one it uses in Serum")
-    if len(dyn["envs"]) > 1:
-        out.append("only the strongest of several envelopes on the Filter FX kept")
+    if not dyn["envs"]:
+        out = [f"Filter FX carried as the effects block's filter: {model}, moved by LFO(s) {', '.join(str(s - 5) for s in sorted(set(dyn['lfos'])))} (route to FX Filter Freq)"]
+    else:
+        e = max(dyn["envs"], key=lambda k: abs(dyn["envs"][k]))
+        P["fxf_env"] = round(_clamp(64 + 63 * dyn["envs"][e] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
+        out = [f"Filter FX carried as the effects block's filter: {model}, envelope {e + 1} x{dyn['envs'][e]:.2f}" + (", and LFO route(s)" if dyn["lfos"] else "")]
+        if feg1 is None:
+            P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(ph["envs"][e], CAL.get("flt_decay_mult", 1.0))
+        elif feg1 != e:
+            out.append("the Filter FX follows the voice filter's envelope, not the one it uses in Serum")
+        if len(dyn["envs"]) > 1:
+            out.append("only the strongest of several envelopes on the Filter FX kept")
     if dyn["ignored"]:
         out.append("Filter FX moved by a source the engine does not have (velocity/aftertouch), left out")
     return out

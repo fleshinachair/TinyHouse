@@ -411,7 +411,7 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
         return None
     i = fx[0]
     pp = plain(nodes[i])
-    envs, ignored, norm = {}, [], float(pp.get("kParamFreq", 0.5))
+    envs, lfos, ignored, norm = {}, [], [], float(pp.get("kParamFreq", 0.5))
     reso = float(pp.get("kParamReso", 10.0))
     for m in mods:
         if m.get("dest_param") != "kParamFreq":
@@ -425,12 +425,14 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
         elif m["source"] in ENV_SOURCES:
             envs[m["source"] - 2] = envs.get(m["source"] - 2, 0.0) + a * (0.5 if m.get("bipolar") else 1.0)
         elif 6 <= m["source"] <= 15:
-            return None                                 # an LFO moves it: not carried
+            if not (ctx or {}).get("fxf_lfo"):          # only the main rack has the engine's LFO route to "FX Filter Freq" (deephouse2move.map_lfos); a bus rack's filter stays flagged
+                return None
+            lfos.append(m["source"])
         else:
             ignored.append(m["source"])
-    if not envs or float(pp.get("kParamWet", 100.0)) < FX_FILTER_MIN_WET:
+    if not (envs or lfos) or float(pp.get("kParamWet", 100.0)) < FX_FILTER_MIN_WET:
         return None
-    return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "envs": envs, "ignored": ignored}
+    return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "envs": envs, "lfos": lfos, "ignored": ignored}
 
 
 FX_MODEL_FILE = Path(__file__).resolve().parent / "calibration/fxfilter_models_probe.json"

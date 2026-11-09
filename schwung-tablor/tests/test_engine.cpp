@@ -790,6 +790,27 @@ static void testFxBuses()
     CHECK(serial2(3) < serial2(0) - 3.0 && serial2(3) > -80.0, "Filter 2 into Filter 1 in series is quieter than Filter 2 alone and not silent (%.1f vs %.1f dB)", serial2(3), serial2(0));
 }
 
+/* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
+static void testFxFilterLfo()
+{
+    auto level = [](bool route) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 100;
+        e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_FX_ON] = 1; e.pots[TB_P_FXF_ON] = 1; e.pots[TB_P_FXF_TYPE] = 1; e.pots[TB_P_FXF_FREQ] = 20; e.pots[TB_P_FXF_ENV] = 64;
+        for (int k = 0; k < 16; k++) e.pots[TB_P_LFO1_S0 + k] = 127;          /* the LFO sits at 1 */
+        e.pots[TB_P_LFO1_RATE] = 0;
+        if (route) { e.pots[TB_P_LR1_SRC] = 1; e.pots[TB_P_LR1_DST] = 24; e.pots[TB_P_LR1_AMT] = 127; e.pots[TB_P_LR1_BIP] = 0; }
+        note(e, 72, 100);
+        auto x = render(e, 200);
+        double a = 0;
+        for (size_t i = x.size() / 2; i < x.size(); i += 2) a += (double) x[i] * x[i];
+        return 10.0 * std::log10(a / (x.size() / 4) + 1e-9);
+    };
+    const double closed = level(false), opened = level(true);
+    CHECK(opened > closed + 10.0, "an LFO route to FX Filter Freq opens a closed Filter FX low-pass (%.1f dB against %.1f)", opened, closed);
+}
+
 int main()
 {
     testThirdOscillator();
@@ -806,6 +827,7 @@ int main()
     testDelaySync();
     testVelocityLaw();
     testFxBuses();
+    testFxFilterLfo();
     testNoteOnset();
     testMonoTakeover();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);

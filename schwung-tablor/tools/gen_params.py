@@ -279,7 +279,7 @@ MOD_DST = ["None",
            "WT1 Bend", "WT2 Bend", "WT1 Formant", "WT2 Formant", "WT1 Pan", "WT2 Pan",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
            # Appended, never inserted: presets store the INDEX.
-           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq"]
+           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on), and a 16-point shape (one cycle,

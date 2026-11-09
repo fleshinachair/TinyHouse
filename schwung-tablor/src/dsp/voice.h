@@ -65,6 +65,7 @@ enum ModDst {
     MD_FLT_FREQ, MD_FLT_RES, MD_SUB_LEVEL, MD_NOISE_LEVEL, MD_AMP,
     /* Appended, never inserted: saved presets store the index. */
     MD_WT3_POS, MD_WT3_LEVEL, MD_WT1_SYNC, MD_WT2_SYNC, MD_WT3_SYNC, MD_FLT2_FREQ,
+    MD_FXF_FREQ,                 /* the effects block's Filter FX cutoff: read by the engine from the newest voice (fxfCutoffMod) */
     MD_COUNT
 };
 
@@ -131,6 +132,7 @@ public:
     }
 
     bool isActive() const  { return active; }
+    float fxfCutoffMod() const { return modOff[MD_FXF_FREQ]; }          /* LFO / spare-envelope routes to the Filter FX cutoff, as a fraction of the filter's width */
     float filterEnvelope() const { return filterADSR.getOutput(); }       /* the Filter FX in the effects block follows it */
     bool isReleasing() const { return adsr.getState() == AnalogADSR::State::release; }
     int  currentNote() const { return midiNote; }

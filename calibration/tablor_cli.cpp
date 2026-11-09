@@ -60,6 +60,8 @@ int main(int argc, char **argv)
         if (semi == std::string::npos) semi = blob.size();
         const std::string k = blob.substr(p, eq - p), v = blob.substr(eq + 1, semi - eq - 1);
         p = semi + 1;
+        if (k == "clip") { e.setClip(parseClip(v.c_str())); continue; }
+        if (k == "arp") { e.setArp(parseArp(v.c_str())); continue; }
         if (k == "smp_set") {
             if (v.empty()) continue;
             auto set = std::make_shared<SampleSet>();

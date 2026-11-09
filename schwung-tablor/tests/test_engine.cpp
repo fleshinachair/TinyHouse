@@ -676,6 +676,141 @@ static void testMonoTakeover()
     CHECK(held < 2.0, "a note arriving over a held one joins without a step (%.1f x)", held);
 }
 
+/* The clip player: a key down starts the pattern, which plays at the host tempo, looped, transposed from C3, and a key up stops it. At 120 BPM a
+ * beat is 0.5 s = 172.3 blocks. */
+static void testClipPlayer()
+{
+    printf("== clip player ==\n");
+    auto make = [] {
+        auto e = std::make_unique<Engine>();
+        e->setTable(0, sineTable());
+        e->pots[TB_P_WT1_LEVEL] = 100; e->pots[TB_P_WT2_LEVEL] = 0; e->pots[TB_P_WT3_LEVEL] = 0;
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VCA_R] = 0;
+        e->setClip(parseClip("192|96,48,69,100"));               /* two beats; A4 starts at beat 1 and lasts half a beat */
+        return e;
+    };
+    {
+        auto e = make();
+        note(*e, 60);                                            /* C3 plays the pattern as written */
+        auto a = render(*e, 160);
+        double early = 0; for (int i = 0; i < (int) a.size(); i++) early = std::max(early, (double) std::abs(a[(size_t) i]));
+        CHECK(early < 50, "nothing sounds before the first note (peak %.0f)", early);
+        auto b = render(*e, 60);                                  /* 0.47 s .. 0.74 s: the note, 0.25 s long */
+        double on = 0; for (int i = 0; i < (int) b.size(); i++) on = std::max(on, (double) std::abs(b[(size_t) i]));
+        CHECK(on > 1000, "the note sounds at its beat (peak %.0f)", on);
+        auto c = render(*e, 100);                                 /* 0.64 s .. 0.93 s: the note ended at 0.75 s */
+        CHECK(rms(c) < 50, "and ends after its length (rms %.0f)", rms(c));
+        auto d = render(*e, 230);                                 /* the loop comes round: beat 1 of the second pass, 1.5 s (block 517) */
+        double again = 0; for (int i = 0; i < (int) d.size(); i++) again = std::max(again, (double) std::abs(d[(size_t) i]));
+        CHECK(again > 1000, "the pattern loops (peak %.0f)", again);
+        const uint8_t off[] = { 0x80, 60, 0 };
+        e->onMidi(off, 3);
+        render(*e, 10);
+        auto f = render(*e, 400);
+        CHECK(rms(f) < 50, "a key up stops it for good (rms %.0f)", rms(f));
+    }
+    {
+        auto e = make();
+        note(*e, 69);                                            /* nine semitones up: the pattern's A4 sounds at F#5 */
+        render(*e, 172);
+        auto b = render(*e, 40);
+        const double hz = heardHz(b);
+        CHECK(hz > 730.0 && hz < 750.0, "the key transposes the pattern from C3 (%.1f Hz, F#5 is 740)", hz);
+    }
+    {
+        Engine e;
+        e.setTable(0, sineTable());
+        e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        note(e, 69);
+        auto a = render(e, 100);
+        CHECK(rms(a) > 1000.0, "without a pattern the key plays its own note (rms %.0f)", rms(a));
+    }
+}
+
+/* The arpeggiator: held keys played one at a time, one 1/16 step (0.125 s, 43 blocks) each; the Pattern shape plays a pattern of indexes into them. */
+static void testArp()
+{
+    printf("== arpeggiator ==\n");
+    auto make = [](const char *spec) {
+        auto e = std::make_unique<Engine>();
+        e->setTable(0, sineTable());
+        e->pots[TB_P_WT1_LEVEL] = 100; e->pots[TB_P_WT2_LEVEL] = 0; e->pots[TB_P_WT3_LEVEL] = 0;
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VCA_R] = 0;
+        e->setArp(parseArp(spec));
+        note(*e, 60); note(*e, 64); note(*e, 67);
+        return e;
+    };
+    /* the pitch heard in step k: blocks [k*43.07 + 14, +22) */
+    auto steps = [](Engine &e, int n) {
+        std::vector<double> hz;
+        double at = 0;
+        for (int k = 0; k < n; k++) {
+            const double from = k * 43.07 + 14.0;
+            render(e, (int) (from - at)); at = std::floor(from);
+            hz.push_back(heardHz(render(e, 22))); at += 22;
+        }
+        return hz;
+    };
+    auto near = [](double a, double b) { return std::fabs(a - b) < 0.1 * b;   /* heardHz counts crossings over a short window: good to a few %, notes here are 20% apart at least */ };
+    {
+        auto e = make("0,24,100,0,0,0,0,12,0,127,0");
+        auto h = steps(*e, 7);
+        const double c3 = 261.6, e3 = 329.6, g3 = 392.0;
+        CHECK(near(h[0], c3) && near(h[1], e3) && near(h[2], g3) && near(h[3], c3) && near(h[4], e3) && near(h[6], c3),
+              "Up walks the held keys upward and round (%.0f %.0f %.0f %.0f %.0f ... %.0f Hz)", h[0], h[1], h[2], h[3], h[4], h[6]);
+    }
+    {
+        auto e = make("1,24,100,0,0,0,0,12,0,127,0");
+        auto h = steps(*e, 4);
+        CHECK(near(h[0], 392.0) && near(h[1], 329.6) && near(h[2], 261.6) && near(h[3], 392.0), "Down walks them downward (%.0f %.0f %.0f %.0f Hz)", h[0], h[1], h[2], h[3]);
+    }
+    {
+        auto e = make("2,24,100,0,0,0,0,12,0,127,0");
+        auto h = steps(*e, 5);
+        CHECK(near(h[0], 261.6) && near(h[1], 329.6) && near(h[2], 392.0) && near(h[3], 329.6) && near(h[4], 261.6), "UpDown turns round at the ends (%.0f %.0f %.0f %.0f %.0f Hz)", h[0], h[1], h[2], h[3], h[4]);
+    }
+    {
+        auto e = make("0,24,100,1,12,0,0,12,0,127,0");
+        auto h = steps(*e, 5);
+        CHECK(near(h[3], 523.3) && near(h[4], 659.3), "a transpose range repeats the keys an octave up (%.0f %.0f Hz)", h[3], h[4]);
+    }
+    {
+        auto e = make("4,24,100,0,0,0,0,12,0,127,96|0,24,2,100|24,24,0,100|48,24,4,100");     /* indexes 2, 0, 4 of three keys: G3, C3, E3 (wrap range 0) */
+        auto h = steps(*e, 4);
+        CHECK(near(h[0], 392.0) && near(h[1], 261.6) && near(h[2], 329.6), "a pattern plays indexes into the held keys (%.0f %.0f %.0f Hz)", h[0], h[1], h[2]);
+        auto b = make("4,24,100,0,0,0,2,12,0,127,96|0,24,4,100");                                 /* index 4 of three keys, wrap range 2: E3 an octave up */
+        auto g = steps(*b, 1);
+        CHECK(near(g[0], 659.3), "a pattern index past the keys wraps up an octave (%.0f Hz)", g[0]);
+    }
+    {
+        auto e = make("0,24,50,0,0,0,0,12,0,127,0");                                              /* gate 50: the note ends half way through its step */
+        render(*e, 8);
+        auto on = render(*e, 4);
+        render(*e, 12);
+        auto off = render(*e, 6);
+        CHECK(rms(on) > 1000.0 && rms(off) < 50.0, "a 50%% gate ends the note half way (%.0f then %.0f rms)", rms(on), rms(off));
+        const uint8_t up[] = { 0x80, 60, 0 };
+        for (int k : { 60, 64, 67 }) { uint8_t m[] = { 0x80, (uint8_t) k, 0 }; e->onMidi(m, 3); }
+        render(*e, 10);
+        auto f = render(*e, 200);
+        CHECK(rms(f) < 50.0, "releasing every key stops the arpeggio (rms %.0f)", rms(f));
+        (void) up;
+    }
+    {
+        auto e = std::make_unique<Engine>();
+        e->setTable(0, sineTable());
+        e->pots[TB_P_WT1_LEVEL] = 100; e->pots[TB_P_WT2_LEVEL] = 0; e->pots[TB_P_WT3_LEVEL] = 0;
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VCA_R] = 0;
+        e->setArp(parseArp("0,24,100,0,0,0,0,12,0,59,0"));                                         /* zone up to B2: C3 is outside and plays as a plain held note */
+        note(*e, 60);
+        render(*e, 100);
+        auto a = render(*e, 20);
+        render(*e, 20);
+        auto b = render(*e, 20);
+        CHECK(near(heardHz(a), 261.6) && near(heardHz(b), 261.6) && rms(b) > 1000.0, "a key outside the zone plays its own note (%.0f Hz)", heardHz(b));
+    }
+}
+
 /* The FX buses: a send is added to the main path (an empty bus is a plain copy, so Direct plus a full send is +6 dB), a source routed to None is
  * on the bus alone, and a bus rack's effects run on what it is sent, tail and all. */
 static void testFxBuses()
@@ -855,6 +990,8 @@ int main()
     testFxFilterLfo();
     testNoteOnset();
     testMonoTakeover();
+    testClipPlayer();
+    testArp();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

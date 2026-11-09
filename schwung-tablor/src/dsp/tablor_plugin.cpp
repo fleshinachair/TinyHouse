@@ -80,7 +80,9 @@ struct tablor_instance {
     { return std::atomic_load(&store); }
 
     /* state blob scratch */
-    char  state_buf[8 * 1024];
+    char  state_buf[16 * 1024];
+    char  arp_str[4096] = {};                 /* the preset's arpeggiator, likewise */
+    char  clip_str[4096] = {};                /* the preset's note pattern as the state carried it (kept to write it back out) */
 
     /* ---- Turnable wavetable selection -------------------------------
      * The filepath control (wt1_table/wt2_table) is OPAQUE to the host:
@@ -967,6 +969,10 @@ static void build_state_blob(tablor_instance *inst)
         if (si >= 0 && si < (int) ps->items.size())
             o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "pk=%s;", preset_key(ps->items[(size_t) si]).c_str());
     }
+    if (inst->clip_str[0])
+        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "clip=%s;", inst->clip_str);
+    if (inst->arp_str[0])
+        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "arp=%s;", inst->arp_str);
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
         if (tb_params[i].type == TB_PATH) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
@@ -994,6 +1000,10 @@ static void build_state_blob(tablor_instance *inst)
 
 static void reset_to_defaults(tablor_instance *inst)
 {
+    inst->clip_str[0] = 0;
+    inst->engine.setClip(nullptr);
+    inst->arp_str[0] = 0;
+    inst->engine.setArp(nullptr);
     for (int i = 0; i < TB_PARAM_COUNT; i++)
         if (tb_params[i].type != TB_PATH)
             inst->params()[i] = tb_params[i].def;
@@ -1015,7 +1025,11 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
         for (int i = 0; i < TB_PARAM_COUNT; i++)
             inst->engine.busPots[b][i] = tb_params[i].def;
     const char *p = val + 6;
-    char kbuf[64], vbuf[512];
+    inst->clip_str[0] = 0;                            /* a preset without a pattern has none */
+    inst->engine.setClip(nullptr);
+    inst->arp_str[0] = 0;
+    inst->engine.setArp(nullptr);
+    char kbuf[64], vbuf[4096];
     while (*p) {
         const char *eq = strchr(p, '=');
         if (!eq) break;
@@ -1031,6 +1045,18 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
             if (host_restore && !strcmp(kbuf, "pk")) {
                 std::atomic_store(&inst->want_pk, std::make_shared<const std::string>(vbuf));
                 select_preset_by_key(inst, vbuf);
+            }
+            if (!strcmp(kbuf, "arp")) {
+                snprintf(inst->arp_str, sizeof inst->arp_str, "%s", vbuf);
+                inst->engine.setArp(tb::parseArp(vbuf));
+                p = (*semi) ? semi + 1 : semi;
+                continue;
+            }
+            if (!strcmp(kbuf, "clip")) {
+                snprintf(inst->clip_str, sizeof inst->clip_str, "%s", vbuf);
+                inst->engine.setClip(tb::parseClip(vbuf));
+                p = (*semi) ? semi + 1 : semi;
+                continue;
             }
             const bool onBus = kbuf[0] == 'b' && (kbuf[1] == '1' || kbuf[1] == '2') && kbuf[2] == '.';
             int idx = param_index(onBus ? kbuf + 3 : kbuf);

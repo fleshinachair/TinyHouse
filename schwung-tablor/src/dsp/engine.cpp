@@ -177,11 +177,295 @@ void Engine::noteOff(int note)
 
 void Engine::allNotesOff(bool allowTail)
 {
+    clipKillAll(false);
+    arpStop(false);
     for (auto &v : voices)
         if (v.isActive())
             allowTail ? v.stop(true) : v.kill();
     monoStackLen = 0;
     std::memset(sustained, 0, sizeof sustained);
+}
+
+/* ---------------------------------------------------------------- clip player */
+double Engine::clipTicksPerFrame() const
+{
+    const double bpm = hostBpm >= 20.0f ? std::clamp((double) hostBpm, 40.0, 300.0) : 120.0;
+    return bpm / 60.0 * 96.0 / 44100.0;
+}
+
+void Engine::clipKillAll(bool noteOffs)
+{
+    nHeld = 0;
+    for (auto &p : players) {
+        if (!p.used) continue;
+        if (noteOffs) for (int i = 0; i < p.nAct; i++) noteOff(p.actNote[i]);
+        p.used = false; p.nAct = 0;
+    }
+}
+
+void Engine::clipSync()
+{
+    const int e = clipEpoch.load();
+    if (e == clipEpochSeen) return;
+    clipEpochSeen = e;
+    clipKillAll(true);                          /* a new pattern: the old players stop where they are */
+}
+
+bool Engine::clipActive()
+{
+    clipSync();
+    auto c = std::atomic_load(&clipSp);
+    return c && c->n > 0 && c->len > 0;
+}
+
+/* A player on `key` from the pattern's start (the same key's, or in the Mono mode the one player, starting over). */
+void Engine::clipStart(int key)
+{
+    ClipPlayer *p = nullptr;
+    for (auto &q : players) if (q.used && q.key == key) p = &q;
+    for (auto &q : players) if (!p && !q.used) p = &q;
+    if (!p) {                                   /* all busy: the oldest goes */
+        p = &players[0];
+        for (auto &q : players) if (q.serial < p->serial) p = &q;
+    }
+    for (int i = 0; i < p->nAct; i++) noteOff(p->actNote[i]);
+    p->used = true; p->key = key; p->pos = 0.0; p->firedTo = 0.0; p->nAct = 0; p->serial = ++playerSerial;
+}
+
+void Engine::clipKeyDown(int key)
+{
+    auto c = std::atomic_load(&clipSp);
+    if (c && c->mono) {
+        for (int i = 0; i < nHeld; i++) if (heldKeys[i] == key) { for (int j = i; j < nHeld - 1; j++) heldKeys[j] = heldKeys[j + 1]; nHeld--; break; }
+        if (nHeld < 32) heldKeys[nHeld++] = key;
+        for (auto &q : players) if (q.used && q.key != key) { for (int i = 0; i < q.nAct; i++) noteOff(q.actNote[i]); q.used = false; q.nAct = 0; }
+        clipStart(key);
+        return;
+    }
+    clipStart(key);
+}
+
+void Engine::clipKeyUp(int key)
+{
+    auto c = std::atomic_load(&clipSp);
+    if (c && c->mono) {
+        for (int i = 0; i < nHeld; i++) if (heldKeys[i] == key) { for (int j = i; j < nHeld - 1; j++) heldKeys[j] = heldKeys[j + 1]; nHeld--; break; }
+        bool was = false;
+        for (auto &p : players)
+            if (p.used && p.key == key) {
+                for (int i = 0; i < p.nAct; i++) noteOff(p.actNote[i]);
+                p.used = false; p.nAct = 0; was = true;
+            }
+        if (was && nHeld > 0) clipStart(heldKeys[nHeld - 1]);      /* back to the key still held, from the pattern's start */
+        return;
+    }
+    for (auto &p : players)
+        if (p.used && p.key == key) {
+            for (int i = 0; i < p.nAct; i++) noteOff(p.actNote[i]);
+            p.used = false; p.nAct = 0;
+        }
+}
+
+/* Send what is due at each player's position: the note-offs first (a note ending as the next begins releases before it), then the
+ * note-ons that start before this block's first sample. */
+void Engine::clipFire()
+{
+    auto c = std::atomic_load(&clipSp);
+    if (!c || c->n <= 0 || c->len <= 0) return;
+    constexpr double eps = 1e-6;
+    for (auto &p : players) {
+        if (!p.used) continue;
+        for (int i = 0; i < p.nAct;) {
+            if (p.actEnd[i] < p.pos + eps) {
+                noteOff(p.actNote[i]);
+                p.actNote[i] = p.actNote[p.nAct - 1]; p.actEnd[i] = p.actEnd[p.nAct - 1]; p.nAct--;
+            } else i++;
+        }
+        const double to = p.pos + eps;
+        if (to <= p.firedTo) continue;
+        const long k0 = (long) std::floor(p.firedTo / c->len), k1 = (long) std::floor(to / c->len);
+        for (long k = k0; k <= k1; k++)
+            for (int j = 0; j < c->n; j++) {
+                const ClipNote &cn = c->notes[j];
+                const double s = (double) k * c->len + cn.tick;
+                if (s < p.firedTo || s >= to) continue;
+                const int note = std::clamp((int) cn.note + p.key - 60, 0, 127);
+                noteOn(note, (float) cn.vel / 127.0f);
+                if (p.nAct < 16) { p.actNote[p.nAct] = note; p.actEnd[p.nAct] = s + std::max(cn.dur, 1); p.nAct++; }
+            }
+        p.firedTo = to;
+    }
+}
+
+/* Frames until the next thing a player must do (a note start or end), so the block is cut there. */
+int Engine::clipLimit(int frames)
+{
+    auto c = std::atomic_load(&clipSp);
+    if (!c || c->n <= 0 || c->len <= 0) return frames;
+    const double tpf = clipTicksPerFrame();
+    for (auto &p : players) {
+        if (!p.used) continue;
+        double next = 1e300;
+        for (int i = 0; i < p.nAct; i++) next = std::min(next, p.actEnd[i]);
+        const double base = std::floor(p.firedTo / c->len) * c->len;
+        for (int j = 0; j < c->n; j++) {
+            double s = base + c->notes[j].tick;
+            if (s < p.firedTo) s += c->len;
+            next = std::min(next, s);
+        }
+        const double f = std::ceil((next - p.pos - 1e-6) / tpf);
+        if (f < (double) frames) frames = std::max(1, (int) f);
+    }
+    return frames;
+}
+
+void Engine::clipAdvance(int frames)
+{
+    const double d = clipTicksPerFrame() * frames;
+    for (auto &p : players) if (p.used) p.pos += d;
+}
+
+
+/* ---------------------------------------------------------------- arpeggiator */
+void Engine::arpStop(bool noteOffs)
+{
+    if (noteOffs) for (int i = 0; i < nAAct; i++) noteOff(aAct[i]);
+    nAAct = 0; nAHeld = 0; arpRun = false;
+    arpPos = arpFiredTo = 0.0; arpNextStep = 0; arpLastPick = -1;
+}
+
+void Engine::arpSync()
+{
+    const int e = arpEpoch.load();
+    if (e == arpEpochSeen) return;
+    arpEpochSeen = e;
+    arpStop(true);
+}
+
+bool Engine::arpActive()
+{
+    arpSync();
+    return std::atomic_load(&arpSp) != nullptr;
+}
+
+bool Engine::arpInZone(int key)
+{
+    auto a = std::atomic_load(&arpSp);
+    return a && key >= a->zoneMin && key <= a->zoneMax;
+}
+
+void Engine::arpKeyDown(int key, int vel)
+{
+    for (int i = 0; i < nAHeld; i++)
+        if (aHeld[i].note == key) { for (int j = i; j < nAHeld - 1; j++) aHeld[j] = aHeld[j + 1]; nAHeld--; break; }
+    if (nAHeld >= 32) { for (int j = 0; j < 31; j++) aHeld[j] = aHeld[j + 1]; nAHeld = 31; }
+    aHeld[nAHeld++] = { key, (uint8_t) std::clamp(vel, 1, 127) };
+    if (!arpRun) { arpRun = true; arpPos = arpFiredTo = 0.0; arpNextStep = 0; nAAct = 0; arpLastPick = -1; }
+}
+
+bool Engine::arpKeyUp(int key)
+{
+    for (int i = 0; i < nAHeld; i++)
+        if (aHeld[i].note == key) {
+            for (int j = i; j < nAHeld - 1; j++) aHeld[j] = aHeld[j + 1];
+            if (--nAHeld == 0) arpStop(true);
+            return true;
+        }
+    return false;
+}
+
+void Engine::arpPlay(int note, int vel, double endTick)
+{
+    note = std::clamp(note, 0, 127);
+    noteOn(note, (float) std::clamp(vel, 1, 127) / 127.0f);
+    if (nAAct >= 32) { noteOff(aAct[0]); for (int i = 0; i < 31; i++) { aAct[i] = aAct[i + 1]; aActEnd[i] = aActEnd[i + 1]; } nAAct = 31; }
+    aAct[nAAct] = note; aActEnd[nAAct] = endTick; nAAct++;
+}
+
+/* The note of step s for the shapes that walk the held keys. */
+void Engine::arpStepNote(long s, const Arp &a)
+{
+    if (nAHeld <= 0) return;
+    const int m = nAHeld;
+    int base[32], vel[32];
+    for (int i = 0; i < m; i++) { base[i] = aHeld[i].note; vel[i] = aHeld[i].vel; }
+    if (a.shape != 3)
+        for (int i = 1; i < m; i++) {                      /* ascending */
+            const int b = base[i], v = vel[i];
+            int j = i - 1;
+            while (j >= 0 && base[j] > b) { base[j + 1] = base[j]; vel[j + 1] = vel[j]; j--; }
+            base[j + 1] = b; vel[j + 1] = v;
+        }
+    const int total = std::min(m * (a.trRange + 1), 256);
+    int i;
+    auto rnd = [&]() { arpRng ^= arpRng << 13; arpRng ^= arpRng >> 17; arpRng ^= arpRng << 5; return (int) (arpRng >> 8); };
+    switch (a.shape) {
+    case 1: i = total - 1 - (int) (s % total); break;
+    case 2: { const int period = std::max(1, 2 * total - 2); const int p = (int) (s % period); i = p < total ? p : period - p; break; }
+    case 5: i = rnd() % total; break;
+    case 6: i = rnd() % total; if (total > 1 && i == arpLastPick) i = (i + 1 + rnd() % (total - 1)) % total; arpLastPick = i; break;
+    default: i = (int) (s % total); break;
+    }
+    const double st = (double) s * a.step;
+    arpPlay(base[i % m] + (i / m) * a.trShift + a.transpose, vel[i % m], st + std::max(1.0, a.step * a.gate / 100.0));
+}
+
+void Engine::arpFire()
+{
+    auto a = std::atomic_load(&arpSp);
+    if (!a || !arpRun) return;
+    constexpr double eps = 1e-6;
+    for (int i = 0; i < nAAct;) {
+        if (aActEnd[i] < arpPos + eps) {
+            noteOff(aAct[i]);
+            aAct[i] = aAct[nAAct - 1]; aActEnd[i] = aActEnd[nAAct - 1]; nAAct--;
+        } else i++;
+    }
+    const double to = arpPos + eps;
+    if (to <= arpFiredTo) return;
+    if (a->shape == 4) {
+        int sorted[32];
+        const int m = nAHeld;
+        for (int i = 0; i < m; i++) sorted[i] = aHeld[i].note;
+        std::sort(sorted, sorted + m);
+        const long k0 = (long) std::floor(arpFiredTo / a->len), k1 = (long) std::floor(to / a->len);
+        for (long k = k0; k <= k1; k++)
+            for (int j = 0; j < a->n; j++) {
+                const ArpNote &cn = a->notes[j];
+                const double s = (double) k * a->len + cn.tick;
+                if (s < arpFiredTo || s >= to || m <= 0) continue;
+                const int q = (int) std::floor((double) cn.idx / m), r = cn.idx - q * m;
+                const int qa = q < 0 ? -((-q) % (a->wrapRange + 1)) : q % (a->wrapRange + 1);
+                arpPlay(sorted[r] + qa * a->wrapSemis + a->transpose, cn.vel, s + std::max(1.0, cn.dur * a->gate / 100.0));
+            }
+    } else {
+        while ((double) arpNextStep * a->step < to) { arpStepNote(arpNextStep, *a); arpNextStep++; }
+    }
+    arpFiredTo = to;
+}
+
+int Engine::arpLimit(int frames)
+{
+    auto a = std::atomic_load(&arpSp);
+    if (!a || !arpRun) return frames;
+    const double tpf = clipTicksPerFrame();
+    double next = 1e300;
+    for (int i = 0; i < nAAct; i++) next = std::min(next, aActEnd[i]);
+    if (a->shape == 4) {
+        const double base = std::floor(arpFiredTo / a->len) * a->len;
+        for (int j = 0; j < a->n; j++) {
+            double s = base + a->notes[j].tick;
+            if (s < arpFiredTo) s += a->len;
+            next = std::min(next, s);
+        }
+    } else next = std::min(next, (double) arpNextStep * a->step);
+    const double f = std::ceil((next - arpPos - 1e-6) / tpf);
+    return f < (double) frames ? std::max(1, (int) f) : frames;
+}
+
+void Engine::arpAdvance(int frames)
+{
+    if (arpRun) arpPos += clipTicksPerFrame() * frames;
 }
 
 void Engine::onMidi(const uint8_t *msg, int len)
@@ -191,10 +475,15 @@ void Engine::onMidi(const uint8_t *msg, int len)
 
     switch (status) {
     case 0x90:
-        if (len >= 3 && msg[2] > 0) { noteOn(msg[1], (float) msg[2] / 127.0f); break; }
+        if (len >= 3 && msg[2] > 0) {
+            if (arpActive() && arpInZone(msg[1])) arpKeyDown(msg[1], msg[2]);
+            else if (clipActive()) clipKeyDown(msg[1]); else noteOn(msg[1], (float) msg[2] / 127.0f);
+            break;
+        }
         [[fallthrough]];
     case 0x80:
-        noteOff(msg[1]);
+        if (arpActive() && arpKeyUp(msg[1])) break;
+        if (clipActive()) clipKeyUp(msg[1]); else noteOff(msg[1]);
         break;
     case 0xB0:
         if (len >= 3) {
@@ -437,6 +726,12 @@ void Engine::renderBlock(int16_t *out, int frames)
     int done = 0;
     while (done < frames) {
         int n = std::min(frames - done, kBlock);
+        clipSync();
+        clipFire();
+        n = clipLimit(n);
+        arpSync();
+        arpFire();
+        n = arpLimit(n);
         std::memset(L, 0, (size_t) n * sizeof(float));
         std::memset(R, 0, (size_t) n * sizeof(float));
 
@@ -577,6 +872,8 @@ void Engine::renderBlock(int16_t *out, int frames)
                 out[(done + i) * 2 + 1] = (int16_t) qr;
             }
         }
+        clipAdvance(n);
+        arpAdvance(n);
         done += n;
     }
 }

@@ -169,6 +169,85 @@ def aux_scale(aux: int, curve, macros: list, inverted: bool = False) -> float:
     return 1.0 - scale if inverted else scale
 
 
+def clip_from_tree(tree: dict):
+    """The note pattern Serum's Clip Player plays when a key goes down, as the engine's "clip" value ("len[:m]|tick,dur,note,vel|...", ticks of 1/96 beat), or
+    None: the player is off, or no clip spans the keyboard (measured: only a clip set to "span keyboard", kParamSpanKeyboardClip = its index, plays on every key;
+    the others sit on their own trigger keys)."""
+    cp = _pp(tree.get("ClipPlayer0", {}))
+    if not cp.get("kParamEnabled", 0) or "kParamSpanKeyboardClip" not in cp:
+        return None                           # without "span keyboard" a clip is bound to its own trigger key and every other key plays its note as usual
+    node = tree.get(f"MidiClip{int(cp['kParamSpanKeyboardClip'])}", {})
+    if not (isinstance(node.get("clip"), dict) and node["clip"].get("notes")):
+        return None
+    nodes = [node]
+    c = nodes[0]["clip"]
+    notes = c["notes"]
+    if len(notes) > 128:                      # a recorded performance, longer than the engine's pattern holds: carried whole or not at all
+        return None
+    end = max(n["timeStamp"] + n["length"] for n in notes)
+    region = c.get("regionEndBeats")
+    length = float(region) if region else max(math.ceil(end - 1e-6), 1)
+    mono = _pp(nodes[0]).get("kParamSpanKeyboardMode") == "Mono"          # the clip's own setting: one pattern at a time, from the last key held
+    out = [str(int(round(length * 96))) + (":m" if mono else "")]
+    for n in sorted(notes, key=lambda n: (n["timeStamp"], n["noteNum"])):
+        out.append("%d,%d,%d,%d" % (round(n["timeStamp"] * 96), max(1, round(n["length"] * 96)), n["noteNum"], max(1, round((n.get("attributes") or [0.787])[0] * 127))))
+    return "|".join(out)
+
+# Serum's arpeggiator step by its Rate value (swept in steps of 0.005 with a sine patch, 2026-11-09): the value is quantised into bands 0.115 wide, each half the length
+# of the one below, with 1/16 at 0.4425..0.5575 (1/16 when unset). A Pattern clip has its own, narrower bands (0.07 wide) and its 1/16 cells are stretched to the step.
+ARP_UP_EDGES = [(0.0, 4.0), (0.0975, 2.0), (0.2125, 1.0), (0.3275, 0.5), (0.4425, 0.25), (0.5575, 0.125), (0.6725, 0.0625), (0.7875, 0.03125), (0.9025, 0.015625)]
+ARP_PATTERN_EDGES = [(0.0, 4.0), (0.275, 2.0), (0.35, 1.0), (0.42, 0.5), (0.49, 0.25), (0.56, 0.125), (0.635, 0.0625), (0.705, 0.03125), (0.775, 0.015625)]
+ARP_SHAPES = {"Up": 0, "Down": 1, "UpDown": 2, "Played": 3, "Pattern": 4, "RandOnce": 5, "RandDrift": 5, "RandNoDup": 6}
+
+
+def arp_from_tree(tree: dict):
+    """Serum's arpeggiator as the engine's "arp" value ("shape,step,gate,trRange,trShift,transpose,wrapRange,wrapSemis,zoneMin,zoneMax,len|tick,dur,idx,vel|...",
+    ticks of 1/96 beat), or None: it is off, or it asks for something the engine does not play."""
+    a = _pp(tree.get("Arp0", {}))
+    if not a.get("kParamEnabled", 0):
+        return None
+    node = tree.get(f"ArpClip{int(a.get('kParamActiveClipID', 0))}", {})
+    p = _pp(node)
+    shape = p.get("kParamShape", "Up")
+    if shape not in ARP_SHAPES:
+        return None
+    sh = ARP_SHAPES[shape]
+    rate = p.get("kParamRate")
+    if "kParamBeatSync" in p and not p["kParamBeatSync"]:
+        # a free-running rate (Beat Sync off), measured: 1 Hz at 0, 1.5 at 0.1, 3.1 at 0.25, 7.4 at 0.4, 10 at 0.5, 17 at 0.6, 40 at 0.75, 100 at 0.9 (log10 Hz ~ 1.72 r + 0.56 r^2);
+        # the engine's clock is the beat, so it is held at 120 BPM
+        r = rate or 0.0
+        beats = 2.0 / (10.0 ** (1.722 * r + 0.5556 * r * r))
+    elif rate is None:
+        beats = 0.25
+    elif sh == 4:
+        beats = [b for e, b in ARP_PATTERN_EDGES if rate >= e][-1]
+    else:
+        beats = [b for e, b in ARP_UP_EDGES if rate >= e][-1]
+    # Dotted / Triplets move the bands (measured with Dotted on, Up: ..0.445 3/4 of 1/8, 0.445..0.485 1/16, 0.485..0.555 3/4 of 1/16, 0.555.. 1/32): they are not applied; the three
+    # presets that set Dotted (Fifth DMension 0.4595, Harmonic Twist and 303 Die Treppe 0.4912) land on the plain 1/16 grid in Serum.
+    gate = int(round(p.get("kParamGate", 100.0)))
+    head = [sh, int(round(beats * 96)), gate, int(p.get("kParamTransposeRange", 0)), int(round(p.get("kParamTransposeShift", 0.0))), int(round(p.get("kParamTranspose", 0.0))),
+            int(p.get("kParamWrapRange", 0)), int(round(p.get("kParamWrapTranspose", 12.0))), int(a.get("kParamKeyZoneMin", 0)), int(a.get("kParamKeyZoneMax", 127)), 0]
+    if not head[4]:
+        head[3] = 0                               # the repeats of the held keys are shifted by the Transpose Shift (default 0): without a shift they are the same notes (measured: no repeat is heard)
+    if sh == 4:
+        c = node.get("clip") if isinstance(node, dict) else None
+        notes = c.get("notes") if isinstance(c, dict) else None
+        if not notes or len(notes) > 128:
+            return None
+        head[3] = head[4] = 0
+        scale = beats / 0.25
+        region = c.get("regionEndBeats")
+        head[10] = int(round((float(region) if region else 4.0) * 96 * scale))
+        parts = [",".join(str(v) for v in head)]
+        for n in sorted(notes, key=lambda n: (n["timeStamp"], n["noteNum"])):
+            parts.append("%d,%d,%d,%d" % (round(n["timeStamp"] * 96 * scale), max(1, round(n["length"] * 96 * scale)), n["noteNum"],
+                                          max(1, round((n.get("attributes") or [0.787])[0] * 127))))
+        return "|".join(parts)
+    return ",".join(str(v) for v in head)
+
+
 def physical(tree: dict, header: dict) -> dict:
     """Decode a Serum tree into plain physical units."""
     g = _pp(tree.get("Global0", {}))
@@ -324,7 +403,7 @@ def physical(tree: dict, header: dict) -> dict:
     fx_nodes = [dict(n) for n in (tree.get("FXRack0", {}).get("FX", []) or [])]
     bus_fx = sum(len(tree.get(f"FXRack{i}", {}).get("FX", []) or []) for i in (1, 2))
     return {
-        "name": header.get("presetName", ""), "tags": header.get("tags", []),
+        "name": header.get("presetName", ""), "tags": header.get("tags", []), "clip": clip_from_tree(tree), "arp": arp_from_tree(tree),
         "serum_version": header.get("productVersion"),
         "mono": bool(g.get("kParamMonoToggle", 0)) or g.get("kParamPolyCount") == 1.0, "legato": bool(g.get("kParamLegato", 0)),
         "master": g.get("kParamMasterVolume"),
@@ -1100,6 +1179,12 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     appr: list[str] = []      # close but not exact        -> tier B
     note: list[str] = []
     paths = {"wt1_table": "Init", "wt2_table": "Init", "wt3_table": "Init"}
+    if ph.get("clip"):
+        paths["clip"] = ph["clip"]
+        note.append("clip player: the pattern is played by the engine's note player (looped at the host tempo, transposed from C3)")
+    if ph.get("arp"):
+        paths["arp"] = ph["arp"]
+        note.append("arpeggiator: played by the engine's arpeggiator (held keys one at a time, or the clip's pattern of key indexes, at the host tempo)")
     missing: list[str] = []
 
     # ---- static macro offsets are folded into the base values --------------

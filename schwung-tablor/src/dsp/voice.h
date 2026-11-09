@@ -74,6 +74,8 @@ inline constexpr int kModEnvs = 2;
 struct VoiceContext {
     const float *pots = nullptr;            /* TB_PARAM_COUNT raw values   */
     const Wavetable *table[kOscs] = {};
+    std::shared_ptr<const SampleSet> sample3; /* the third's */
+    std::shared_ptr<const SampleSet> sample2; /* the second sample oscillator's set (smp2_*), the same way */
     std::shared_ptr<const SampleSet> sample; /* the sample oscillator's set, if one is loaded; a voice keeps a share while it plays from it (sample.h) */
     int streamBudget = kStreamBudget;       /* this voice's share, see kStreamBudget */
     AnalogTables *analog = nullptr;
@@ -159,6 +161,8 @@ public:
 
         for (int o = 0; o < kOscs; o++) osc[o].setWavetable(c.table[o]);
         smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
+        smp2.start(c.sample2, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
+        smp3.start(c.sample3, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
 
         const float *P = c.pots;
         const int glideMode = (int) P[TB_P_GLIDE_MODE];
@@ -212,6 +216,8 @@ public:
         midiNote = note;
         velocity = vel;
         smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
+        smp2.start(c.sample2, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
+        smp3.start(c.sample3, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
         if (glissando || portamento) {
             noteSmoother.setTime(potGlideTime(P[TB_P_GLIDE]));
             noteSmoother.setValue((float) note / 127.0f);
@@ -234,7 +240,7 @@ public:
         filterADSR.noteOff();
         for (auto &e : modEnv) e.noteOff();
         if (!allowTail) {
-            active = false; smp.release();
+            active = false; smp.release(); smp2.release(); smp3.release();
         }
     }
 
@@ -335,6 +341,18 @@ public:
             const bool fixedPitch = P[TB_P_SMP_FIXED] >= 0.5f;                 /* a sample that does not follow the keyboard (Serum's noise slot samples) */
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp.r->root) + c.pitchBendSemis) + P[TB_P_SMP_TUNE] + P[TB_P_SMP_FINE] / 100.0f;
             addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smp.processAdding(semis, knob * knob, (float) sampleRate, l, r, n); });
+        }
+        if (smp2.on && P[TB_P_SMP2_LEVEL] > 0.0f) {                /* the second sample oscillator: the same, with its own controls */
+            const float knob = pot01(P[TB_P_SMP2_LEVEL]);
+            const bool fixedPitch = P[TB_P_SMP2_FIXED] >= 0.5f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp2.r->root) + c.pitchBendSemis) + P[TB_P_SMP2_TUNE] + P[TB_P_SMP2_FINE] / 100.0f;
+            addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smp2.processAdding(semis, knob * knob, (float) sampleRate, l, r, n); });
+        }
+        if (smp3.on && P[TB_P_SMP3_LEVEL] > 0.0f) {                /* the third (Serum has three oscillators, any of them a sample) */
+            const float knob = pot01(P[TB_P_SMP3_LEVEL]);
+            const bool fixedPitch = P[TB_P_SMP3_FIXED] >= 0.5f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp3.r->root) + c.pitchBendSemis) + P[TB_P_SMP3_TUNE] + P[TB_P_SMP3_FINE] / 100.0f;
+            addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smp3.processAdding(semis, knob * knob, (float) sampleRate, l, r, n); });
         }
 
         /* velocity */
@@ -437,7 +455,7 @@ public:
         }
 
         if (adsr.getState() == AnalogADSR::State::idle) {
-            active = false; smp.release();
+            active = false; smp.release(); smp2.release(); smp3.release();
         }
 
         for (int i = 0; i < n; i++) {
@@ -778,7 +796,7 @@ private:
 
     Filter filter, filter2, noiseHp, noiseLp;
     float noiseHpHz = 0.0f, noiseHpSet = 0.0f, noiseLpHz = 0.0f, noiseLpSet = 0.0f, noisePan = 0.0f;
-    SamplePlayer smp;
+    SamplePlayer smp, smp2, smp3;
     AnalogADSR filterADSR, adsr;
     AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */

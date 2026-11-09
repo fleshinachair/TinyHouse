@@ -151,6 +151,8 @@ BALANCES = dict(
     sub = pot("sub_bal",   "BSUB", "Sub Filter Balance", 0),
     noise = pot("noise_bal", "BNZ", "Noise Filter Balance", 0),
     smp = pot("smp_bal",   "BSMP", "Sample Filter Balance", 0),
+    smp2 = pot("smp2_bal", "BSM2", "Sample 2 Filter Balance", 0),
+    smp3 = pot("smp3_bal", "BSM3", "Sample 3 Filter Balance", 0),
 )
 # Where each source goes, as Serum's routing buttons (calibration/probe_bus.py and the rack-0 filter probe): through the voice filter (the default); "Direct" past the
 # filter and into the effects (Serum's Master); "None", to the FX buses only; "Out", past the filter AND the effects, straight to the output (Serum's Direct).
@@ -198,7 +200,7 @@ MODFX = dict(
 BUSES = {}
 FLT_OUT = ["Master", "None", "Out", "Filter"]
 FLTOUT = dict(f1 = enum("flt1_out", "F1O", "Filter 1 Output", FLT_OUT, 0), f2 = enum("flt2_out", "F2O", "Filter 2 Output", FLT_OUT, 0))
-for _k, _n in (("wt1", "WT1"), ("wt2", "WT2"), ("wt3", "WT3"), ("sub", "Sub"), ("noise", "Noise"), ("smp", "Sample"), ("flt1", "Filter 1"), ("flt2", "Filter 2")):
+for _k, _n in (("wt1", "WT1"), ("wt2", "WT2"), ("wt3", "WT3"), ("sub", "Sub"), ("noise", "Noise"), ("smp", "Sample"), ("smp2", "Sample 2"), ("smp3", "Sample 3"), ("flt1", "Filter 1"), ("flt2", "Filter 2")):
     for _b in (1, 2):
         BUSES["%s_%d" % (_k, _b)] = pot("%s_bus%d" % (_k, _b), "%s%d" % (_k[:2].upper() + _k[-1:].upper(), _b), "%s Bus %d" % (_n, _b), 0)
 # Serum's Sample and Multisample oscillators: one sample set (a .tbs file made by sample_export.py), played from the keyboard at its
@@ -232,6 +234,23 @@ SAMPLE = dict(
     fine  = num("smp_fine",  "SMPF", "Sample Fine", -100, 100, 0),
     post  = enum("smp_post", "SMPR", "Sample Route", ROUTE, 0),
     fixed = enum("smp_fixed", "SMPX", "Sample Pitch", ["Track", "Fixed"], 0),
+)
+# A second sample oscillator for presets that stack two (Serum's oscillators A and B both on Sample / Multisample): the same controls and laws as the first.
+SAMPLE2 = dict(
+    set   = wtfile("smp2_set", "SMQS", "Sample 2 Set"),
+    level = pot("smp2_level", "SMQL", "Sample 2 Level", 0),
+    tune  = num("smp2_tune",  "SMQT", "Sample 2 Tune", -48, 48, 0),
+    fine  = num("smp2_fine",  "SMQF", "Sample 2 Fine", -100, 100, 0),
+    post  = enum("smp2_post", "SMQR", "Sample 2 Route", ROUTE, 0),
+    fixed = enum("smp2_fixed", "SMQX", "Sample 2 Pitch", ["Track", "Fixed"], 0),
+)
+SAMPLE3 = dict(
+    set   = wtfile("smp3_set", "SMRS", "Sample 3 Set"),
+    level = pot("smp3_level", "SMRL", "Sample 3 Level", 0),
+    tune  = num("smp3_tune",  "SMRT", "Sample 3 Tune", -48, 48, 0),
+    fine  = num("smp3_fine",  "SMRF", "Sample 3 Fine", -100, 100, 0),
+    post  = enum("smp3_post", "SMRR", "Sample 3 Route", ROUTE, 0),
+    fixed = enum("smp3_fixed", "SMRX", "Sample 3 Pitch", ["Track", "Fixed"], 0),
 )
 SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
@@ -570,6 +589,10 @@ BANKS = [
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[2][k], EQS[3][k])]),
         row(O1["shape"], O1["sgain"], O1["sout"], O2["shape"], O2["sgain"], O2["sout"]),
         row(O3["shape"], O3["sgain"], O3["sout"]),
+        row(SAMPLE2["set"], SAMPLE2["level"], SAMPLE2["tune"], SAMPLE2["fine"], SAMPLE2["post"], SAMPLE2["fixed"]),
+        row(BALANCES["smp2"], BUSES["smp2_1"], BUSES["smp2_2"]),
+        row(SAMPLE3["set"], SAMPLE3["level"], SAMPLE3["tune"], SAMPLE3["fine"], SAMPLE3["post"], SAMPLE3["fixed"]),
+        row(BALANCES["smp3"], BUSES["smp3_1"], BUSES["smp3_2"]),
     ]),
 ]
 
@@ -665,7 +688,7 @@ def chain_param(p):
 # exactly like the wavetable enums. A static entry would duplicate the key.
 # The LFO shapes, rates, modes and routes are hidden and only ever set by the converter or a preset load, so the host has
 # no use for them in chain_params (they would double its size); they stay in the param table, the state blob and set_param.
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$)")
 chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"])]
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"

@@ -69,7 +69,7 @@ def main():
             st = base
             for w in (1, 2, 3):
                 st = setk(st, "wt%d_level" % w, 100 if w == slot else 0)
-            for key, val in (("sub_level", 0), ("noise_level", 0), ("smp_level", 0), ("flt_freq", 127), ("flt_env", 64), ("flt_res", 0), ("flt_drive", 0), ("flt_gain", 0), ("flt_key", 0),
+            for key, val in (("sub_level", 0), ("noise_level", 0), ("smp_level", 0), ("smp2_level", 0), ("smp3_level", 0), ("flt_freq", 127), ("flt_env", 64), ("flt_res", 0), ("flt_drive", 0), ("flt_gain", 0), ("flt_key", 0),
                              ("fx_on", 0), ("volume", 30), ("me1_dst", 0), ("me2_dst", 0)):
                 st = setk(st, key, val)
             for r in range(1, 9):

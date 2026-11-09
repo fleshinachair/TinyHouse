@@ -62,11 +62,11 @@ int main(int argc, char **argv)
         p = semi + 1;
         if (k == "clip") { e.setClip(parseClip(v.c_str())); continue; }
         if (k == "arp") { e.setArp(parseArp(v.c_str())); continue; }
-        if (k == "smp_set") {
+        if (k == "smp_set" || k == "smp2_set" || k == "smp3_set") {
             if (v.empty()) continue;
             auto set = std::make_shared<SampleSet>();
             if (!sampleLoad((root + v).c_str(), *set)) { fprintf(stderr, "sample set failed: %s\n", v.c_str()); return 3; }
-            e.setSample(set);
+            if (k == "smp3_set") e.setSample3(set); else if (k == "smp2_set") e.setSample2(set); else e.setSample(set);
             continue;
         }
         if (k == "wt1_table" || k == "wt2_table" || k == "wt3_table") {

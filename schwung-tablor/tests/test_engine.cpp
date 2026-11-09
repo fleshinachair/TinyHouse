@@ -728,6 +728,51 @@ static void testClipPlayer()
 }
 
 /* The arpeggiator: held keys played one at a time, one 1/16 step (0.125 s, 43 blocks) each; the Pattern shape plays a pattern of indexes into them. */
+/* The two sample oscillators: each plays its own set at its own level and tuning. */
+static std::shared_ptr<SampleSet> sineSet(int cycles)
+{
+    auto s = std::make_shared<SampleSet>();
+    SampleRegion r;
+    r.root = 60; r.loops = true; r.loopStart = 0.0f; r.loopEnd = 1.0f; r.rate = 44100.0f; r.frames = 4410;
+    r.pcm.resize(4410);
+    for (int i = 0; i < 4410; i++) r.pcm[(size_t) i] = (int16_t) (12000.0 * std::sin(2.0 * M_PI * cycles * i / 4410.0));
+    s->regions.push_back(std::move(r));
+    return s;
+}
+
+static void testSample2()
+{
+    printf("== second sample oscillator ==\n");
+    auto near = [](double x, double want) { return std::fabs(x - want) < want * 0.1; };
+    auto make = [] {
+        auto e = std::make_unique<Engine>();
+        e->pots[TB_P_WT1_LEVEL] = 0; e->pots[TB_P_WT2_LEVEL] = 0; e->pots[TB_P_WT3_LEVEL] = 0;
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VCA_R] = 0;
+        return e;
+    };
+    auto hear = [&](bool first, bool second) {
+        auto e = make();
+        if (first)  { e->setSample(sineSet(10));  e->pots[TB_P_SMP_LEVEL] = 100; }
+        if (second) { e->setSample2(sineSet(10)); e->pots[TB_P_SMP2_LEVEL] = 100; e->pots[TB_P_SMP2_TUNE] = 12; }
+        note(*e, 60);
+        render(*e, 40);
+        return render(*e, 60);
+    };
+    auto a = hear(true, false), b = hear(false, true), c = hear(true, true);
+    CHECK(near(heardHz(a), 100.0), "the first sample plays at its root (%.1f Hz, 100 expected)", heardHz(a));
+    CHECK(near(heardHz(b), 200.0), "the second sample plays alone, an octave up by its own tuning (%.1f Hz, 200 expected)", heardHz(b));
+    CHECK(rms(c) > rms(a) * 1.05, "both together are louder than the first alone (rms %.0f vs %.0f)", rms(c), rms(a));
+    {
+        auto e = make();
+        e->setSample3(sineSet(10)); e->pots[TB_P_SMP3_LEVEL] = 100; e->pots[TB_P_SMP3_TUNE] = 19;
+        note(*e, 60); render(*e, 40);
+        auto f = render(*e, 60);
+        CHECK(near(heardHz(f), 300.0), "the third sample plays alone, a fifth and an octave up (%.1f Hz, 300 expected)", heardHz(f));
+    }
+    auto d = make(); d->setSample2(sineSet(10)); d->pots[TB_P_SMP2_LEVEL] = 0; note(*d, 60); render(*d, 40);
+    CHECK(rms(render(*d, 60)) < 50, "a level of 0 is silent (rms %.0f)", rms(render(*d, 1)));
+}
+
 static void testArp()
 {
     printf("== arpeggiator ==\n");
@@ -991,6 +1036,7 @@ int main()
     testNoteOnset();
     testMonoTakeover();
     testClipPlayer();
+    testSample2();
     testArp();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;

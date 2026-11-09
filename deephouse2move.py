@@ -480,11 +480,13 @@ def to_vital(ph: dict) -> dict:
 CARRY_BUSES = True                        # the sources' sends to the two FX buses and the buses' racks (engine: Voice sends, Engine::fxBus); off: the old rack-0-only conversion
 TABLOR_DEFAULTS = {
     "flt1_out": 0, "flt2_out": 0, "flt1_bus1": 0, "flt1_bus2": 0, "flt2_bus1": 0, "flt2_bus2": 0,
-    "wt1_bus1": 0, "wt1_bus2": 0, "wt2_bus1": 0, "wt2_bus2": 0, "wt3_bus1": 0, "wt3_bus2": 0, "sub_bus1": 0, "sub_bus2": 0, "noise_bus1": 0, "noise_bus2": 0, "smp_bus1": 0, "smp_bus2": 0,
+    "wt1_bus1": 0, "wt1_bus2": 0, "wt2_bus1": 0, "wt2_bus2": 0, "wt3_bus1": 0, "wt3_bus2": 0, "sub_bus1": 0, "sub_bus2": 0, "noise_bus1": 0, "noise_bus2": 0, "smp_bus1": 0, "smp_bus2": 0, "smp2_bus1": 0, "smp2_bus2": 0, "smp3_bus1": 0, "smp3_bus2": 0,
     "wt1_post": 0, "wt2_post": 0, "wt3_post": 0, "sub_post": 0, "noise_post": 0,
-    "wt1_bal": 0, "wt2_bal": 0, "wt3_bal": 0, "sub_bal": 0, "noise_bal": 0, "smp_bal": 0,
+    "wt1_bal": 0, "wt2_bal": 0, "wt3_bal": 0, "sub_bal": 0, "noise_bal": 0, "smp_bal": 0, "smp2_bal": 0, "smp3_bal": 0,
     "flt2_type": 1, "flt2_freq": 127, "flt2_res": 0, "flt2_env": 64, "flt2_drive": 0, "flt2_key": 0, "flt_gain": 0, "flt2_gain": 0,
     "smp_set": "", "smp_level": 0, "smp_tune": 0, "smp_fine": 0, "smp_post": 0, "smp_fixed": 0,
+    "smp2_set": "", "smp2_level": 0, "smp2_tune": 0, "smp2_fine": 0, "smp2_post": 0, "smp2_fixed": 0,
+    "smp3_set": "", "smp3_level": 0, "smp3_tune": 0, "smp3_fine": 0, "smp3_post": 0, "smp3_fixed": 0,
     "wt1_pos": 0, "wt2_pos": 0, "wt1_level": 100, "wt2_level": 0, "wt1_tune": 0, "wt2_tune": 0,
     "wt1_uni": 1, "wt1_detune": 0, "wt1_spread": 0, "wt1_pan": 64,
     "wt2_uni": 1, "wt2_detune": 0, "wt2_spread": 0, "wt2_pan": 64,
@@ -828,7 +830,7 @@ def apply_stereo_fit(name: str, P: dict) -> list:
     return [f"stereo width matched to Serum's side/mid (master width {fit['start']['mwidth']}->{fit['fit']['mwidth']}, side/mid {fit['before_db']:+.1f} -> {fit['after_db']:+.1f} dB, Serum {fit['target_db']:+.1f})"]
 
 
-SIG_NEW_ZERO = {f"{k}_bus{b}" for k in ("wt1", "wt2", "wt3", "sub", "noise", "smp", "flt1", "flt2") for b in (1, 2)} | {"flt1_out", "flt2_out"}
+SIG_NEW_ZERO = {f"{k}_bus{b}" for k in ("wt1", "wt2", "wt3", "sub", "noise", "smp", "smp2", "smp3", "flt1", "flt2") for b in (1, 2)} | {"flt1_out", "flt2_out"}
 
 
 def params_sig(P: dict) -> str:
@@ -845,9 +847,13 @@ def params_sig(P: dict) -> str:
             skip = skip | {k for k in P if k.startswith(pre + "_")}
     if not P.get("smp_set"):                                    # no sample set: its other controls do nothing
         skip = skip | {k for k in P if k.startswith("smp_")}
+    if not P.get("smp2_set"):
+        skip = skip | {k for k in P if k.startswith("smp2_")}
+    if not P.get("smp3_set"):
+        skip = skip | {k for k in P if k.startswith("smp3_")}
     if not P.get("fxf_on", 0):
         skip = skip | {k for k in P if k.startswith("fxf_")}
-    if not any(P.get(k, 0) for k in ("wt1_bal", "wt2_bal", "wt3_bal", "sub_bal", "noise_bal", "smp_bal")):      # no source reaches Filter 2
+    if not any(P.get(k, 0) for k in ("wt1_bal", "wt2_bal", "wt3_bal", "sub_bal", "noise_bal", "smp_bal", "smp2_bal", "smp3_bal")):      # no source reaches Filter 2
         skip = skip | {k for k in P if k.startswith("flt2_")}
     if P.get("comp_mix", 0) == 0 or P.get("comp_ratio", 0) == 0:  # a compressor that is off does not change the level
         skip = skip | {k for k in P if k.startswith("comp_")}
@@ -1262,25 +1268,26 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
 
     wt_oscs = [o for o in ph["oscs"] if o["enabled"] and o["kind"] == "kOsc_WT"]
     odd = [o for o in ph["oscs"] if o["enabled"] and o["kind"] != "kOsc_WT"]
-    # The engine's one sample oscillator carries the loudest Sample / Multisample oscillator whose files are on this machine.
-    smp = None
+    # The engine's three sample oscillators carry the loudest Sample / Multisample oscillators whose files are on this machine.
+    smps = []
     for o in sorted((o for o in odd if o.get("sample") and eff_level(o) > 0.02), key=lambda o: -eff_level(o)):
         got = SE.export_info(o["sample"], wt_out.parent / "Samples" / subdir)
         if got:
-            smp = (o, got[0], got[1])
-            break
-    if not smp and ph["noise"].get("click") and ph["noise"].get("sample"):
+            smps.append((o, got[0], got[1]))
+            if len(smps) == 3:
+                break
+    if not smps and ph["noise"].get("click") and ph["noise"].get("sample"):
         # a one-shot click or hit in the noise slot (a kick attack): the sample oscillator plays it once, at its own pitch
         nz0 = ph["noise"]
         got = SE.export_info(nz0["sample"], wt_out.parent / "Samples" / subdir)
         if got:
-            smp = ({"id": 3, "noise": True, "level": nz0["level"]}, got[0], got[1])
+            smps.append(({"id": 3, "noise": True, "level": nz0["level"]}, got[0], got[1]))
     for o in odd:
-        if smp and o is smp[0]:
+        if any(o is s[0] for s in smps):
             continue
         if eff_level(o) <= 0.02:
             continue                                   # an oscillator that is on but silent adds nothing
-        crit.append(f"osc {'ABC'[o['id']]} is a {o['kind'][5:]} oscillator (Tablor has one sample oscillator and no other kind)")
+        crit.append(f"osc {'ABC'[o['id']]} is a {o['kind'][5:]} oscillator (Tablor has three sample oscillators and no other kind)")
     def bent(o):
         return any(w["mode"] in BEND_WARPS and w["amount"] >= WARP_NOISE_FLOOR for w in o["warp"])
 
@@ -1410,8 +1417,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     # patch whose body bypasses must not be strangled by a filter it never went through.
     routed = {int(k): v for k, v in ph["routed"].items()}
     sources = [(o["id"], levels.get(o["id"], 0.0)) for o in keep]
-    if smp and not smp[0].get("noise"):
-        sources.append((smp[0]["id"], levels.get(smp[0]["id"], 0.0)))
+    for s_ in smps:
+        if not s_[0].get("noise"):
+            sources.append((s_[0]["id"], levels.get(s_[0]["id"], 0.0)))
     if sub["enabled"]:
         sources.append((4, sub["level"]))
     if nz["enabled"]:
@@ -1436,20 +1444,19 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"wt{slot}_post"] = post_of(oid)
     P["sub_post"] = post_of(4, sub["enabled"])
     P["noise_post"] = post_of(3, nz["enabled"])
-    if smp:
-        so, spath, sinfo = smp
-        P["smp_set"] = f"{MOVE_SAMPLE_ROOT}/{subdir}/{spath.name}"
+    for sk, (so, spath, sinfo) in zip(("smp", "smp2", "smp3"), smps):
+        P[f"{sk}_set"] = f"{MOVE_SAMPLE_ROOT}/{subdir}/{spath.name}"
         slevel = level_of(3, so["level"]) if so.get("noise") else eff_level(so)
-        P["smp_level"] = round(_clamp(pot_level(slevel) * CAL["smp_scale"], 0, 127))
-        P["smp_fixed"] = int(bool(so.get("noise")))
-        P["smp_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
-        P["smp_fine"] = round(_clamp(sinfo["fine"], -100, 100))
-        P["smp_post"] = post_of(so["id"])
+        P[f"{sk}_level"] = round(_clamp(pot_level(slevel) * CAL["smp_scale"], 0, 127))
+        P[f"{sk}_fixed"] = int(bool(so.get("noise")))
+        P[f"{sk}_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
+        P[f"{sk}_fine"] = round(_clamp(sinfo["fine"], -100, 100))
+        P[f"{sk}_post"] = post_of(so["id"])
         note.append(f"sample oscillator carried: {sinfo['file']} ({'multisample' if sinfo['multi'] else 'sample'})")
     # ---- FX buses: each source's send to Bus 1 / Bus 2 (Serum's level cubed is the gain, probe_bus.py) ----
     send_keys = {**{oid: f"wt{slot}" for oid, slot in slot_of.items()}, 4: "sub", 3: "noise"}
-    if smp:
-        send_keys[smp[0]["id"]] = "smp"
+    for sk, s_ in zip(("smp", "smp2", "smp3"), smps):
+        send_keys[s_[0]["id"]] = sk
     for k in send_keys.values():
         P[f"{k}_bus1"] = P[f"{k}_bus2"] = 0
     if CARRY_BUSES:
@@ -1535,9 +1542,9 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P["sub_bal"] = pot_bal(4)
         if nz["enabled"]:
             P["noise_bal"] = pot_bal(3)
-        if smp:
-            P["smp_bal"] = pot_bal(smp[0]["id"])
-        reaches2 = {k: P[k] for k in ("wt1_bal", "wt2_bal", "wt3_bal", "sub_bal", "noise_bal", "smp_bal") if P[k] > 0}
+        for sk, s_ in zip(("smp", "smp2", "smp3"), smps):
+            P[f"{sk}_bal"] = pot_bal(s_[0]["id"])
+        reaches2 = {k: P[k] for k in ("wt1_bal", "wt2_bal", "wt3_bal", "sub_bal", "noise_bal", "smp_bal", "smp2_bal", "smp3_bal") if P[k] > 0}
         if reaches2 or serial or serial2:
             voice_filter_pots(f2, 1, "flt2", "filter 2")
             note.append("second voice filter carried (" + ", ".join(f"{k[:-4]} {v / 63.5 - 1:+.1f}" for k, v in reaches2.items()) + (", " if reaches2 else "") + ("in series after filter 1" if serial else "in series before filter 1" if serial2 else "") + ")")

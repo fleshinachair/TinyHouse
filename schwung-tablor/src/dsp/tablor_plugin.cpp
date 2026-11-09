@@ -41,7 +41,7 @@ struct tablor_instance {
     char  module_dir[512] = {};
 
     /* wavetable selection = absolute file paths ("" = built-in Init) */
-    char  wt_path[TB_WT_SLOTS + 1][512] = {};      /* slot TB_WT_SLOTS is the sample set */
+    char  wt_path[TB_WT_SLOTS + 3][512] = {};      /* slot TB_WT_SLOTS is the sample set, the next two the second and third */
 
     /* presets: factory (from the module) + UNLIMITED user .tblr files in
      * the user library (filename = preset name, content = TBLR1 blob).
@@ -626,7 +626,7 @@ static int param_index(const char *key)
 /* Which wavetable slot a param drives: wt1_table -> 0 ... wt3_table -> 2. */
 static int tb_path_slot(int param_idx)
 {
-    return param_idx == TB_P_WT1_TABLE ? 0 : param_idx == TB_P_WT2_TABLE ? 1 : param_idx == TB_P_SMP_SET ? TB_WT_SLOTS : 2;
+    return param_idx == TB_P_WT1_TABLE ? 0 : param_idx == TB_P_WT2_TABLE ? 1 : param_idx == TB_P_SMP_SET ? TB_WT_SLOTS : param_idx == TB_P_SMP2_SET ? TB_WT_SLOTS + 1 : param_idx == TB_P_SMP3_SET ? TB_WT_SLOTS + 2 : 2;
 }
 
 /* The same for the wtN_select / wtN_shape keys, which are not params. */
@@ -666,16 +666,20 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
      * the old one sounding until the new one is ready (the sound stays continuous), so that path does not mute. */
     if (mute) {
         if (osc == TB_WT_SLOTS) inst->engine.setSample(nullptr);
+        else if (osc == TB_WT_SLOTS + 1) inst->engine.setSample2(nullptr);
+        else if (osc == TB_WT_SLOTS + 2) inst->engine.setSample3(nullptr);
         else if (osc >= 0 && osc < TB_WT_SLOTS) inst->engine.setTable(osc, nullptr);
     }
 
-    if (osc == TB_WT_SLOTS) {               /* the sample set: read on the worker, then swapped in like a wavetable */
+    if (osc >= TB_WT_SLOTS) {               /* a sample set (the first, or the second): read on the worker, then swapped in like a wavetable */
         const std::string p = path;
-        inst->loader.post([inst, p] {
-            if (p.empty()) { inst->engine.setSample(nullptr); return; }
+        const int which = osc - TB_WT_SLOTS;
+        inst->loader.post([inst, p, which] {
+            auto put = [&](std::shared_ptr<tb::SampleSet> s) { if (which == 2) inst->engine.setSample3(std::move(s)); else if (which == 1) inst->engine.setSample2(std::move(s)); else inst->engine.setSample(std::move(s)); };
+            if (p.empty()) { put(nullptr); return; }
             auto set = std::make_shared<tb::SampleSet>();
-            if (tb::sampleLoad(p.c_str(), *set)) inst->engine.setSample(set);
-            else inst->engine.setSample(nullptr);
+            if (tb::sampleLoad(p.c_str(), *set)) put(set);
+            else put(nullptr);
         });
         return;
     }
@@ -1011,6 +1015,8 @@ static void reset_to_defaults(tablor_instance *inst)
     set_table_path(inst, 1, "");
     set_table_path(inst, 2, "");
     set_table_path(inst, TB_WT_SLOTS, "");
+    set_table_path(inst, TB_WT_SLOTS + 1, "");
+    set_table_path(inst, TB_WT_SLOTS + 2, "");
 }
 
 /* Version-tagged blob: "TBLR1;…" or "TBLR2;…". Anything without a known
@@ -1446,7 +1452,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
         }
         /* a state restore may have landed while we were scanning: re-apply
          * whatever paths it stored, now that the list and loader are live */
-        for (int osc = 0; osc <= TB_WT_SLOTS; osc++)
+        for (int osc = 0; osc <= TB_WT_SLOTS + 2; osc++)
             if (inst->wt_path[osc][0]) {
                 char keep[512];
                 snprintf(keep, sizeof keep, "%s", inst->wt_path[osc]);

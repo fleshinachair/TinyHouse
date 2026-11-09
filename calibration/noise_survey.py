@@ -56,7 +56,7 @@ def main():
             print("  skipped", n, str(err)[:50], flush=True); serum = H.Serum(); continue
         m = d2m.map_to_tablor(d2m.to_vital(ph) | {"preset_name": n}, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
         st = d2m.blob(m)
-        for key, val in (("wt1_level", 0), ("wt2_level", 0), ("wt3_level", 0), ("sub_level", 0), ("smp_level", 0), ("flt_freq", 127), ("flt_env", 64), ("flt_res", 0), ("flt_drive", 0),
+        for key, val in (("wt1_level", 0), ("wt2_level", 0), ("wt3_level", 0), ("sub_level", 0), ("smp_level", 0), ("smp2_level", 0), ("smp3_level", 0), ("flt_freq", 127), ("flt_env", 64), ("flt_res", 0), ("flt_drive", 0),
                          ("flt_gain", 0), ("flt_key", 0), ("fx_on", 0), ("me1_dst", 0), ("me2_dst", 0), ("noise_post", 1), ("volume", 36)):
             st = setk(st, key, val)
         for r in range(1, 9):

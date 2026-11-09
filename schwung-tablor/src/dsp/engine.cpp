@@ -28,6 +28,8 @@ Engine::Tables Engine::loadTables() const
     Tables t;
     for (int o = 0; o < kOscs; o++) t.t[o] = std::atomic_load(&table[o]);
     t.s = std::atomic_load(&sampleSet);
+    t.s2 = std::atomic_load(&sampleSet2);
+    t.s3 = std::atomic_load(&sampleSet3);
     return t;
 }
 
@@ -44,6 +46,8 @@ VoiceContext Engine::makeContext(const Tables &t)
     c.pots = pots;
     for (int o = 0; o < kOscs; o++) c.table[o] = t.t[o].get();
     c.sample = t.s;
+    c.sample2 = t.s2;
+    c.sample3 = t.s3;
 
     /* The share comes from the Voices control, so a chord cannot change a held
      * note's unison. More voices than that can only be sounding just after the

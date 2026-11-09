@@ -118,6 +118,8 @@ public:
 
     /* The sample oscillator's set; null clears it. Swapped in from the loader thread like a wavetable. */
     void setSample(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet, std::move(s)); }
+    void setSample2(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet2, std::move(s)); }
+    void setSample3(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet3, std::move(s)); }
 
     void allNotesOff(bool allowTail);
 
@@ -214,7 +216,7 @@ private:
     bool  monoActive = false;
 
     /* One block's hold on the tables: the only thing keeping them alive. */
-    struct Tables { std::shared_ptr<Wavetable> t[kOscs]; std::shared_ptr<SampleSet> s; };
+    struct Tables { std::shared_ptr<Wavetable> t[kOscs]; std::shared_ptr<SampleSet> s, s2, s3; };
     Tables loadTables() const;
     VoiceContext makeContext(const Tables &t);
 
@@ -239,7 +241,7 @@ private:
     bool  fxSeenValid = false;
     std::vector<Voice> voices;
     std::shared_ptr<Wavetable> table[kOscs];
-    std::shared_ptr<SampleSet> sampleSet;
+    std::shared_ptr<SampleSet> sampleSet, sampleSet2, sampleSet3;
 
     /* mono mode state: held-note stack, last-note priority */
     static constexpr int kStackMax = 32;

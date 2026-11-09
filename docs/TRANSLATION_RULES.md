@@ -556,3 +556,10 @@ Serum 2's arpeggiator (`Arp0.kParamEnabled`; 33 of the 626 factory presets) is c
 - **Pattern**: the clip's loop is `regionEndBeats`, else 4 beats; a note's `noteNum` is an index into the held keys sorted by pitch (negative counts from the top); an index past the keys wraps round them, and each wrap adds **WrapTranspose** semitones (default 12) up to **WrapRange** wraps (a negative wrap goes down; the count runs 0..WrapRange then starts over). A held note is joined at the arp's own beat grid in Serum; the engine starts the clock at the first key down.
 - Not carried: Phantom wrap mode, step actions (Chord), retrig, velocity decay, repeats, chance. The importer's gate decides what is kept.
 - Result: of the 33, 8 pass the gate (ARP - Altar, Legend Epix, Rainfall, LD - In Sphere, BA - Harmonic Twist, SEQ - Fifth DMension, Running down the Hill, Stressed Acid); the rest are stopped by other gaps: MultiSample / Granular oscillators (12), FM / RM / Dist warps (7), Bode and Split (5), a convolution reverb. ARP - Acid101 passes the level but not the bands (20.7 dB; its Serum render holds a steady level between steps that the engine's does not, undiagnosed).
+
+## Added 2026-11-09 (night 3): three sample oscillators
+
+- Serum has three oscillators and any of them can be a Sample or Multisample. The engine now has three sample oscillators (`smp_*`, `smp2_*`, `smp3_*`), each with set, level, tune, fine, route, filter balance and the two bus sends, with the same laws as the first. The converter gives them to the loudest three, in order; a preset whose sample files are not on this machine is still blocked.
+- The noise slot's one-shot click sample (a kick attack) is still carried only when the preset has no sample oscillator of its own.
+- Not carried: Granular oscillators (still blocked), a sample oscillator's pan and unison.
+

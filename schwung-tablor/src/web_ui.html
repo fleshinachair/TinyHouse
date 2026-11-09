@@ -16,7 +16,7 @@
  * and mirrored in FMT; the rest read as the raw 0..127 pot. */
 :root{
   --bg:#0a0b0c; --panel:#101213; --line:#1c1f21; --line2:#272b2e;
-  --txt:#c4cac5; --dim:#68706b; --faint:#3a403c;
+  --txt:#d2d8d3; --dim:#9aa39d; --faint:#7b847e;
   --g:#5be584; --g2:#2f8f50; --g3:#173d27; --hi:#d9ffe4;
 }
 *{box-sizing:border-box}
@@ -50,7 +50,44 @@ body{
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .gfx{display:block; column-width:360px; column-gap:10px}
 .gfx > .panel{break-inside:avoid; margin-bottom:10px}
-@media (max-width:1100px){.g3,.g2{grid-template-columns:minmax(0,1fr)}}
+/* Narrower windows: the three oscillators stay side by side (smaller knobs, shorter waterfalls)
+ * while the other pages drop to two columns. Under 700px the oscillators become one panel at a
+ * time behind a 1/2/3 switch, and everything else is a single column. */
+.seg.oscsel{display:none; margin:0 0 10px}
+@media (max-width:1100px){
+  :root{--kw:48px; --ks:32px}
+  .g3:not(#osc),.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .wrap{padding:10px 10px 28px}
+  .grid,.gfx{gap:8px}
+  .panel > .head{padding:6px 9px 5px; min-height:30px}
+  .panel > .body{padding:8px 9px 10px; gap:8px}
+  #osc canvas.gr{height:150px !important}
+  .knob .lab{font-size:9px}
+  .gfx{column-width:300px}
+}
+@media (max-width:900px){
+  :root{--kw:42px; --ks:28px}
+  #osc canvas.gr{height:110px !important}
+  .row > .fld{margin:6px 4px 0 0}
+  .panel > .head .pick select{max-width:110px}
+}
+@media (max-width:700px){
+  .g3,.g2,#osc{grid-template-columns:minmax(0,1fr)}
+  :root{--kw:56px; --ks:36px}
+  .knob .lab{font-size:10px}
+  #osc canvas.gr{height:140px !important}
+  .seg.oscsel{display:inline-flex}
+  #osc .panel:not(.sel){display:none}
+  #top{flex-wrap:wrap; gap:8px 12px}
+  #top .hint{display:none}
+  #pbar{margin-left:0; flex:1 1 100%}
+  #pbar .cur{flex:1; width:auto}
+  #tabs{overflow-x:auto}
+  #tabs button{padding:8px 11px 9px; letter-spacing:.14em; white-space:nowrap}
+  #browser{grid-template-columns:120px 1fr}
+  #browser .list div{padding:6px 10px}
+  #browser .banks div{padding:7px 9px}
+}
 .panel{background:var(--panel); border:1px solid var(--line); border-radius:6px; min-width:0}
 .panel > .head{
   display:flex; align-items:center; gap:10px; padding:8px 12px 7px;
@@ -60,6 +97,20 @@ body{
 .panel > .head .pick{margin-left:auto; display:flex; gap:6px; min-width:0}
 .panel > .head .pick select{max-width:170px}
 .panel > .body{padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px}
+.fxoff{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; align-items:flex-start}
+.fxoff:empty{display:none}
+.fxoff:not(:empty)::before{content:"Bypassed"; flex:1 0 100%; font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin-top:6px}
+.fxoff > .panel{width:230px; margin:0; column-span:none}
+.panel .chev{display:none}
+.panel.fx > .head{cursor:default}
+.panel.fx.collapsed > .head,.panel.fx.peek > .head{cursor:pointer}
+.panel.fx.collapsed > .head{border-bottom-color:transparent}
+.panel.fx.peek .chev{transform:rotate(45deg)}
+.panel.fx.collapsed > .head:hover .ttl{color:var(--txt)}
+.panel.fx.collapsed > .head .ttl{color:var(--faint)}
+.panel.fx.collapsed > .body{display:none}
+.panel.fx.collapsed .chev,.panel.fx.peek .chev{display:block}
+.panel .chev{margin-left:auto; width:6px; height:6px; border-right:1.5px solid var(--faint); border-bottom:1.5px solid var(--faint); transform:rotate(-45deg); margin-right:4px}
 .row{display:flex; flex-wrap:wrap; gap:8px 2px; align-items:flex-start}
 .row > .fld{margin:6px 6px 0 0}
 .row > .tg{margin:14px 8px 0 0}
@@ -68,8 +119,8 @@ body{
 .cols > *{min-width:0}
 
 /* ---- knob ---- */
-.knob{width:60px; text-align:center; flex:none; user-select:none}
-.knob svg{display:block; margin:0 auto; cursor:ns-resize; touch-action:none}
+.knob{width:var(--kw,60px); text-align:center; flex:none; user-select:none}
+.knob svg{display:block; margin:0 auto; cursor:ns-resize; touch-action:none; width:var(--ks,40px); height:var(--ks,40px)}
 .knob .lab{color:var(--dim); font-size:10px; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .knob .val{color:#7e8a82; font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:13px}
 .knob:hover .val,.knob.live .val{color:var(--g)}
@@ -974,17 +1025,63 @@ function reverbGraph() {
 }
 
 /* ----------------------------------------------------------------- build */
+var fxStrip = null;
 function fxCard(into, title, power, build) {
   var p = panel(title, into, { power: power });
   build(p.body, p);
+  if (power && META[power]) {
+    /* A rack effect that is switched off folds down to its title bar. The power switch opens it
+     * again; clicking the bar peeks inside an off effect without switching it on. */
+    var peek = false, wasOn = val(power) >= 1;
+    p.root.classList.add("fx");
+    el("span", "chev", p.head);
+    var ph = null;                      /* marks the card's place in the grid while it is parked */
+    var sync = function () {
+      var off = val(power) < 1, fold = off && !peek;
+      p.root.classList.toggle("collapsed", fold);
+      p.root.classList.toggle("peek", off && peek);
+      if (fxStrip) {
+        if (fold && !ph) {
+          ph = document.createComment("");
+          p.root.parentNode.insertBefore(ph, p.root);
+          fxStrip.appendChild(p.root);
+        } else if (!fold && ph) {
+          ph.parentNode.insertBefore(p.root, ph);
+          ph.parentNode.removeChild(ph);
+          ph = null;
+        }
+      }
+      redrawSoon();
+    };
+    on(power, function (v) {
+      var now = v >= 1;
+      if (now !== wasOn) { peek = false; wasOn = now; }
+      sync();
+    });
+    p.head.addEventListener("click", function (e) {
+      if (e.target.closest(".pw,select,input,button")) return;
+      if (val(power) >= 1) return;
+      peek = !peek;
+      sync();
+    });
+  }
   return p;
 }
 function sub(into, txt) { return el("div", "sub", into, txt); }
 
 function buildOsc() {
   var host = document.getElementById("osc");
+  var sel = el("div", "seg oscsel", host.parentNode), panels = [];
+  host.parentNode.insertBefore(sel, host);
+  function showOsc(i) {
+    panels.forEach(function (p, j) { p.classList.toggle("sel", j === i); });
+    [].forEach.call(sel.children, function (b, j) { b.classList.toggle("on", j === i); });
+    redrawSoon();
+  }
   [1, 2, 3].forEach(function (n) {
     var p = panel("OSC " + n, host, { cls: "osc" });
+    panels.push(p.root);
+    el("button", null, sel, "OSC " + n).addEventListener("click", function () { showOsc(n - 1); });
     el("div", "pick", p.head).id = "pick" + n;
     var c = graph(p.body, waterfall(n), 190, {
       down: function (x, y, w) { setVal("wt" + n + "_pos", x / w * 127, true); return true; },
@@ -999,6 +1096,7 @@ function buildOsc() {
     row([[pre + "post", "Route"], [pre + "bus1", "Bus 1"], [pre + "bus2", "Bus 2"]], p.body);
     placed[pre + "table"] = 1;
   });
+  showOsc(0);
 }
 
 function buildFilter(page) {
@@ -1056,6 +1154,7 @@ function buildEnv(page) {
 
 function buildFx(page) {
   var g = el("div", "grid gfx", page);
+  fxStrip = el("div", "fxoff", page);
   fxCard(g, "Distortion", null, function (b) {
     graph(b, distGraph(), 150);
     row([["dist_mode", "Mode"], ["dist_cal", "Calibrated"]], b);

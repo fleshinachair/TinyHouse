@@ -94,24 +94,20 @@ and still save with the patch; they simply have no cell on the hardware.
 
 ## Web panel
 
-Open `move.local:7700/remote-ui` and Tablor lays itself out the way the plugin
-it came from does: both oscillators across the top with their wavetable
-displays, then noise, sub, filter and the amp envelope, with global below. Every control is live in both
-directions — turn a knob here and the Move follows, turn one on the Move and
-this follows.
+Open `move.local:7700/remote-ui` for the full control surface, laid out after Serum 2: three oscillators
+with 3D wavetable displays across the top, then tabs for the filters, envelopes, the effects rack, the
+sub / noise / sample mixer and the globals. Every parameter the module declares has a control (the panel
+builds itself from `chain_params`, and anything not placed lands in "More"), and every control is live in
+both directions.
 
-![Web panel](docs/img/web-panel.png)
-
-The waterfall is your actual wavetable, not a stand-in. The module publishes a
-digest of the table it has loaded, and the panel also reads the file itself
-over the manager's file API and decodes it, so the drawing follows whichever
-table is loaded — changed from the browser here, or from the pot on the Move.
-The bright line is the frame the Pos knob is sitting on. The ADSR curves are
-computed from the live parameter values, so they are readouts rather than
-decoration.
-
-Each oscillator's title bar carries the wavetable picker and a pack filter,
-which is where the file browsing lives now that it is off the hardware pages.
+- **Preset browser** in the header: previous / next, and a searchable list of every bank. Picking a sound in
+  another bank switches the Move to it. Needs the module's `preset_list` / `preset_now` keys (this build);
+  an older module simply shows no browser.
+- **Graphs you can drag**: wavetable position (drag across the waterfall), filter cutoff and resonance,
+  envelope handles, EQ band nodes (wheel for Q). Readouts are in Hz, ms and dB where the engine's mapping
+  is mirrored in the panel, and the raw 0..127 pot elsewhere.
+- Not on the panel yet: the four LFOs, the mod matrix, the sample set choice, and the two FX buses' own
+  racks (`b1.` / `b2.` keys). The module does not declare them to the host, so the panel cannot read them.
 
 ## Building
 

@@ -26,6 +26,7 @@
 #include "engine.h"
 #include "wt/scanner.h"
 #include "wt/loader.h"
+#include "preset_digest.h"
 
 static const host_api_v1_t *g_host = nullptr;
 
@@ -56,6 +57,7 @@ struct tablor_instance {
         int factory_count = 0;
         std::vector<std::string> banks;
         std::vector<int> bank_first, bank_n;
+        std::string digest;               /* the store's banks and preset names as JSON, for the web panel's browser (preset_digest.h) */
     };
     std::shared_ptr<const PresetList> presets { std::make_shared<PresetList>() };
     std::atomic<int> preset_index { 0 };
@@ -534,6 +536,13 @@ static void scan_store_presets(tablor_instance *inst)
         next->bank_first.push_back(0);
         next->bank_n.push_back(0);
     }
+    {
+        std::vector<std::vector<std::string>> names(next->banks.size());
+        for (size_t k = 0; k < next->banks.size(); k++)
+            for (int i = next->bank_first[k]; i < next->bank_first[k] + next->bank_n[k]; i++)
+                names[k].push_back(next->items[(size_t) i].name);
+        next->digest = tb::presetDigest(next->banks, names);
+    }
     int b = inst->bank_index.load();
     if (b < 0 || b >= (int) next->banks.size()) b = 0;
     inst->bank_index = b;
@@ -857,6 +866,11 @@ static void tb_publish_selection(tablor_instance *inst)
            ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt3_shape\",\"name\":\"WT3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}";
+    /* The web panel's preset browser: the store's banks and preset names (read-only, built when the store is scanned), the
+     * current bank and index, and the index to load. `bank` is declared above; `preset` is the index within the current bank. */
+    out += ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
     out += "]";
 
     std::atomic_store(&inst->sel,
@@ -1245,6 +1259,18 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         const int b = inst->bank_index.load();
         const int first = b >= 0 && b < (int) ps->banks.size() ? ps->bank_first[(size_t) b] : 0;
         return write_str(buf, buf_len, std::to_string(std::max(inst->store_index.load() - first, 0)).c_str());
+    }
+    /* The web panel's browser: every bank with its preset names (a string built at scan time), and "bank,index" for the sound
+     * the page shows. */
+    if (!strcmp(key, "preset_list"))
+        return write_str(buf, buf_len, inst->storeList()->digest.c_str());
+    if (!strcmp(key, "preset_now")) {
+        auto ps = inst->storeList();
+        const int b = inst->bank_index.load();
+        const int first = b >= 0 && b < (int) ps->banks.size() ? ps->bank_first[(size_t) b] : 0;
+        char tmp[32];
+        snprintf(tmp, sizeof tmp, "%d,%d", std::max(b, 0), std::max(inst->store_index.load() - first, 0));
+        return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "preset_name")) {
         auto ps = inst->storeList();

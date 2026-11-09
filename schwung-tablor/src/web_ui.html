@@ -1,281 +1,470 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TinyHouse</title>
 <style>
-/* Laid out after the original Wavetable plugin (SocaLabs / Roland Rabien,
- * reference/wavetable/Screenshots): near-black ground, one boxed panel per
- * section with a lighter title bar, real knobs with an amber value arc, and
- * the curve displays sitting inside the panel they belong to.
+/* TinyHouse remote panel. Laid out after Serum 2: three oscillators with 3D
+ * wavetable displays across the top, then tabs for the filters, the envelopes,
+ * the effects rack and the globals. Dark, flat, one green.
  *
- * The CONTROLS are ours — no FX row, no step sequencer
- * Tablor adds. Ranges, option names and page grouping all come from
- * ui_pages.json, the same file the hardware pages are generated from, so this
- * cannot drift from the device. */
+ * Every control is built from the module's own chain_params (range, options,
+ * default), so a parameter the module declares cannot be missing from here:
+ * anything the layout below does not place lands in "More" on the Globals tab.
+ * Values carry real units (Hz, ms, dB) only where the engine's mapping is known
+ * and mirrored in FMT; the rest read as the raw 0..127 pot. */
 :root{
-  --bg:#0e1013; --panel:#191b20; --bar:#23262c; --edge:#2e323a;
-  --txt:#c3c8d1; --dim:#767c88; --acc:#d2884f; --acc-d:#8a5a37;
-  --wave:#4fd06a; --wave-hi:#e8e04a;
+  --bg:#0a0b0c; --panel:#101213; --line:#1c1f21; --line2:#272b2e;
+  --txt:#c4cac5; --dim:#68706b; --faint:#3a403c;
+  --g:#5be584; --g2:#2f8f50; --g3:#173d27; --hi:#d9ffe4;
 }
 *{box-sizing:border-box}
+html{background:var(--bg)}
 body{
-  background:var(--bg); color:var(--txt); margin:0; padding:8px;
-  font:11px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;
+  margin:0; background:var(--bg); color:var(--txt);
+  font:12px/1.35 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
   -webkit-font-smoothing:antialiased;
 }
-/* ---- top bar ---- */
-#top{
-  display:flex; align-items:center; gap:10px; background:var(--bar);
-  border:1px solid var(--edge); border-radius:5px; padding:6px 10px; margin-bottom:6px;
+.wrap{max-width:1680px; margin:0 auto; padding:14px 16px 36px}
+
+/* ---- header + tabs ---- */
+#top{display:flex; align-items:center; gap:18px; padding:2px 2px 12px}
+#top .brand{font-size:12px; letter-spacing:.42em; font-weight:700; color:var(--hi)}
+#top .brand i{font-style:normal; color:var(--g)}
+#top .hint{margin-left:auto; color:var(--faint); font-size:10px; letter-spacing:.08em}
+#tabs{display:flex; gap:2px; margin:14px 0 10px; border-bottom:1px solid var(--line)}
+#tabs button{
+  background:none; border:0; border-bottom:2px solid transparent; color:var(--dim);
+  font:inherit; letter-spacing:.2em; text-transform:uppercase; font-size:10px;
+  padding:8px 16px 9px; cursor:pointer; margin-bottom:-1px;
 }
-#top .brand{font-size:13px; letter-spacing:.34em; font-weight:700; color:var(--txt)}
-#top .brand small{color:var(--dim); letter-spacing:.08em; font-weight:400; margin-left:8px; font-size:10px}
-buttonbutton.step:hover{color:var(--acc); border-color:var(--acc-d)}
-buttonbutton.act:hover{background:#241a12}
-input/* ---- rack ---- */
-#rack{display:grid; grid-template-columns:repeat(12,1fr); gap:6px; align-items:start}
-.panel{
-  background:var(--panel); border:1px solid var(--edge); border-radius:5px;
-  display:flex; flex-direction:column; overflow:hidden; min-width:0;
+#tabs button:hover{color:var(--txt)}
+#tabs button.on{color:var(--g); border-bottom-color:var(--g)}
+.page{display:none}
+.page.on{display:block}
+
+/* ---- layout ---- */
+.grid{display:grid; gap:10px; align-items:start}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.gfx{display:block; column-width:360px; column-gap:10px}
+.gfx > .panel{break-inside:avoid; margin-bottom:10px}
+@media (max-width:1100px){.g3,.g2{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel); border:1px solid var(--line); border-radius:6px; min-width:0}
+.panel > .head{
+  display:flex; align-items:center; gap:10px; padding:8px 12px 7px;
+  border-bottom:1px solid var(--line); min-height:34px;
 }
-.panel > .bar{
-  background:var(--bar); border-bottom:1px solid var(--edge);
-  padding:5px 9px; display:flex; align-items:center; gap:8px;
-  font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--dim);
-}
-.panel > .bar .dot{width:7px; height:7px; border-radius:50%; background:var(--acc-d); flex:none}
-.panel > .bar .pick{
-  margin-left:auto; display:flex; gap:5px; align-items:center; min-width:0;
-}
-.panel > .bar .pick select{
-  appearance:none; -webkit-appearance:none; text-align:center;
-  background:#0d0f12; color:var(--acc); border:1px solid var(--edge);
-  border-radius:10px; padding:2px 8px; font-size:10px; cursor:pointer;
-  max-width:190px; text-overflow:ellipsis;
-}
-.panel > .bar .pick select.pack{color:var(--dim); max-width:100px}
-.panel > .bar .pick select:hover{border-color:var(--acc-d)}
-.panel > .bar .name{
-  color:var(--acc); letter-spacing:.12em; text-transform:none; font-size:11px;
-  margin-left:auto; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
-.body{padding:8px 9px 9px; display:flex; gap:10px; flex:1; min-width:0}
-.col{display:flex; flex-direction:column; gap:8px; min-width:0}
-.knobs{display:flex; gap:2px; flex-wrap:wrap}
+.panel > .head .ttl{font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--dim)}
+.panel > .head .pick{margin-left:auto; display:flex; gap:6px; min-width:0}
+.panel > .head .pick select{max-width:170px}
+.panel > .body{padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px}
+.row{display:flex; flex-wrap:wrap; gap:8px 2px; align-items:flex-start}
+.row > .fld{margin:6px 6px 0 0}
+.row > .tg{margin:14px 8px 0 0}
+.sub{font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin:2px 0 -4px}
+.cols{display:flex; gap:14px; flex-wrap:wrap}
+.cols > *{min-width:0}
+
 /* ---- knob ---- */
-.knob{width:52px; text-align:center; flex:none; user-select:none}
+.knob{width:60px; text-align:center; flex:none; user-select:none}
 .knob svg{display:block; margin:0 auto; cursor:ns-resize; touch-action:none}
-.knob .lab{color:var(--dim); font-size:10px; margin-top:1px;
-           overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-.knob .val{color:var(--acc); font-size:10px; height:11px; visibility:hidden;
-           font-variant-numeric:tabular-nums}
-.knob:hover .val,.knob.live .val{visibility:visible}
-.knob:hover .lab,.knob.live .lab{visibility:hidden}
-.knob .stack{position:relative; height:11px; margin-top:1px}
-.knob .stack > *{position:absolute; left:0; right:0; top:0}
-/* ---- enum pill ---- */
-.pill{width:76px; text-align:center; flex:none}
-.pill select{
-  width:100%; appearance:none; -webkit-appearance:none; text-align:center;
-  background:#0d0f12; color:var(--acc); border:1px solid var(--edge);
-  border-radius:10px; padding:3px 4px; font-size:10px; cursor:pointer;
-  text-overflow:ellipsis;
+.knob .lab{color:var(--dim); font-size:10px; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.knob .val{color:#7e8a82; font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:13px}
+.knob:hover .val,.knob.live .val{color:var(--g)}
+.knob:hover .lab{color:var(--txt)}
+
+/* ---- enum controls ---- */
+.fld{display:flex; flex-direction:column; gap:3px; min-width:0}
+.fld > .lab{color:var(--dim); font-size:10px}
+select{
+  appearance:none; -webkit-appearance:none; background:#0c0e0f; color:var(--g);
+  border:1px solid var(--line2); border-radius:4px; padding:3px 22px 3px 8px; font:inherit; font-size:11px;
+  cursor:pointer; min-width:0; text-overflow:ellipsis;
+  background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 11px) 50%,calc(100% - 7px) 50%; background-size:4px 4px,4px 4px; background-repeat:no-repeat;
 }
-.pill select:hover{border-color:var(--acc-d)}
-.pill .lab{color:var(--dim); font-size:10px; margin-top:2px}
-/* ---- displays ---- */
-canvas.disp{
-  background:#0a0b0d; border:1px solid #23262c; border-radius:3px;
-  display:block; width:100%; flex:none; min-width:0;
+select:hover{border-color:var(--g2)}
+select:focus{outline:none; border-color:var(--g)}
+.seg{display:inline-flex; border:1px solid var(--line2); border-radius:4px; overflow:hidden}
+.seg button{
+  background:none; border:0; border-right:1px solid var(--line2); color:var(--dim); font:inherit; font-size:10px;
+  padding:3px 8px; cursor:pointer; white-space:nowrap;
 }
-.row{display:flex; align-items:center; gap:5px; margin-bottom:4px}
-.row .n{color:var(--dim); width:14px; flex:none; text-align:right}
-.row .pill{width:auto; flex:1 1 0; min-width:0; max-width:150px}
-.row .pill.sw{flex:0 0 46px; max-width:46px}
-.row .pill .lab{display:none}
-.arrow{color:var(--dim); flex:none}
-.hint{color:var(--dim); font-size:10px; padding:2px 9px 8px}
-/* ---- spans ---- */
-.s2{grid-column:span 2}.s3{grid-column:span 3}.s4{grid-column:span 4}
-.s6{grid-column:span 6}.s8{grid-column:span 8}.s12{grid-column:span 12}
-@media (max-width:1240px){
-  .s2,.s3,.s4{grid-column:span 6}.s6,.s8{grid-column:span 12}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--txt)}
+.seg button.on{background:var(--g3); color:var(--g)}
+.pw{
+  width:26px; height:14px; border-radius:7px; background:#1a1d1f; border:1px solid var(--line2);
+  position:relative; cursor:pointer; flex:none; padding:0;
 }
-@media (max-width:640px){ .s2,.s3,.s4,.s6,.s8{grid-column:span 12} }
+.pw::after{content:""; position:absolute; top:2px; left:2px; width:8px; height:8px; border-radius:50%; background:var(--faint); transition:left .1s,background .1s}
+.pw.on{background:var(--g3); border-color:var(--g2)}
+.pw.on::after{left:14px; background:var(--g)}
+.tg{display:flex; align-items:center; gap:7px; color:var(--dim); font-size:10px}
+
+/* ---- graphs ---- */
+canvas.gr{display:block; width:100%; background:#080909; border:1px solid var(--line); border-radius:4px; touch-action:none}
+canvas.gr.drag{cursor:crosshair}
+.cap{display:flex; justify-content:space-between; color:var(--faint); font-size:9px; letter-spacing:.08em; margin-top:-6px}
+.cap b{color:var(--dim); font-weight:500}
+.note{color:var(--faint); font-size:10px}
+.band.hot .knob .lab{color:var(--g)}
+.err{color:#e58a5b; padding:30px; font-size:13px}
+
+/* ---- preset bar and browser ---- */
+#pbar{display:none; align-items:center; gap:4px; margin-left:8px}
+#pbar.on{display:flex}
+#pbar button{
+  background:#0c0e0f; border:1px solid var(--line2); color:var(--dim); font:inherit; cursor:pointer;
+  height:28px; min-width:28px; border-radius:4px; padding:0 8px;
+}
+#pbar button:hover{color:var(--g); border-color:var(--g2)}
+#pbar .cur{
+  display:flex; align-items:baseline; gap:10px; width:min(46vw,460px); height:28px; padding:0 14px;
+  background:#0c0e0f; border:1px solid var(--line2); border-radius:4px; cursor:pointer; overflow:hidden; white-space:nowrap;
+}
+#pbar .cur:hover,#pbar .cur.open{border-color:var(--g2)}
+#pbar .cur .bk{color:var(--dim); font-size:10px; letter-spacing:.14em; text-transform:uppercase; align-self:center}
+#pbar .cur .nm{color:var(--hi); font-size:13px; overflow:hidden; text-overflow:ellipsis; align-self:center}
+#pbar .cnt{color:var(--faint); font-size:10px; font-variant-numeric:tabular-nums; margin-left:6px; min-width:58px}
+#browser{
+  display:none; position:fixed; z-index:20; left:50%; top:52px; transform:translateX(-50%);
+  width:min(900px,calc(100vw - 24px)); height:min(560px,calc(100vh - 80px));
+  background:var(--panel); border:1px solid var(--line2); border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.7);
+  grid-template-columns:200px 1fr; grid-template-rows:auto 1fr; overflow:hidden;
+}
+#browser.on{display:grid}
+#browser .bhead{grid-column:1 / -1; display:flex; gap:10px; align-items:center; padding:10px 12px; border-bottom:1px solid var(--line)}
+#browser .bhead input{
+  flex:1; background:#0a0c0d; border:1px solid var(--line2); border-radius:4px; color:var(--hi);
+  font:inherit; font-size:13px; padding:6px 10px;
+}
+#browser .bhead input:focus{outline:none; border-color:var(--g)}
+#browser .bhead .x{background:none; border:0; color:var(--dim); font-size:16px; cursor:pointer}
+#browser .banks{border-right:1px solid var(--line); overflow:auto; padding:6px 0}
+#browser .banks div{display:flex; justify-content:space-between; gap:8px; padding:7px 14px; cursor:pointer; color:var(--dim)}
+#browser .banks div:hover{color:var(--txt); background:#14171a}
+#browser .banks div.on{color:var(--g); background:var(--g3)}
+#browser .banks small{color:var(--faint)}
+#browser .list{overflow:auto; padding:6px 0}
+#browser .list div{display:flex; gap:12px; padding:6px 16px; cursor:pointer; color:var(--txt); white-space:nowrap}
+#browser .list div:hover,#browser .list div.sel{background:#14171a}
+#browser .list div.cur{color:var(--g)}
+#browser .list div.cur::before{content:""; width:5px; height:5px; border-radius:50%; background:var(--g); align-self:center; margin-left:-10px; margin-right:5px}
+#browser .list small{color:var(--faint); margin-left:auto; font-size:10px; letter-spacing:.1em; text-transform:uppercase}
+#browser .empty{padding:24px; color:var(--faint)}
 </style>
 </head>
 <body>
-
-<div id="top">
-  <div class="brand">TABLOR<small>2-osc wavetable</small></div>
+<div class="wrap">
+  <div id="top"><div class="brand">TINY<i>HOUSE</i></div><div id="pbar"></div><div class="hint" id="hint">connecting…</div></div>
+  <div id="browser"></div>
+  <div id="osc" class="grid g3"></div>
+  <div id="tabs"></div>
+  <div id="pages"></div>
 </div>
-
-<div id="rack"></div>
 
 <script src="/static/schwung-remote-api.js"></script>
 <script>
 (function () {
 "use strict";
 
-var K = "synth:";
-var META = {};      /* key -> slot from ui_pages.json */
-var CTL  = {};      /* key -> { set(valueString) }    */
-var VAL  = {};      /* key -> current numeric/string  */
+var KP = "synth:";
+var META = {};            /* key -> chain_params entry */
+var VAL = {};             /* key -> number (enums: option index) */
+var SUBS = {};            /* key -> [fn(value)] */
 var placed = {};
+var graphs = [];
 
-function send(key, v) { schwungRemote.setParam(K + key, String(v)); }
-function el(tag, cls, parent) {
+/* ------------------------------------------------------------------ dom */
+function el(tag, cls, parent, text) {
   var e = document.createElement(tag);
   if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
   if (parent) parent.appendChild(e);
   return e;
 }
+function svgNode(parent, tag, attrs) {
+  var n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (var a in attrs) n.setAttribute(a, attrs[a]);
+  parent.appendChild(n);
+  return n;
+}
 
-/* ------------------------------------------------------------------ knob */
-/* -135deg .. +135deg, amber arc from the minimum, grey pointer. Drag
- * vertically; 160 px covers the range, Shift for fine. */
-var A0 = -135, A1 = 135, R = 16;
+/* ---------------------------------------------------------------- values */
+function send(key, v) {
+  try { schwungRemote.setParam(KP + key, String(v)); } catch (e) {}
+}
+function clampTo(m, v) {
+  if (!m) return v;
+  if (m.type === "int") return Math.max(m.min, Math.min(m.max, Math.round(v)));
+  if (m.type === "enum") return Math.max(0, Math.min(m.options.length - 1, Math.round(v)));
+  return v;
+}
+function setVal(key, v, push) {
+  var m = META[key];
+  v = clampTo(m, v);
+  if (VAL[key] === v) return;
+  VAL[key] = v;
+  var s = SUBS[key];
+  if (s) for (var i = 0; i < s.length; i++) s[i](v);
+  redrawSoon();
+  if (push) send(key, v);
+}
+function on(key, fn) {
+  (SUBS[key] = SUBS[key] || []).push(fn);
+  if (VAL[key] !== undefined) fn(VAL[key]);
+}
+function val(key) {
+  var v = VAL[key];
+  if (v !== undefined) return v;
+  var m = META[key];
+  return m && typeof m.default === "number" ? m.default : 0;
+}
+function incoming(key, s) {
+  var m = META[key];
+  if (!m) return;
+  if (m.type === "enum") {
+    var i = m.options.indexOf(s);
+    if (i < 0) i = parseInt(s, 10);
+    if (!isNaN(i)) setVal(key, i, false);
+  } else if (m.type === "int") {
+    var n = parseFloat(s);
+    if (!isNaN(n)) setVal(key, n, false);
+  }
+}
+function frac(key) {
+  var m = META[key];
+  if (!m || m.type !== "int") return 0;
+  return (val(key) - m.min) / ((m.max - m.min) || 1);
+}
 
+/* ---------------------------------------------------- engine mappings
+ * Each one mirrors src/dsp/param_map.h, fx.h or engine.cpp, so a readout and a
+ * curve say what the engine does. Where the mapping is not mirrored here the
+ * control shows its raw pot value. */
+var P01 = function (v) { return v / 127; };
+var MAP = {
+  noteHz: function (v) { return 440 * Math.pow(2, (8 + v - 69) / 12); },             /* potFilterNote */
+  attack: function (v) { var x = P01(v); return Math.max(0.003, 0.0005 + 10 * Math.pow(x, 5)); },
+  env: function (v) { return Math.pow(10, P01(v) * 4 - 3); },
+  eqHz: function (v) { return 20 * Math.pow(1000, P01(v)); },
+  eqDb: function (v) { return (v - 64) / 63 * 24; },
+  shelfDb: function (v) { return v >= 64 ? (v - 64) / 63 * 12 : (v - 64) / 64 * 12; },
+  rate3: function (v) { var x = P01(v); return 20 * x * x * x; },                      /* chorus / flanger / phaser */
+  delayMs: function (v) { return Math.pow(1500, P01(v)); },
+  revT60: function (v) { return 0.2 * Math.pow(150, P01(v)); },
+  glide: function (v) { return 0.001 * Math.pow(2000, P01(v)); },
+  wideRate: function (v) { return 0.05 * Math.pow(100, P01(v)); },
+  compThresh: function (v) { return -90 + 120 * P01(v); },
+  compRatio: function (v) { return Math.pow(100, P01(v)); },
+  compKnee: function (v) { return 48 * P01(v); },
+  compAtk: function (v) { return 0.1 * Math.pow(1000, P01(v)); },
+  compRel: function (v) { return 10 * Math.pow(300, P01(v)); },
+  compMakeup: function (v) { return 24 * P01(v); },
+  compBandDb: function (v) { return v >= 64 ? (v - 64) / 63 * 24 : (v - 64) / 64 * 24; },
+  eqQ: function (type, v) {                                                          /* potEqQ */
+    var reso = [0, 10, 25, 40, 50, 60, 75, 90, 100];
+    var qBell = [0.10, 0.10, 0.16, 0.58, 1.25, 2.4, 5.5, 10.0, 14.0];
+    var qShelf = [0.40, 0.40, 0.44, 0.51, 0.64, 0.79, 1.13, 1.67, 2.10];
+    var q = (type === 2 || type === 3) ? qShelf : qBell;
+    var r = Math.min(Math.max(v * (100 / 127), 0), 100), i = 0;
+    while (i < 7 && r > reso[i + 1]) i++;
+    var x = (r - reso[i]) / (reso[i + 1] - reso[i]);
+    return Math.exp(Math.log(q[i]) + x * (Math.log(q[i + 1]) - Math.log(q[i])));
+  }
+};
+function fHz(f) { return f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 1 : 2) + " kHz" : (f >= 100 ? f.toFixed(0) : f.toFixed(1)) + " Hz"; }
+function fSec(t) {
+  if (t >= 1) return t.toFixed(t >= 10 ? 1 : 2) + " s";
+  var m = t * 1000;
+  return (m >= 100 ? m.toFixed(0) : m >= 10 ? m.toFixed(1) : m.toFixed(2)) + " ms";
+}
+function fMs(m) { return fSec(m / 1000); }
+function fDb(x) { return (x > 0.05 ? "+" : "") + x.toFixed(1) + " dB"; }
+function cal() { return val("dist_cal") >= 1; }
+
+var FMT = [
+  [/^(vca|flt|me[12])_a$/, function (v) { return fSec(MAP.attack(v)); }],
+  [/^(vca|flt|me[12])_[dr]$/, function (v) { return fSec(MAP.env(v)); }],
+  [/^(flt2?|fxf)_freq$/, function (v) { return fHz(MAP.noteHz(v)); }],
+  [/^flt2?_gain$/, function (v) { return fDb(24 * P01(v)); }],
+  [/^(eq[ms]?\d|dist_pre)_freq$/, function (v) { return fHz(MAP.eqHz(v)); }],
+  [/^(dly2?_(lo|hi)|rev_damp|rev_lo|chor_filt|phas_freq)$/, function (v) { return fHz(MAP.eqHz(v)); }],
+  [/^eq[ms]?\d_gain$/, function (v) { return fDb(MAP.eqDb(v)); }],
+  [/^(lo|hi)_shelf$/, function (v) { return fDb(MAP.shelfDb(v)); }],
+  [/^dly2?_time(r)?$/, function (v) { return fMs(MAP.delayMs(v)); }],
+  [/^dly2?_fb$/, function (v) { return Math.round(Math.min(P01(v), 0.97) * 100) + "%"; }],
+  [/^(chor|flan|phas)_fb$/, function (v) { return Math.round(0.8 * P01(v) * 100) + "%"; }],
+  [/^(chor|flan|phas)_rate$/, function (v) { return MAP.rate3(v).toFixed(2) + " Hz"; }],
+  [/^chor_d[12]$/, function (v) { return (30 * P01(v)).toFixed(1) + " ms"; }],
+  [/^rev_decay$/, function (v) { return fSec(MAP.revT60(v)); }],
+  [/^fx_wrate$/, function (v) { return MAP.wideRate(v).toFixed(2) + " Hz"; }],
+  [/^glide$/, function (v) { return fSec(MAP.glide(v)); }],
+  [/^comp_thresh\d?$/, function (v) { return fDb(MAP.compThresh(v)); }],
+  [/^comp_ratio$/, function (v) { return MAP.compRatio(v).toFixed(1) + ":1"; }],
+  [/^comp_knee$/, function (v) { return MAP.compKnee(v).toFixed(0) + " dB"; }],
+  [/^comp_attack$/, function (v) { return fMs(MAP.compAtk(v)); }],
+  [/^comp_release$/, function (v) { return fMs(MAP.compRel(v)); }],
+  [/^comp_makeup$/, function (v) { return fDb(MAP.compMakeup(v)); }],
+  [/^comp_gain\d$/, function (v) { return fDb(MAP.compBandDb(v)); }],
+  [/^(wt\d|sub|smp)_tune$/, function (v) { return (v > 0 ? "+" : "") + v + " st"; }],
+  [/^pb_range$/, function (v) { return v + " st"; }],
+  [/^dist_drive$/, function (v) { return cal() ? fDb(-16 + v * 70 / 127) : Math.round(P01(v) * 100) + "%"; }],
+  [/^dist_out$/, function (v) { return cal() ? fDb(-36 + v * 48 / 127) : String(v); }],
+  [/^dist_level$/, function (v) { return cal() ? fDb((v - 64) * 24 / 64) : String(v); }],
+  [/^dist_pre_q$/, function (v) { return (0.3 * Math.pow(10, P01(v))).toFixed(2); }],
+  [/^mwidth$/, function (v) { return Math.round(v / 64 * 100) + "%"; }]
+];
+function fmt(key, v) {
+  for (var i = 0; i < FMT.length; i++) if (FMT[i][0].test(key)) return FMT[i][1](v);
+  return String(Math.round(v));
+}
+
+/* -------------------------------------------------------------- controls */
+var A0 = -135, A1 = 135, KR = 15;
 function polar(cx, cy, r, deg) {
   var a = (deg - 90) * Math.PI / 180;
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
 }
 function arcPath(cx, cy, r, from, to) {
   var p0 = polar(cx, cy, r, from), p1 = polar(cx, cy, r, to);
-  var big = Math.abs(to - from) > 180 ? 1 : 0;
-  return "M" + p0[0].toFixed(2) + "," + p0[1].toFixed(2) +
-         "A" + r + "," + r + " 0 " + big + " 1 " + p1[0].toFixed(2) + "," + p1[1].toFixed(2);
+  return "M" + p0[0].toFixed(2) + "," + p0[1].toFixed(2) + "A" + r + "," + r + " 0 " +
+         (Math.abs(to - from) > 180 ? 1 : 0) + " " + (to > from ? 1 : 0) + " " + p1[0].toFixed(2) + "," + p1[1].toFixed(2);
 }
 
-function makeKnob(slot, label, into) {
-  var min = slot.min, max = slot.max, span = (max - min) || 1;
+function knob(key, label, into) {
+  var m = META[key];
+  if (!m || m.type !== "int") return null;
+  placed[key] = 1;
+  var min = m.min, max = m.max, span = (max - min) || 1;
+  var bip = min < 0 || (min === 0 && max === 127 && m.default === 64);
+  var def = typeof m.default === "number" ? m.default : min;
   var wrap = el("div", "knob", into);
-  var NS = "http://www.w3.org/2000/svg";
-  var svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("width", 44); svg.setAttribute("height", 44);
-  svg.setAttribute("viewBox", "0 0 44 44");
-  wrap.appendChild(svg);
+  wrap.title = m.name + "  (" + key + ")  - drag, wheel, shift for fine, double-click resets";
+  var svg = svgNode(wrap, "svg", { width: 40, height: 40, viewBox: "0 0 40 40" });
+  svgNode(svg, "path", { d: arcPath(20, 20, KR, A0, A1), stroke: "#1f2326", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
+  var arc = svgNode(svg, "path", { stroke: "#5be584", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
+  var ptr = svgNode(svg, "line", { stroke: "#d9ffe4", "stroke-width": 2, "stroke-linecap": "round" });
+  el("div", "lab", wrap, label || m.name);
+  var out = el("div", "val", wrap);
 
-  function node(t, attrs) {
-    var n = document.createElementNS(NS, t);
-    for (var a in attrs) n.setAttribute(a, attrs[a]);
-    svg.appendChild(n);
-    return n;
-  }
-  node("circle", { cx: 22, cy: 22, r: 13, fill: "#2b2e35", stroke: "#3a3e46" });
-  node("path", { d: arcPath(22, 22, R, A0, A1), stroke: "#33373e",
-                 "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
-  var arc = node("path", { stroke: "var(--acc)", "stroke-width": 3, fill: "none",
-                           "stroke-linecap": "round" });
-  var ptr = node("line", { stroke: "#a2a8b3", "stroke-width": 2.5,
-                           "stroke-linecap": "round" });
-
-  var stack = el("div", "stack", wrap);
-  var lab = el("div", "lab", stack); lab.textContent = label;
-  var out = el("div", "val", stack);
-  wrap.title = slot.full + "  (" + slot.k + ")";
-
-  var v = min;
-  function paint() {
+  function paint(v) {
     var f = (v - min) / span, deg = A0 + f * (A1 - A0);
-    arc.setAttribute("d", f <= 0.001 ? "" : arcPath(22, 22, R, A0, deg));
-    var a = polar(22, 22, 12.5, deg), b = polar(22, 22, 5, deg);
+    var from = bip ? 0 : A0, to = deg;
+    if (bip) from = A0 + ((def - min) / span) * (A1 - A0);
+    arc.setAttribute("d", Math.abs(to - from) < 0.5 ? "" : arcPath(20, 20, KR, Math.min(from, to), Math.max(from, to)));
+    var a = polar(20, 20, 11, deg), b = polar(20, 20, 4.5, deg);
     ptr.setAttribute("x1", b[0]); ptr.setAttribute("y1", b[1]);
     ptr.setAttribute("x2", a[0]); ptr.setAttribute("y2", a[1]);
-    out.textContent = Math.round(v);
+    out.textContent = fmt(key, v);
   }
-  function setLocal(nv, push) {
-    nv = Math.max(min, Math.min(max, nv));
-    if (nv === v) return;
-    v = nv; VAL[slot.k] = v; paint(); redrawSoon();
-    if (push) send(slot.k, Math.round(v));
-  }
+  on(key, paint);
+  paint(val(key));
+  /* a value readout can depend on another key (the distortion's calibrated law) */
+  if (key.indexOf("dist_") === 0 && key !== "dist_cal") on("dist_cal", function () { paint(val(key)); });
 
-  /* Drag state is a plain flag with document-level listeners for the pointer's
-   * lifetime, not pointer capture: capture is the nicer API but it throws or
-   * silently no-ops in enough embedded web views that keying the handler off
-   * hasPointerCapture would leave every knob dead in exactly the browser this
-   * page has to work in. Capture is still requested, just never depended on. */
   var dragY = 0, dragV = 0, dragging = false;
-  function onMove(e) {
+  function mv(e) {
     if (!dragging) return;
-    var k = e.shiftKey ? 4 : 1;
-    setLocal(Math.round(dragV + (dragY - e.clientY) * (span / 160) / k), true);
+    setVal(key, dragV + (dragY - e.clientY) * (span / 170) / (e.shiftKey ? 5 : 1), true);
     e.preventDefault();
   }
   function end() {
-    if (!dragging) return;
-    dragging = false;
-    wrap.classList.remove("live");
-    document.removeEventListener("pointermove", onMove);
+    dragging = false; wrap.classList.remove("live");
+    document.removeEventListener("pointermove", mv);
     document.removeEventListener("pointerup", end);
     document.removeEventListener("pointercancel", end);
   }
   svg.addEventListener("pointerdown", function (e) {
-    dragging = true; dragY = e.clientY; dragV = v;
-    wrap.classList.add("live");
-    try { svg.setPointerCapture(e.pointerId); } catch (_) {}
-    document.addEventListener("pointermove", onMove);
+    dragging = true; dragY = e.clientY; dragV = val(key); wrap.classList.add("live");
+    document.addEventListener("pointermove", mv);
     document.addEventListener("pointerup", end);
     document.addEventListener("pointercancel", end);
     e.preventDefault();
   });
-  svg.addEventListener("wheel", function (e) {
+  svg.addEventListener("dblclick", function () { setVal(key, def, true); });
+  wrap.addEventListener("wheel", function (e) {
     e.preventDefault();
-    setLocal(v + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 1 : Math.max(1, Math.round(span / 64))), true);
+    var step = e.shiftKey ? 1 : Math.max(1, Math.round(span / 64));
+    setVal(key, val(key) + (e.deltaY < 0 ? step : -step), true);
   }, { passive: false });
-
-  paint();
-  CTL[slot.k] = { set: function (s) {
-    var nv = parseFloat(s); if (isNaN(nv)) return;
-    v = Math.max(min, Math.min(max, nv)); VAL[slot.k] = v; paint(); redrawSoon();
-  } };
+  return wrap;
 }
 
-/* ------------------------------------------------------------------ enum */
-function makePill(slot, label, into, cls) {
-  var wrap = el("div", "pill" + (cls ? " " + cls : ""), into);
-  var sel = el("select", null, wrap);
-  wrap.title = slot.full + "  (" + slot.k + ")";
-  slot.options.forEach(function (o, i) {
-    var op = el("option", null, sel); op.value = String(i); op.textContent = o;
-  });
-  sel.addEventListener("change", function () {
-    VAL[slot.k] = parseInt(sel.value, 10); send(slot.k, sel.value); redrawSoon();
-  });
-  if (label) { var l = el("div", "lab", wrap); l.textContent = label; }
-  CTL[slot.k] = { set: function (s) {
-    var i = slot.options.indexOf(s);
-    if (i < 0) { i = parseInt(s, 10); if (isNaN(i)) return; }
-    sel.value = String(i); VAL[slot.k] = i; redrawSoon();
-  } };
+function isOnOff(m) {
+  return m.type === "enum" && m.options.length === 2 && m.options[0] === "Off" && m.options[1] === "On";
 }
 
-/* ------------------------------------------------------- generic control */
-function control(key, label, into, cls) {
-  var slot = META[key];
-  if (!slot) return;
+function toggle(key, into, label) {
+  var m = META[key];
+  if (!m || m.type !== "enum") return null;
   placed[key] = 1;
-  if (slot.t === "int") makeKnob(slot, label || slot.n, into);
-  else if (slot.t === "enum") makePill(slot, label, into, cls);
-}
-function controls(keys, into) {
-  keys.forEach(function (spec) {
-    if (typeof spec === "string") control(spec, null, into);
-    else control(spec[0], spec[1], into);
-  });
+  var b = el("button", "pw", into);
+  b.title = m.name + "  (" + key + ")";
+  b.addEventListener("click", function () { setVal(key, val(key) >= 1 ? 0 : 1, true); });
+  on(key, function (v) { b.classList.toggle("on", v >= 1); });
+  b.classList.toggle("on", val(key) >= 1);
+  if (!label) return b;
+  var w = el("label", "tg", into);
+  w.appendChild(b);
+  el("span", null, w, label);
+  return w;
 }
 
-/* -------------------------------------------------------------- displays */
-var canvases = [];
-function addCanvas(into, draw, h) {
-  var c = el("canvas", "disp", into);
-  c.style.height = (h || 72) + "px";
-  canvases.push({ c: c, draw: draw });
-  return c;
+function choice(key, label, into) {
+  var m = META[key];
+  if (!m || m.type !== "enum") return null;
+  if (isOnOff(m)) return toggle(key, into, label || m.name);
+  placed[key] = 1;
+  var f = el("div", "fld", into);
+  f.title = m.name + "  (" + key + ")";
+  if (label) el("div", "lab", f, label);
+  if (m.options.length <= 5) {
+    var seg = el("div", "seg", f), bs = [];
+    m.options.forEach(function (o, i) {
+      var b = el("button", null, seg, o);
+      b.addEventListener("click", function () { setVal(key, i, true); });
+      bs.push(b);
+    });
+    var paint = function (v) { bs.forEach(function (b, i) { b.classList.toggle("on", i === v); }); };
+    on(key, paint); paint(val(key));
+  } else {
+    var sel = el("select", null, f);
+    m.options.forEach(function (o, i) { var op = el("option", null, sel, o); op.value = String(i); });
+    sel.addEventListener("change", function () { setVal(key, parseInt(sel.value, 10), true); });
+    on(key, function (v) { sel.value = String(v); });
+    sel.value = String(val(key));
+  }
+  return f;
 }
+
+/* a row of controls: "key" or ["key", "Label"] */
+function row(specs, into) {
+  var r = el("div", "row", into);
+  specs.forEach(function (s) {
+    var key = typeof s === "string" ? s : s[0], label = typeof s === "string" ? null : s[1];
+    var m = META[key];
+    if (!m) return;
+    if (m.type === "int") knob(key, label, r);
+    else if (m.type === "enum") choice(key, label, r);
+  });
+  return r;
+}
+
+function panel(title, into, o) {
+  o = o || {};
+  var p = el("div", "panel" + (o.cls ? " " + o.cls : ""), into);
+  var head = el("div", "head", p);
+  if (o.power && META[o.power]) toggle(o.power, head);
+  el("div", "ttl", head, title);
+  var body = el("div", "body", p);
+  return { root: p, head: head, body: body };
+}
+
+/* --------------------------------------------------------------- graphs */
 var pending = false;
 function redrawSoon() {
   if (pending) return;
@@ -283,13 +472,11 @@ function redrawSoon() {
   requestAnimationFrame(function () { pending = false; drawAll(); });
 }
 function drawAll() {
-  canvases.forEach(function (o) {
-    var c = o.c, dpr = window.devicePixelRatio || 1;
-    var w = c.clientWidth, h = c.clientHeight;
-    if (!w || !h) return;
-    if (c.width !== w * dpr || c.height !== h * dpr) {
-      c.width = w * dpr; c.height = h * dpr;
-    }
+  graphs.forEach(function (o) {
+    var c = o.c, w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;                         /* on a hidden tab */
+    var dpr = window.devicePixelRatio || 1;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     var g = c.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
@@ -298,431 +485,948 @@ function drawAll() {
 }
 window.addEventListener("resize", redrawSoon);
 
-function num(key, dflt) {
-  var v = VAL[key];
-  return (v === undefined || v === null || isNaN(v)) ? (dflt || 0) : v;
-}
-function frac(key) {
-  var s = META[key];
-  if (!s || s.t !== "int") return 0;
-  var span = (s.max - s.min) || 1;
-  return (num(key, s.min) - s.min) / span;
-}
-
-/* ADSR, exactly as the original draws it: line with round handles. */
-function drawAdsr(a, d, s, r) {
-  return function (g, w, h) {
-    var pad = 8, x0 = pad, x1 = w - pad, y0 = pad, y1 = h - pad;
-    var fa = frac(a), fd = frac(d), fr = frac(r), fs = frac(s);
-    var tot = fa + fd + fr + 0.9;
-    var xa = x0 + (x1 - x0) * (fa / tot);
-    var xd = xa + (x1 - x0) * (fd / tot);
-    var xs = xd + (x1 - x0) * (0.9 / tot);
-    var ys = y1 - (y1 - y0) * fs;
-    g.strokeStyle = "#c8834f"; g.lineWidth = 1.5; g.lineJoin = "round";
-    g.beginPath();
-    g.moveTo(x0, y1); g.lineTo(xa, y0); g.lineTo(xd, ys); g.lineTo(xs, ys); g.lineTo(x1, y1);
-    g.stroke();
-    [[xa, y0], [xd, ys], [x1, y1]].forEach(function (p) {
-      g.beginPath(); g.arc(p[0], p[1], 3, 0, 7);
-      g.fillStyle = "#0a0b0d"; g.fill();
-      g.strokeStyle = "#e6e9ee"; g.lineWidth = 1.4; g.stroke();
+/* draw(g, w, h); ptr = { down(x,y)->bool, move(x,y), up() } for a draggable graph */
+function graph(into, draw, h, ptr) {
+  var c = el("canvas", "gr" + (ptr ? " drag" : ""), into);
+  c.style.height = h + "px";
+  graphs.push({ c: c, draw: draw });
+  if (ptr) {
+    var live = false;
+    var pos = function (e) { var r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    c.addEventListener("pointerdown", function (e) {
+      var p = pos(e);
+      if (ptr.down(p[0], p[1], c.clientWidth, c.clientHeight)) {
+        live = true;
+        try { c.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+      }
     });
-  };
+    c.addEventListener("pointermove", function (e) {
+      if (!live) return;
+      var p = pos(e);
+      ptr.move(p[0], p[1], c.clientWidth, c.clientHeight, e);
+      e.preventDefault();
+    });
+    var up = function () { live = false; if (ptr.up) ptr.up(); };
+    c.addEventListener("pointerup", up);
+    c.addEventListener("pointercancel", up);
+    if (ptr.wheel) c.addEventListener("wheel", function (e) {
+      var r = c.getBoundingClientRect();
+      if (ptr.wheel(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1 : -1, c.clientWidth, c.clientHeight)) e.preventDefault();
+    }, { passive: false });
+  }
+  return c;
 }
 
-/* Wavetable waterfall, drawn from the REAL table. wtN_shape is
- * "<frames>,<samples>,<data>" with one character per sample, quantised to 64
- * levels over [-1,1] -- built on the module's worker when a table lands, so
- * asking for it costs a string copy. Until it arrives (or on a module that
- * does not serve it) nothing is drawn but the frame marker, rather than a
- * shape that would be a lie about what is loaded. */
-var SHAPE = {};        /* osc -> {frames, samples, data:[Float32Array]} */
-var QI = {};
+var GREEN = "91,229,132";
+function gridLines(g, w, h, xs, ys) {
+  g.strokeStyle = "rgba(255,255,255,.045)"; g.lineWidth = 1;
+  g.beginPath();
+  (xs || []).forEach(function (x) { g.moveTo(Math.round(x) + .5, 0); g.lineTo(Math.round(x) + .5, h); });
+  (ys || []).forEach(function (y) { g.moveTo(0, Math.round(y) + .5); g.lineTo(w, Math.round(y) + .5); });
+  g.stroke();
+}
+function label(g, txt, x, y, al) {
+  g.fillStyle = "rgba(255,255,255,.28)"; g.font = "9px system-ui,sans-serif";
+  g.textAlign = al || "left"; g.fillText(txt, x, y);
+}
+
+/* The Serum look: a curve extruded back into the screen. Each copy is filled with the
+ * ground first, so the nearer ones hide the ones behind; the front one carries the
+ * bright line and a green wash that fades down. pts = [[x,y]...] with room left
+ * above and to the right for the depth. */
+function ridge(g, pts, w, h, o) {
+  o = o || {};
+  var depth = o.depth === undefined ? 5 : o.depth, dx = o.dx === undefined ? 2.4 : o.dx, dy = o.dy === undefined ? 2.4 : o.dy;
+  var base = o.base === undefined ? h - 1 : o.base;
+  for (var k = depth; k >= 0; k--) {
+    g.save();
+    g.translate(k * dx, -k * dy);
+    g.beginPath(); g.moveTo(pts[0][0], base);
+    for (var i = 0; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+    g.lineTo(pts[pts.length - 1][0], base); g.closePath();
+    g.fillStyle = "#080909"; g.fill();
+    if (k === 0) {
+      var gr = g.createLinearGradient(0, 0, 0, h);
+      gr.addColorStop(0, "rgba(" + GREEN + ",.34)"); gr.addColorStop(1, "rgba(" + GREEN + ",.02)");
+      g.fillStyle = gr; g.fill();
+    }
+    g.beginPath();
+    for (i = 0; i < pts.length; i++) i ? g.lineTo(pts[i][0], pts[i][1]) : g.moveTo(pts[i][0], pts[i][1]);
+    g.lineJoin = "round";
+    if (k === 0) { g.strokeStyle = "rgb(" + GREEN + ")"; g.lineWidth = 1.7; g.shadowColor = "rgba(" + GREEN + ",.55)"; g.shadowBlur = 6; }
+    else { g.strokeStyle = "rgba(" + GREEN + "," + (0.10 + 0.22 * (1 - k / (depth + 1))).toFixed(2) + ")"; g.lineWidth = 1; }
+    g.stroke();
+    g.restore();
+  }
+}
+
+/* ---- wavetable waterfall ------------------------------------------------
+ * wtN_shape is "<frames>,<samples>,<data>", one character per sample quantised to
+ * 64 levels over [-1,1], built by the module when a table lands. The panel also
+ * reads the file itself over the manager's file API, so the drawing follows
+ * whichever table is loaded from either side. */
+var SHAPE = {}, QI = {}, PATHS = [], shapeReq = {}, audioCtx = null;
 (function () {
   var A = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
   for (var i = 0; i < A.length; i++) QI[A.charAt(i)] = i;
 })();
-
 function parseShape(str) {
   if (!str) return null;
   var c1 = str.indexOf(","), c2 = str.indexOf(",", c1 + 1);
   if (c1 < 0 || c2 < 0) return null;
-  var nf = parseInt(str.substring(0, c1), 10);
-  var ns = parseInt(str.substring(c1 + 1, c2), 10);
-  var body = str.substring(c2 + 1);
+  var nf = parseInt(str.substring(0, c1), 10), ns = parseInt(str.substring(c1 + 1, c2), 10), body = str.substring(c2 + 1);
   if (!(nf > 0 && ns > 0) || body.length < nf * ns) return null;
   var out = [];
   for (var f = 0; f < nf; f++) {
     var a = new Float32Array(ns);
-    for (var i = 0; i < ns; i++) {
-      var q = QI[body.charAt(f * ns + i)];
-      a[i] = (q === undefined ? 31 : q) / 63 * 2 - 1;
-    }
+    for (var i = 0; i < ns; i++) { var q = QI[body.charAt(f * ns + i)]; a[i] = (q === undefined ? 31 : q) / 63 * 2 - 1; }
     out.push(a);
   }
   return { frames: nf, samples: ns, data: out };
 }
-
-/* Keeping the display live without reloading the page.
- *
- * A module web UI cannot pull a value: getParam answers from the manager's
- * cache in both the standalone and iframe paths (remote-ui.js
- * handleIframeGetParam: "not currently supported by the WS protocol, so read
- * from local state"). Values only ARRIVE -- on subscribe, on the notify ring,
- * or on a 30 s refresh. The ring only carries keys the DEVICE set, so a table
- * change pushes wtN_select (the index) and never the new digest.
- *
- * resubscribe() would force a re-read, but the manager answers it with a
- * chain_params message and remote-ui.js re-renders the slot unconditionally
- * on that (unlike its hierarchy handler, which guards on the structure being
- * unchanged) -- which rebuilds the iframe and reloads this page. That is the
- * flash, and it is too blunt to use per table change.
- *
- * So the page reads the wavetable ITSELF. wt_paths gives the file behind
- * every wtN_select index, the manager serves files over /files/download, and
- * decodeAudioData handles the FLAC these tables are stored as. A change from
- * either side lands as an index or a path, and both resolve to a file we can
- * draw. The module's digest still paints first and covers any browser that
- * will not decode the file. */
-var PATHS = [];
-
-function wtRootRelative(path) {
-  return "/files/download?path=" + encodeURIComponent(path);
-}
-
-/* .wt2048 names its own frame size; a plain .wav gets the usual 2048. */
+function ingestShape(osc, v) { var sh = parseShape(v); if (sh) { SHAPE[osc] = sh; redrawSoon(); } }
 function frameSizeOf(path) {
-  var m = /\.wt(\d+)$/i.exec(path || "");
-  var n = m ? parseInt(m[1], 10) : 0;
+  var m = /\.wt(\d+)$/i.exec(path || ""), n = m ? parseInt(m[1], 10) : 0;
   return (n >= 256 && n <= 4096 && (n & (n - 1)) === 0) ? n : 2048;
 }
-
-var audioCtx = null;
-var shapeReq = {};      /* osc -> path currently being fetched */
-
 function loadShapeFromFile(osc, path) {
   if (!path || shapeReq[osc] === path) return;
   shapeReq[osc] = path;
   if (!window.fetch || !(window.AudioContext || window.webkitAudioContext)) return;
-  fetch(wtRootRelative(path)).then(function (r) {
+  fetch("/files/download?path=" + encodeURIComponent(path)).then(function (r) {
     if (!r.ok) throw 0;
     return r.arrayBuffer();
   }).then(function (buf) {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx.decodeAudioData(buf);
   }).then(function (ab) {
-    var pcm = ab.getChannelData(0);
-    var fs = frameSizeOf(path);
-    var nf = Math.floor(pcm.length / fs);
+    var pcm = ab.getChannelData(0), fs = frameSizeOf(path), nf = Math.floor(pcm.length / fs);
     if (nf < 1) return;
-    var OF = Math.min(24, nf), OS = 64, out = [];
+    var OF = Math.min(32, nf), OS = 96, out = [];
     for (var f = 0; f < OF; f++) {
-      var src = (OF === 1) ? 0 : Math.round(f * (nf - 1) / (OF - 1));
-      var a = new Float32Array(OS);
+      var src = OF === 1 ? 0 : Math.round(f * (nf - 1) / (OF - 1)), a = new Float32Array(OS);
       for (var i = 0; i < OS; i++) a[i] = pcm[src * fs + Math.floor(i * fs / OS)] || 0;
       out.push(a);
     }
     SHAPE[osc] = { frames: OF, samples: OS, data: out };
     redrawSoon();
-  }).catch(function () {
-    /* no decode: whatever the module's digest gave us stays on screen */
-    shapeReq[osc] = null;
-  });
+  }).catch(function () { shapeReq[osc] = null; });
 }
-
-/* A select index resolves through wt_paths; a filepath is already a path. */
 function shapeFromIndex(osc, idx) {
   var i = parseInt(idx, 10);
   if (!isNaN(i) && PATHS[i]) loadShapeFromFile(osc, PATHS[i]);
 }
 
-function ingestShape(osc, v) {
-  var sh = parseShape(v);
-  if (sh) { SHAPE[osc] = sh; redrawSoon(); }
-}
-[1, 2, 3].forEach(function (osc) {
-  CTL["wt" + osc + "_shape"] = { set: function (v) { ingestShape(osc, v); } };
-});
-CTL.wt_paths = { set: function (v) {
-  try { var a = JSON.parse(v); if (a && a.length) PATHS = a; } catch (e) {}
-} };
-function fetchShape(osc) {
-  if (!schwungRemote.getParam) return;
-  schwungRemote.getParam(K + "wt" + osc + "_shape").then(function (v) {
-    ingestShape(osc, v);
-  }).catch(function () {});
-}
-
-function drawWaterfall(osc, pos) {
+function waterfall(n) {
+  var pos = "wt" + n + "_pos";
   return function (g, w, h) {
-    var sh = SHAPE[osc];
-    var pad = 6, fp = frac(pos);
-    if (!sh) {
-      g.fillStyle = "#3a3f47"; g.font = "10px system-ui";
-      g.fillText("waiting for table…", pad + 2, h / 2);
-      return;
+    var sh = SHAPE[n], padL = 10, padR = 10, padT = 10, padB = 12;
+    if (!sh) { label(g, "waiting for table…", padL + 4, h / 2); return; }
+    var rows = sh.frames, cur = Math.round(frac(pos) * (rows - 1));
+    var depthX = Math.min(90, w * 0.18), depthY = h * 0.30;
+    var fw = w - padL - padR - depthX, fh = h - padT - padB - depthY, amp = fh * 0.46;
+    /* floor grid */
+    g.strokeStyle = "rgba(255,255,255,.04)"; g.lineWidth = 1; g.beginPath();
+    for (var q = 0; q <= 4; q++) {
+      var t = q / 4, ox = padL + depthX * (1 - t), oy = padT + depthY * (1 - t);
+      g.moveTo(ox, oy + fh); g.lineTo(ox + fw, oy + fh);
     }
-    var rows = sh.frames, cur = Math.round(fp * (rows - 1));
-    for (var i = 0; i < rows; i++) {
-      var t = i / (rows - 1 || 1);
-      var y = pad + (h - pad * 2) * (0.16 + t * 0.84);
-      var xs = pad + (h - pad * 2) * (1 - t) * 0.30;
-      var amp = (h - pad * 2) * 0.17;
-      var d = sh.data[i], n = d.length;
+    g.stroke();
+    /* back (frame 0) to front (last): nearer frames hide the ones behind */
+    for (var i = rows - 1; i >= 0; i--) {
+      var tt = rows === 1 ? 1 : i / (rows - 1);                 /* 0 = back */
+      var x0 = padL + depthX * (1 - tt), yMid = padT + depthY * (1 - tt) + fh * 0.5;
+      var d = sh.data[i], ns = d.length, pts = [];
+      for (var s = 0; s < ns; s++) pts.push([x0 + fw * (s / (ns - 1)), yMid - d[s] * amp]);
+      var ybase = padT + depthY * (1 - tt) + fh;
+      g.beginPath(); g.moveTo(pts[0][0], ybase);
+      pts.forEach(function (p) { g.lineTo(p[0], p[1]); });
+      g.lineTo(pts[pts.length - 1][0], ybase); g.closePath();
+      g.fillStyle = "#080909"; g.fill();
       g.beginPath();
-      for (var x = 0; x < n; x++) {
-        var px = xs + (w - pad - xs) * (x / (n - 1));
-        var py = y - d[x] * amp;
-        x ? g.lineTo(px, py) : g.moveTo(px, py);
+      pts.forEach(function (p, j) { j ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); });
+      g.lineJoin = "round";
+      if (i === cur) {
+        g.shadowColor = "rgba(" + GREEN + ",.9)"; g.shadowBlur = 9;
+        g.strokeStyle = "#d9ffe4"; g.lineWidth = 1.8;
+      } else {
+        g.shadowBlur = 0;
+        g.strokeStyle = "rgba(" + GREEN + "," + (0.16 + 0.55 * tt).toFixed(2) + ")"; g.lineWidth = 1;
       }
-      if (i === cur) { g.strokeStyle = "#e8e04a"; g.lineWidth = 1.6; }
-      else { g.strokeStyle = "rgba(79,208,106," + (0.12 + t * 0.5).toFixed(2) + ")"; g.lineWidth = 1; }
-      g.stroke();
+      g.stroke(); g.shadowBlur = 0;
     }
+    label(g, "frame " + (cur + 1) + " / " + rows, padL + 2, h - 3);
   };
 }
 
-/* ---------------------------------------------------------------- panels */
-function panel(cls, title, nameEl) {
-  var p = el("div", "panel " + cls, document.getElementById("rack"));
-  var bar = el("div", "bar", p);
-  el("div", "dot", bar);
-  var t = el("div", null, bar); t.textContent = title;
-  if (nameEl) { var n = el("div", "name", bar); n.id = nameEl; n.textContent = "Init"; }
-  return el("div", "body", p);
+/* ---- filter response ----------------------------------------------------
+ * The voice filter: cutoff in MIDI-note units over the pot, Q = 0.7071 / (1 - 0.99 res),
+ * 12 or 24 dB. A two-pole analogue prototype with that Q; the 24 dB types are two of them. */
+function filterDb(type, fc, q, f) {
+  var s = f / fc, s2 = s * s;
+  var den = Math.sqrt((1 - s2) * (1 - s2) + (s / q) * (s / q)) || 1e-9, num;
+  var t = type & 7, kind = t >> 1;
+  num = kind === 0 ? 1 : kind === 1 ? s2 : kind === 2 ? s / q : Math.abs(1 - s2);
+  var mag = num / den;
+  if (t & 1) mag = mag * mag;
+  return 20 * Math.log10(Math.max(mag, 1e-6));
+}
+var DBMAX = 24, DBMIN = -42;
+function dbY(db, h, top) { return top + (DBMAX - Math.max(DBMIN, Math.min(DBMAX, db))) / (DBMAX - DBMIN) * (h - top - 2); }
+function responsePts(fn, w, h, depth, n) {
+  var pts = [], px = 2.4 * depth, py = 2.4 * depth;
+  n = n || 140;
+  for (var i = 0; i <= n; i++) {
+    var x = i / n, f = 13 * Math.pow(20000 / 13, x);
+    pts.push([x * (w - px - 2) + 1, dbY(fn(f), h, py + 4)]);
+  }
+  return pts;
+}
+function freqGrid(g, w, h, depth) {
+  var px = 2.4 * depth, xs = [];
+  [100, 1000, 10000].forEach(function (f) { xs.push(Math.log(f / 13) / Math.log(20000 / 13) * (w - px - 2) + 1); });
+  gridLines(g, w, h, xs, [dbY(0, h, 2.4 * depth + 4)]);
+  [["100", 100], ["1k", 1000], ["10k", 10000]].forEach(function (t, i) { label(g, t[0], xs[i] + 3, h - 3); });
+}
+function filterGraph(prefix, withKey) {
+  var t = prefix + "_type", fr = prefix + "_freq", rs = prefix + "_res";
+  return function (g, w, h) {
+    var fc = MAP.noteHz(val(fr)), q = 0.70710678 / (1 - frac(rs) * 0.99), type = val(t);
+    freqGrid(g, w, h, 5);
+    ridge(g, responsePts(function (f) { return filterDb(type, fc, q, f); }, w, h, 5), w, h, { base: h });
+    var px = 2.4 * 5, x = frac(fr) * (w - px - 2) + 1;
+    g.fillStyle = "#d9ffe4"; g.beginPath(); g.arc(x, dbY(filterDb(type, fc, q, fc), h, px + 4), 3.5, 0, 7); g.fill();
+    label(g, fHz(fc), w - 4, 12, "right");
+  };
+}
+function filterPtr(prefix) {
+  var fr = prefix + "_freq", rs = prefix + "_res";
+  function set(x, y, w, h) {
+    var px = 2.4 * 5;
+    setVal(fr, (x - 1) / (w - px - 2) * 127, true);
+    setVal(rs, (1 - (y - px - 4) / (h - px - 6)) * 127, true);
+  }
+  return { down: function (x, y, w, h) { set(x, y, w, h); return true; }, move: set };
 }
 
-function buildOsc(n) {
-  var b = panel("s6", "OSC " + n, "wtname" + n);
-  var left = el("div", "col", b);
-  var r1 = el("div", "knobs", left), r2 = el("div", "knobs", left);
-  controls([["wt" + n + "_pos", "Pos"], ["wt" + n + "_tune", "Tune"],
-            ["wt" + n + "_level", "Level"], ["wt" + n + "_pan", "Pan"]], r1);
-  var shape = [["wt" + n + "_uni", "Unison"], ["wt" + n + "_detune", "Detune"],
-               ["wt" + n + "_spread", "Spread"]];
-  if (n < 3) shape.push(["wt" + n + "_formant", "Formant"], ["wt" + n + "_bend", "Bend"]);
-  shape.push(["wt" + n + "_sync", "Sync"]);
-  controls(shape, r2);
-  var right = el("div", "col", b);
-  right.style.flex = "1"; right.style.minWidth = "0";
-  addCanvas(right, drawWaterfall(n, "wt" + n + "_pos"), 104);
-  placed["wt" + n + "_table"] = 1;
-  CTL["wt" + n + "_table"] = { set: function (p) {
-    var e = document.getElementById("wtname" + n);
-    if (!e) return;
-    if (!p) { e.textContent = "Init"; return; }
-    var s = p.substring(p.lastIndexOf("/") + 1), d = s.lastIndexOf(".");
-    e.textContent = d > 0 ? s.substring(0, d) : s;
-  } };
-  /* A path that changed under us -- the pot, or the device's own browser --
-   * means a new digest exists that nothing will push until the slow refresh.
-   * Ask for it. */
-  var prevPath = null;
-  var watch = CTL["wt" + n + "_table"].set;
-  CTL["wt" + n + "_table"] = { set: function (p) {
-    watch(p);
-    if (p !== prevPath) { prevPath = p; if (p) loadShapeFromFile(n, p); }
-  } };
+/* ---- envelope -----------------------------------------------------------
+ * Segment widths follow the pot (the pots are logarithmic in time), so every stage stays
+ * visible whatever its length; the readouts underneath give the real times. The
+ * decay and release are the engine's exponential stages. */
+function envGeom(k, w, h) {
+  var pad = 10, top = 12, bot = h - 12;
+  var wa = 0.04 + 0.2 * frac(k.a), wd = 0.04 + 0.2 * frac(k.d), wr = 0.04 + 0.2 * frac(k.r), wh = 0.18;
+  var tot = wa + wd + wh + wr, W = w - 2 * pad, s = frac(k.s);
+  var xa = pad + W * wa / tot, xd = xa + W * wd / tot, xs = xd + W * wh / tot, xr = xs + W * wr / tot;
+  var ys = bot - (bot - top) * s;
+  return { pad: pad, top: top, bot: bot, xa: xa, xd: xd, xs: xs, xr: xr, ys: ys, W: W, tot: tot, wa: wa, wd: wd, wr: wr };
+}
+function envPts(k, w, h) {
+  var G = envGeom(k, w, h), pts = [[G.pad, G.bot]], i, N = 28, K = 4.2, norm = 1 - Math.exp(-K);
+  pts.push([G.xa, G.top]);
+  for (i = 1; i <= N; i++) { var u = i / N; pts.push([G.xa + (G.xd - G.xa) * u, G.ys + (G.top - G.ys) * (Math.exp(-K * u) - Math.exp(-K)) / norm]); }
+  pts.push([G.xs, G.ys]);
+  for (i = 1; i <= N; i++) { u = i / N; pts.push([G.xs + (G.xr - G.xs) * u, G.bot + (G.ys - G.bot) * (Math.exp(-K * u) - Math.exp(-K)) / norm]); }
+  return { pts: pts, G: G };
+}
+function envGraph(k) {
+  return function (g, w, h) {
+    var E = envPts(k, w - 12, h - 8), G = E.G;
+    gridLines(g, w, h, [], [G.top + 8, (G.top + G.bot) / 2, G.bot]);
+    g.save(); g.translate(0, 8);
+    ridge(g, E.pts, w - 12, h - 8, { depth: 4, dx: 2.4, dy: 2.4, base: G.bot + 4 });
+    g.restore();
+    [[G.xa, G.top], [G.xd, G.ys], [G.xr, G.bot]].forEach(function (p) {
+      g.beginPath(); g.arc(p[0], p[1] + 8, 3.6, 0, 7); g.fillStyle = "#0a0b0c"; g.fill();
+      g.strokeStyle = "#d9ffe4"; g.lineWidth = 1.5; g.stroke();
+    });
+    label(g, "A " + fSec(k.attackFn(val(k.a))), 8, h - 3);
+    label(g, "D " + fSec(MAP.env(val(k.d))), w * .38, h - 3);
+    label(g, "R " + fSec(MAP.env(val(k.r))), w - 6, h - 3, "right");
+  };
+}
+function envPtr(k) {
+  var pick = null;
+  return {
+    down: function (x, y, w, h) {
+      var G = envGeom(k, w - 12, h - 8), best = 1e9;
+      [["a", G.xa, G.top + 8], ["d", G.xd, G.ys + 8], ["r", G.xr, G.bot + 8]].forEach(function (p) {
+        var d = Math.hypot(x - p[1], y - p[2]);
+        if (d < best) { best = d; pick = p[0]; }
+      });
+      return best < 28;
+    },
+    move: function (x, y, w, h) {
+      var G = envGeom(k, w - 12, h - 8), W = G.W;
+      /* invert the widths: a segment is 0.04 + 0.2 f of the total */
+      var fx = function (seg, from, to) {
+        var share = Math.max(0, (to - from) / W) * G.tot;      /* width in the same units */
+        return Math.max(0, Math.min(1, (share - 0.04) / 0.2));
+      };
+      if (pick === "a") setVal(k.a, fx("a", G.pad, x) * 127, true);
+      else if (pick === "d") {
+        setVal(k.d, fx("d", G.xa, x) * 127, true);
+        setVal(k.s, (1 - (y - 8 - G.top) / (G.bot - G.top)) * 127, true);
+      } else if (pick === "r") setVal(k.r, fx("r", G.xs, x) * 127, true);
+    }
+  };
+}
+function envBlock(into, title, ks, extras, o) {
+  o = o || {};
+  var k = { a: ks[0], d: ks[1], s: ks[2], r: ks[3], attackFn: MAP.attack };
+  var p = panel(title, into);
+  graph(p.body, envGraph(k), 130, envPtr(k));
+  row([[k.a, "Attack"], [k.d, "Decay"], [k.s, "Sustain"], [k.r, "Release"]].concat(extras || []), p.body);
+  return p;
 }
 
-function build() {
-  buildOsc(1); buildOsc(2); buildOsc(3);
-
-  var nb = panel("s2", "Noise");
-  var nk = el("div", "knobs", el("div", "col", nb));
-  controls([["noise_level", "Level"]], nk);
-  control("noise_type", "Type", nk);
-
-  var sb = panel("s2", "Sub");
-  var sc = el("div", "col", sb);
-  control("sub_wave", "Wave", el("div", "knobs", sc));
-  var sk = el("div", "knobs", sc);
-  controls([["sub_tune", "Tune"], ["sub_level", "Level"]], sk);
-
-  var fb = panel("s4", "Filter");
-  var fc = el("div", "col", fb);
-  var f1 = el("div", "knobs", fc);
-  control("flt_type", "Type", f1);
-  controls([["flt_freq", "Freq"], ["flt_res", "Res"], ["flt_drive", "Drive"]], f1);
-  var f2 = el("div", "knobs", fc);
-  controls([["flt_key", "Key"], ["flt_vel", "Vel"], ["flt_env", "Amnt"],
-            ["flt_a", "A"], ["flt_d", "D"], ["flt_s", "S"], ["flt_r", "R"]], f2);
-  var fr = el("div", "col", fb); fr.style.flex = "1"; fr.style.minWidth = "0";
-  addCanvas(fr, drawAdsr("flt_a", "flt_d", "flt_s", "flt_r"), 104);
-
-  var ab = panel("s4", "ADSR");
-  var al = el("div", "col", ab);
-  var ak = el("div", "knobs", al);
-  controls([["vca_a", "A"], ["vca_d", "D"], ["vca_s", "S"], ["vca_r", "R"],
-            ["vca_vel", "Vel"]], ak);
-  var ar = el("div", "col", ab); ar.style.flex = "1"; ar.style.minWidth = "0";
-  addCanvas(ar, drawAdsr("vca_a", "vca_d", "vca_s", "vca_r"), 104);
-
-  /* the two spare envelopes, each with where it points and how far */
-  [1, 2].forEach(function (n) {
-    var mb = panel("s4", "Env " + n);
-    var ml = el("div", "col", mb);
-    var mk = el("div", "knobs", ml);
-    controls([["me" + n + "_a", "A"], ["me" + n + "_d", "D"],
-              ["me" + n + "_s", "S"], ["me" + n + "_r", "R"]], mk);
-    var mr = el("div", "knobs", ml);
-    control("me" + n + "_dst", "To", mr);
-    control("me" + n + "_amt", "Amt", mr);
-    var mc = el("div", "col", mb); mc.style.flex = "1"; mc.style.minWidth = "0";
-    addCanvas(mc, drawAdsr("me" + n + "_a", "me" + n + "_d",
-                           "me" + n + "_s", "me" + n + "_r"), 104);
+/* ---- EQ ------------------------------------------------------------------ */
+function biquadDb(type, f0, gdb, q, f) {
+  var sr = 44100, A = Math.pow(10, gdb / 40), w0 = 2 * Math.PI * f0 / sr, cw = Math.cos(w0), sw = Math.sin(w0), al = sw / (2 * q);
+  var b0, b1, b2, a0, a1, a2, sq = 2 * Math.sqrt(A) * al;
+  if (type === 1) { b0 = 1 + al * A; b1 = -2 * cw; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * cw; a2 = 1 - al / A; }
+  else if (type === 2) { b0 = A * ((A + 1) - (A - 1) * cw + sq); b1 = 2 * A * ((A - 1) - (A + 1) * cw); b2 = A * ((A + 1) - (A - 1) * cw - sq); a0 = (A + 1) + (A - 1) * cw + sq; a1 = -2 * ((A - 1) + (A + 1) * cw); a2 = (A + 1) + (A - 1) * cw - sq; }
+  else if (type === 3) { b0 = A * ((A + 1) + (A - 1) * cw + sq); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - sq); a0 = (A + 1) - (A - 1) * cw + sq; a1 = 2 * ((A - 1) - (A + 1) * cw); a2 = (A + 1) - (A - 1) * cw - sq; }
+  else if (type === 4) { b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = (1 + cw) / 2; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; }
+  else if (type === 5) { b0 = (1 - cw) / 2; b1 = 1 - cw; b2 = (1 - cw) / 2; a0 = 1 + al; a1 = -2 * cw; a2 = 1 - al; }
+  else return 0;
+  var w = 2 * Math.PI * f / sr, c1 = Math.cos(w), s1 = Math.sin(w), c2 = Math.cos(2 * w), s2 = Math.sin(2 * w);
+  var nr = b0 + b1 * c1 + b2 * c2, ni = -(b1 * s1 + b2 * s2), dr = a0 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
+  return 10 * Math.log10(Math.max((nr * nr + ni * ni) / (dr * dr + di * di), 1e-12));
+}
+/* the four bands of one rack: [type, freq, gain, q] keys */
+function eqBands(set) {
+  var out = [];
+  for (var b = 1; b <= 4; b++) out.push({ t: set + b + "_type", f: set + b + "_freq", g: set + b + "_gain", q: set + b + "_q" });
+  return out;
+}
+var EQY = 24;
+function eqGraph(bands, hotRef) {
+  return function (g, w, h) {
+    var px = 2.4 * 4;
+    function y(db) { return px + 6 + (EQY - db) / (2 * EQY) * (h - px - 8); }
+    gridLines(g, w, h, [], [y(12), y(0), y(-12)]);
+    var xs = []; [100, 1000, 10000].forEach(function (f, i) { var x = Math.log(f / 20) / Math.log(1000) * (w - px - 2) + 1; xs.push(x); label(g, ["100", "1k", "10k"][i], x + 3, h - 3); });
+    gridLines(g, w, h, xs, []);
+    var pts = [];
+    for (var i = 0; i <= 140; i++) {
+      var f = 20 * Math.pow(1000, i / 140), db = 0;
+      bands.forEach(function (B) {
+        var type = val(B.t);
+        if (type > 0) db += biquadDb(type, MAP.eqHz(val(B.f)), MAP.eqDb(val(B.g)), MAP.eqQ(type, val(B.q)), f);
+      });
+      pts.push([i / 140 * (w - px - 2) + 1, y(Math.max(-EQY, Math.min(EQY, db)))]);
+    }
+    ridge(g, pts, w, h, { depth: 4, base: y(-EQY) + 6 });
+    bands.forEach(function (B, i) {
+      var type = val(B.t); if (!type) return;
+      var x = frac(B.f) * (w - px - 2) + 1, yy = y(type === 4 || type === 5 ? 0 : MAP.eqDb(val(B.g)));
+      g.beginPath(); g.arc(x, yy, 5, 0, 7);
+      g.fillStyle = hotRef.i === i ? "#d9ffe4" : "#0a0b0c"; g.fill();
+      g.strokeStyle = "#d9ffe4"; g.lineWidth = 1.4; g.stroke();
+      label(g, String(i + 1), x, yy - 9, "center");
+    });
+  };
+}
+function eqPtr(bands, hotRef, wrapEl) {
+  var px = 2.4 * 4;
+  function y2db(y, h) { return EQY - (y - px - 6) / (h - px - 8) * 2 * EQY; }
+  function mark() { if (wrapEl) [].forEach.call(wrapEl.querySelectorAll(".band"), function (b, i) { b.classList.toggle("hot", i === hotRef.i); }); redrawSoon(); }
+  return {
+    down: function (x, y, w, h) {
+      var best = 1e9, bi = -1;
+      bands.forEach(function (B, i) {
+        if (!val(B.t)) return;
+        var bx = frac(B.f) * (w - px - 2) + 1, by = px + 6 + (EQY - (val(B.t) >= 4 ? 0 : MAP.eqDb(val(B.g)))) / (2 * EQY) * (h - px - 8);
+        var d = Math.hypot(x - bx, y - by);
+        if (d < best) { best = d; bi = i; }
+      });
+      if (bi < 0 || best > 26) return false;
+      hotRef.i = bi; mark(); return true;
+    },
+    move: function (x, y, w, h) {
+      var B = bands[hotRef.i];
+      setVal(B.f, (x - 1) / (w - px - 2) * 127, true);
+      if (val(B.t) < 4) { var db = Math.max(-EQY, Math.min(EQY, y2db(y, h))); setVal(B.g, 64 + db / EQY * 63, true); }
+    },
+    wheel: function (x, y, dir) {
+      if (hotRef.i < 0) return false;
+      setVal(bands[hotRef.i].q, val(bands[hotRef.i].q) + dir * 3, true); return true;
+    }
+  };
+}
+function eqBlock(into, set, cap) {
+  var bands = eqBands(set), hot = { i: 0 }, box = el("div", null, into);
+  box.style.cssText = "display:flex;flex-direction:column;gap:10px";
+  var gwrap = el("div", null, box);
+  graph(gwrap, eqGraph(bands, hot), 150, eqPtr(bands, hot, box));
+  var cols = el("div", "cols", box);
+  bands.forEach(function (B, i) {
+    var c = el("div", "band", cols);
+    var f = el("div", "fld", c); el("div", "lab", f, "Band " + (i + 1));
+    choice(B.t, null, f);
+    row([[B.f, "Freq"], [B.g, "Gain"], [B.q, "Q"]], c);
   });
+  if (cap) el("div", "note", box, cap);
+  mark0(box, hot);
+  return box;
+}
+function mark0(box, hot) { var b = box.querySelectorAll(".band"); if (b[hot.i]) b[hot.i].classList.add("hot"); }
 
-  /* the effects a preset carries with it: delay and reverb under one SPACE knob, width, and four EQ bands */
-  var xb = panel("s4", "Space");
-  var xc = el("div", "col", xb);
-  var x1 = el("div", "knobs", xc);
-  controls([["fx_space", "Space"], ["fx_wide", "Width"], ["fx_wrate", "W rate"], ["fx_wdepth", "W depth"]], x1);
-  var x2 = el("div", "knobs", xc);
-  control("dly_mode", "Mode", x2);
-  controls([["dly_mix", "Dly mix"], ["dly_time", "Time L"], ["dly_timer", "Time R"], ["dly_fb", "Fdbk"],
-            ["dly_lo", "Lo cut"], ["dly_hi", "Hi cut"]], x2);
-  var x3 = el("div", "knobs", xc);
-  controls([["rev_mix", "Rev mix"], ["rev_decay", "Decay"], ["rev_damp", "Damp"], ["rev_lo", "Lo cut"],
-            ["rev_width", "Width"]], x3);
+/* ---- compressor, distortion, delay, reverb ---------------------------------- */
+function compGraph() {
+  return function (g, w, h) {
+    var lo = -72, hi = 6, px = 2.4 * 4;
+    function X(db) { return 1 + (db - lo) / (hi - lo) * (w - px - 2); }
+    function Y(db) { return h - 4 - (Math.max(lo, Math.min(hi, db)) - lo) / (hi - lo) * (h - px - 8); }
+    var T = MAP.compThresh(val("comp_thresh")), R = MAP.compRatio(val("comp_ratio")), K = MAP.compKnee(val("comp_knee")), M = MAP.compMakeup(val("comp_makeup"));
+    gridLines(g, w, h, [X(-48), X(-24), X(0)], [Y(-48), Y(-24), Y(0)]);
+    var pts = [];
+    for (var i = 0; i <= 120; i++) {
+      var x = lo + (hi - lo) * i / 120, y;
+      if (2 * (x - T) < -K) y = x;
+      else if (2 * Math.abs(x - T) <= K) y = x + (1 / R - 1) * Math.pow(x - T + K / 2, 2) / (2 * K);
+      else y = T + (x - T) / R;
+      pts.push([X(x), Y(y + M)]);
+    }
+    ridge(g, pts, w, h, { depth: 4, base: h });
+    if (val("comp_multi") >= 1) [MAP.compThresh(val("comp_thresh2")), MAP.compThresh(val("comp_thresh3"))].forEach(function (t, i) {
+      g.setLineDash([3, 3]); g.strokeStyle = "rgba(" + GREEN + ",.35)"; g.beginPath(); g.moveTo(X(t), 0); g.lineTo(X(t), h); g.stroke(); g.setLineDash([]);
+      label(g, "T" + (i + 2), X(t) + 3, 10);
+    });
+    label(g, "in dB", w - px - 2, h - 3, "right");
+  };
+}
+function distGraph() {
+  return function (g, w, h) {
+    var mode = val("dist_mode"), c = cal(), px = 2.4 * 3;
+    var iw = w - px - 4, ih = h - px - 6;
+    function X(x) { return 2 + (x + 1) / 2 * iw; }
+    function Y(y) { return px + 3 + (1 - (Math.max(-1.25, Math.min(1.25, y)) + 1.25) / 2.5) * ih; }
+    gridLines(g, w, h, [X(0)], [Y(0)]);
+    var pts = [], dm = frac("dist_mix");
+    var gain, k = 1, lv = 1, mix, dry = 0, hold = 1 + val("dist_drive");
+    if (c) { gain = Math.pow(10, (-16 + val("dist_drive") * 70 / 127) / 20); k = Math.pow(10, (-36 + val("dist_out") * 48 / 127) / 20); lv = Math.pow(10, (val("dist_level") - 64) * 24 / 64 / 20); mix = dm; dry = 1 - mix * mix; mix = mix; }
+    else { var a = frac("dist_drive"); gain = 1 + 14 * a * a; k = 1 / Math.sqrt(gain); mix = dm; }
+    var bias = c ? 0.004 : 0.25, bo = Math.tanh(gain * bias);
+    function f(x) {
+      if (mode === 1) return Math.tanh(gain * (x + bias)) - bo;
+      if (mode === 2) return Math.max(-1, Math.min(1, gain * x));
+      if (mode === 3 && c) return Math.sin(gain * x);
+      return Math.tanh(gain * x);
+    }
+    if (c && mode === 4) {                                   /* Downsample: the input held for N samples */
+      var ns = 64, per = Math.max(1, Math.min(64, hold)), hv = 0;
+      g.strokeStyle = "rgba(255,255,255,.18)"; g.beginPath();
+      for (var i = 0; i < ns; i++) { var xx = 2 + i / (ns - 1) * iw, yy = Y(Math.sin(i / ns * 6.2832 * 2) * .8); i ? g.lineTo(xx, yy) : g.moveTo(xx, yy); }
+      g.stroke();
+      g.beginPath();
+      for (i = 0; i < ns; i++) { if (i % per === 0) hv = Math.sin(i / ns * 6.2832 * 2) * .8; xx = 2 + i / (ns - 1) * iw; yy = Y(hv); i ? g.lineTo(xx, yy) : g.moveTo(xx, yy); }
+      g.strokeStyle = "rgb(" + GREEN + ")"; g.lineWidth = 1.6; g.stroke();
+      label(g, "hold " + per + " samples", w - 4, 12, "right");
+      return;
+    }
+    for (var j = 0; j <= 120; j++) {
+      var x = -1 + 2 * j / 120, y;
+      y = c ? lv * (dry * x + mix * k * f(x)) : x + mix * (k * f(x) - x);
+      pts.push([X(x), Y(y)]);
+    }
+    ridge(g, pts, w, h, { depth: 3, dx: 2.4, dy: 2.4, base: h });
+    label(g, "in → out", w - px - 4, h - 3, "right");
+  };
+}
+function delayGraph(set) {
+  var t = set + "_time", tr = set + "_timer", fb = set + "_fb", md = set + "_mode";
+  return function (g, w, h) {
+    var l = MAP.delayMs(val(t)), r = MAP.delayMs(val(tr)), f = Math.min(P01(val(fb)), 0.97), ping = val(md) === 1;
+    var taps = [], span = 0, k;
+    for (k = 1; k <= 24; k++) {
+      var a = Math.pow(f, k - 1);
+      if (a < 0.03) break;
+      if (ping) taps.push({ t: k * l, a: a, ch: k % 2 ? 0 : 1 });
+      else { taps.push({ t: k * l, a: a, ch: 0 }); taps.push({ t: k * r, a: a, ch: 1 }); }
+    }
+    taps.forEach(function (p) { span = Math.max(span, p.t); });
+    span = Math.max(span * 1.04, 1);
+    var mid = h / 2;
+    gridLines(g, w, h, [], [mid]);
+    taps.forEach(function (p) {
+      var x = 8 + (p.t / span) * (w - 16), hh = p.a * (mid - 12);
+      g.fillStyle = p.ch ? "rgba(" + GREEN + ",.45)" : "rgb(" + GREEN + ")";
+      g.fillRect(Math.round(x), p.ch ? mid + 2 : mid - 2 - hh, 3, hh);
+    });
+    g.fillStyle = "#d9ffe4"; g.fillRect(8, 8, 3, mid - 10); label(g, "L", 14, 16); label(g, "R", 14, h - 8);
+    label(g, fMs(span), w - 6, h - 3, "right");
+  };
+}
+function reverbGraph() {
+  return function (g, w, h) {
+    var T = MAP.revT60(val("rev_decay")), px = 2.4 * 4, pts = [];
+    for (var i = 0; i <= 100; i++) {
+      var t = i / 100 * T * 1.15, a = Math.exp(-6.9078 * t / T);
+      pts.push([1 + i / 100 * (w - px - 2), px + 5 + (1 - a) * (h - px - 9)]);
+    }
+    gridLines(g, w, h, [1 + (w - px - 2) / 1.15], []);
+    ridge(g, pts, w, h, { depth: 4, base: h });
+    label(g, "T60 " + fSec(T), w - px - 4, 12, "right");
+  };
+}
 
-  [1, 2, 3, 4].forEach(function (n) {
-    var eb = panel("s3", "EQ " + n);
-    var ek = el("div", "knobs", el("div", "col", eb));
-    control("eq" + n + "_type", "Type", ek);
-    controls([["eq" + n + "_freq", "Freq"], ["eq" + n + "_gain", "Gain"], ["eq" + n + "_q", "Q"]], ek);
+/* ----------------------------------------------------------------- build */
+function fxCard(into, title, power, build) {
+  var p = panel(title, into, { power: power });
+  build(p.body, p);
+  return p;
+}
+function sub(into, txt) { return el("div", "sub", into, txt); }
+
+function buildOsc() {
+  var host = document.getElementById("osc");
+  [1, 2, 3].forEach(function (n) {
+    var p = panel("OSC " + n, host, { cls: "osc" });
+    el("div", "pick", p.head).id = "pick" + n;
+    var c = graph(p.body, waterfall(n), 190, {
+      down: function (x, y, w) { setVal("wt" + n + "_pos", x / w * 127, true); return true; },
+      move: function (x, y, w) { setVal("wt" + n + "_pos", x / w * 127, true); }
+    });
+    var pre = "wt" + n + "_";
+    row([[pre + "pos", "Pos"], [pre + "level", "Level"], [pre + "tune", "Tune"], [pre + "pan", "Pan"], [pre + "bal", "Filter bal"]], p.body);
+    row([[pre + "uni", "Unison"], [pre + "detune", "Detune"], [pre + "spread", "Spread"], [pre + "sync", "Sync"], [pre + "bend", "Bend"], [pre + "formant", "Formant"]], p.body);
+    sub(p.body, "Warp shaper");
+    row([[pre + "wshape", "Shaper"], [pre + "sgain", "Gain"], [pre + "sout", "Out"]], p.body);
+    sub(p.body, "Routing");
+    row([[pre + "post", "Route"], [pre + "bus1", "Bus 1"], [pre + "bus2", "Bus 2"]], p.body);
+    placed[pre + "table"] = 1;
   });
+}
 
-  var gb = panel("s4", "Global");
-  var gk = el("div", "knobs", el("div", "col", gb));
-  control("voice_mode", "Mode", gk);
-  control("legato", "Legato", gk);
-  control("glide_mode", "Glide", gk);
-  controls([["glide", "Rate"], ["voices", "Voices"], ["pb_range", "PB"],
-            ["volume", "Level"]], gk);
+function buildFilter(page) {
+  var g = el("div", "grid g2", page);
+  var f1 = panel("Filter 1", g);
+  graph(f1.body, filterGraph("flt"), 150, filterPtr("flt"));
+  row([["flt_type", "Type"]], f1.body);
+  row([["flt_freq", "Cutoff"], ["flt_res", "Resonance"], ["flt_drive", "Drive"], ["flt_gain", "Gain"]], f1.body);
+  sub(f1.body, "Modulation");
+  row([["flt_env", "Env amt"], ["flt_key", "Key track"], ["flt_vel", "Velocity"]], f1.body);
+  sub(f1.body, "Routing");
+  row([["flt1_out", "Output"], ["flt1_bus1", "Bus 1"], ["flt1_bus2", "Bus 2"]], f1.body);
 
-  /* Anything ui_pages.json declares that the layout above did not place —
-   * a new control lands here rather than silently vanishing from the UI. */
-  var rest = Object.keys(META).filter(function (k) {
-    return !placed[k] && META[k].t !== "file";
+  var f2 = panel("Filter 2", g);
+  graph(f2.body, filterGraph("flt2"), 150, filterPtr("flt2"));
+  row([["flt2_type", "Type"]], f2.body);
+  row([["flt2_freq", "Cutoff"], ["flt2_res", "Resonance"], ["flt2_drive", "Drive"], ["flt2_gain", "Gain"]], f2.body);
+  sub(f2.body, "Modulation");
+  row([["flt2_env", "Env amt"], ["flt2_key", "Key track"]], f2.body);
+  sub(f2.body, "Routing");
+  row([["flt2_out", "Output"], ["flt2_bus1", "Bus 1"], ["flt2_bus2", "Bus 2"]], f2.body);
+  el("div", "note", f2.body, "Filter 2 shares Filter 1's envelope; Env amt is its own share of it.");
+}
+
+function buildMix(page) {
+  var g = el("div", "grid g3", page);
+  var s = panel("Sub", g);
+  row([["sub_wave", "Wave"]], s.body);
+  row([["sub_tune", "Tune"], ["sub_level", "Level"], ["sub_bal", "Filter bal"]], s.body);
+  sub(s.body, "Routing");
+  row([["sub_post", "Route"], ["sub_bus1", "Bus 1"], ["sub_bus2", "Bus 2"]], s.body);
+  var n = panel("Noise", g);
+  row([["noise_type", "Type"]], n.body);
+  row([["noise_level", "Level"], ["noise_hp", "High-pass"], ["noise_lp", "Low-pass"], ["noise_bal", "Filter bal"]], n.body);
+  sub(n.body, "Routing");
+  row([["noise_post", "Route"], ["noise_bus1", "Bus 1"], ["noise_bus2", "Bus 2"]], n.body);
+  var m = panel("Sample", g);
+  row([["smp_fixed", "Pitch"]], m.body);
+  row([["smp_level", "Level"], ["smp_tune", "Tune"], ["smp_fine", "Fine"], ["smp_bal", "Filter bal"]], m.body);
+  sub(m.body, "Routing");
+  row([["smp_post", "Route"], ["smp_bus1", "Bus 1"], ["smp_bus2", "Bus 2"]], m.body);
+  el("div", "note", m.body, "Which sample plays is part of the preset; load a different one from the Move.");
+}
+
+function buildEnv(page) {
+  var g = el("div", "grid g2", page);
+  envBlock(g, "Amp envelope", ["vca_a", "vca_d", "vca_s", "vca_r"], [["vca_vel", "Velocity"], ["vca_vlaw", "Vel law"]]);
+  envBlock(g, "Filter envelope", ["flt_a", "flt_d", "flt_s", "flt_r"], [["flt_env", "Env amt"], ["flt2_env", "Flt 2 amt"]]);
+  var e1 = envBlock(g, "Envelope 1", ["me1_a", "me1_d", "me1_s", "me1_r"], [["me1_amt", "Amount"]]);
+  row([["me1_dst", "Destination"]], e1.body);
+  var e2 = envBlock(g, "Envelope 2", ["me2_a", "me2_d", "me2_s", "me2_r"], [["me2_amt", "Amount"]]);
+  row([["me2_dst", "Destination"]], e2.body);
+  el("div", "note", page).textContent = "Drag the handles on a curve to set attack, decay, sustain and release. The widths follow the knobs, not the clock; the labels give the times.";
+}
+
+function buildFx(page) {
+  var g = el("div", "grid gfx", page);
+  fxCard(g, "Distortion", null, function (b) {
+    graph(b, distGraph(), 150);
+    row([["dist_mode", "Mode"], ["dist_cal", "Calibrated"]], b);
+    row([["dist_drive", "Drive"], ["dist_mix", "Mix"], ["dist_out", "Wet gain"], ["dist_level", "Level"]], b);
+    sub(b, "Pre-filter");
+    row([["dist_pre", "Type"]], b);
+    row([["dist_pre_freq", "Freq"], ["dist_pre_q", "Q"]], b);
   });
-  if (rest.length) {
-    var ob = panel("s12", "Other");
-    var ok = el("div", "knobs", el("div", "col", ob));
-    rest.forEach(function (k) { control(k, META[k].n, ok); });
+  fxCard(g, "Filter FX", "fxf_on", function (b) {
+    graph(b, (function () {
+      var inner = filterGraph("fxf");
+      return function (gg, w, h) { inner(gg, w, h); };
+    })(), 130, filterPtr("fxf"));
+    row([["fxf_type", "Type"]], b);
+    row([["fxf_freq", "Cutoff"], ["fxf_res", "Resonance"], ["fxf_env", "Env amt"]], b);
+  });
+  fxCard(g, "Compressor", "comp_on", function (b) {
+    graph(b, compGraph(), 150);
+    row([["comp_multi", "Multiband"]], b);
+    row([["comp_thresh", "Thresh"], ["comp_ratio", "Ratio"], ["comp_knee", "Knee"], ["comp_attack", "Attack"], ["comp_release", "Release"], ["comp_makeup", "Makeup"], ["comp_mix", "Mix"]], b);
+    sub(b, "Bands");
+    row([["comp_thresh2", "Thresh 2"], ["comp_thresh3", "Thresh 3"], ["comp_gain1", "Gain 1"], ["comp_gain2", "Gain 2"], ["comp_gain3", "Gain 3"], ["comp_below", "Below"]], b);
+  });
+  var eq = fxCard(g, "EQ", "eq_on", function (b, p) {
+    var tabs = el("div", "seg", b), boxes = [], names = ["Main", "Mid", "Side"], sets = ["eq", "eqm", "eqs"];
+    sets.forEach(function (s, i) {
+      var box = eqBlock(b, s, i ? "Mid/side bands act only when the preset uses the split rack." : "");
+      if (i) box.style.display = "none";
+      boxes.push(box);
+      var bt = el("button", i ? null : "on", tabs, names[i]);
+      bt.addEventListener("click", function () {
+        boxes.forEach(function (x, j) { x.style.display = j === i ? "flex" : "none"; });
+        [].forEach.call(tabs.children, function (c, j) { c.classList.toggle("on", j === i); });
+        redrawSoon();
+      });
+    });
+  });
+  eq.root.style.columnSpan = "all";
+  fxCard(g, "Chorus", "chor_on", function (b) {
+    row([["chor_mix", "Mix"], ["chor_rate", "Rate"], ["chor_depth", "Depth"], ["chor_d1", "Delay 1"], ["chor_d2", "Delay 2"], ["chor_fb", "Feedback"], ["chor_filt", "Filter"], ["chor_fmode", "Filter mode"]], b);
+  });
+  fxCard(g, "Flanger", "flan_on", function (b) {
+    row([["flan_mix", "Mix"], ["flan_rate", "Rate"], ["flan_depth", "Depth"], ["flan_fb", "Feedback"], ["flan_phase", "Phase"]], b);
+  });
+  fxCard(g, "Phaser", "phas_on", function (b) {
+    row([["phas_mix", "Mix"], ["phas_rate", "Rate"], ["phas_depth", "Depth"], ["phas_depth2", "Depth 2"], ["phas_freq", "Freq"], ["phas_fb", "Feedback"], ["phas_phase", "Phase"], ["phas_poles", "Poles"]], b);
+  });
+  fxCard(g, "Delay", "dly_on", function (b) {
+    graph(b, delayGraph("dly"), 90);
+    row([["dly_mode", "Mode"], ["dly_sync", "Tempo sync"]], b);
+    row([["dly_mix", "Mix"], ["dly_time", "Time L"], ["dly_timer", "Time R"], ["dly_fb", "Feedback"], ["dly_lo", "Lo cut"], ["dly_hi", "Hi cut"]], b);
+  });
+  fxCard(g, "Delay 2", null, function (b) {
+    graph(b, delayGraph("dly2"), 90);
+    row([["dly2_mode", "Mode"]], b);
+    row([["dly2_mix", "Mix"], ["dly2_time", "Time L"], ["dly2_timer", "Time R"], ["dly2_fb", "Feedback"], ["dly2_lo", "Lo cut"], ["dly2_hi", "Hi cut"]], b);
+    el("div", "note", b, "Runs with the Delay switch.");
+  });
+  fxCard(g, "Reverb", "rev_on", function (b) {
+    graph(b, reverbGraph(), 90);
+    row([["rev_mix", "Mix"], ["rev_decay", "Decay"], ["rev_damp", "Damp"], ["rev_lo", "Lo cut"], ["rev_width", "Width"]], b);
+  });
+  fxCard(g, "Width", "wide_on", function (b) {
+    row([["fx_wide", "Amount"], ["fx_wrate", "Rate"], ["fx_wdepth", "Depth"]], b);
+  });
+  fxCard(g, "Hyper", null, function (b) {
+    row([["hyd_uni", "Voices"], ["hyd_det", "Detune"], ["hyd_rate", "Rate"], ["hyd_wet", "Wet"]], b);
+  });
+  fxCard(g, "Rack", "fx_on", function (b) {
+    row([["fx_space", "Space"]], b);
+    el("div", "note", b, "FX Enable switches the whole rack. Space scales the delay and reverb mixes.");
+  });
+}
+
+function buildGlobal(page) {
+  var g = el("div", "grid g3", page);
+  var v = panel("Voice", g);
+  row([["voice_mode", "Mode"], ["legato", "Legato"], ["glide_mode", "Glide"]], v.body);
+  row([["voices", "Voices"], ["glide", "Glide time"], ["pb_range", "Bend range"]], v.body);
+  var o = panel("Output", g);
+  row([["volume", "Master gain"], ["decay", "Decay"], ["drive", "Drive"]], o.body);
+  row([["lo_shelf", "Low shelf"], ["hi_shelf", "High shelf"]], o.body);
+  row([["mwidth", "Width"], ["monohz", "Mono <"]], o.body);
+  var left = Object.keys(META).filter(function (k) {
+    var m = META[k];
+    return !placed[k] && (m.type === "int" || m.type === "enum") && m.access !== "read" && !NOT_CONTROLS.test(k);
+  });
+  window.__left = left;
+  if (left.length) {
+    var m = panel("More", g);
+    m.root.id = "more";
+    row(left.map(function (k) { return [k, META[k].name]; }), m.body);
   }
 }
 
-/* ------------------------------------------------------- wavetable picker */
-/* wt_pack / wtN_select are not in ui_pages.json: the module
- * builds them into chain_params at runtime, because their options ARE the
- * files currently on the device. getChainParams() is the only way to see
- * them, and the lists change whenever the pack does, so the pack commit
- * re-reads the contract the way the hardware pages do. */
+/* -------------------------------------------------------- wavetable pickers */
 var packSels = [], tableSels = [];
-
 function fillSelect(sel, options, cur) {
   sel.textContent = "";
-  options.forEach(function (o, i) {
-    var op = el("option", null, sel); op.value = String(i); op.textContent = o;
-  });
+  options.forEach(function (o, i) { var op = el("option", null, sel, o); op.value = String(i); });
   if (cur !== undefined && cur !== null) sel.value = String(cur);
 }
-
 function findParam(list, key) {
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].key === key) return list[i];
   return null;
 }
-
 function buildPickers(cp) {
   var pack = findParam(cp, "wt_pack");
-  if (!pack || !pack.options) return false;      /* older module: leave the name */
-
+  if (!pack || !pack.options) return false;
   [1, 2, 3].forEach(function (n) {
-    var sel = findParam(cp, "wt" + n + "_select");
-    if (!sel || !sel.options) return;
-    var nameEl = document.getElementById("wtname" + n);
-    if (!nameEl) return;
-    var host = el("div", "pick");
-    nameEl.parentNode.replaceChild(host, nameEl);
-
-    var ps = el("select", "pack", host);
-    ps.title = "Wavetable pack — filters the list beside it";
-    fillSelect(ps, pack.options, 0);
-    packSels.push(ps);
-
+    var sel = findParam(cp, "wt" + n + "_select"), host = document.getElementById("pick" + n);
+    if (!sel || !sel.options || !host) return;
+    var ps = el("select", null, host);
+    ps.title = "Wavetable pack: filters the list beside it";
+    fillSelect(ps, pack.options, 0); packSels.push(ps);
     var ts = el("select", null, host);
     ts.title = "Wavetable for oscillator " + n;
-    fillSelect(ts, sel.options, 0);
-    tableSels.push({ n: n, sel: ts });
-
-    ts.addEventListener("change", function () {
-      send("wt" + n + "_select", ts.value);
-      shapeFromIndex(n, ts.value);
-    });
+    fillSelect(ts, sel.options, 0); tableSels.push({ n: n, sel: ts });
+    ts.addEventListener("change", function () { schwungRemote.setParam(KP + "wt" + n + "_select", ts.value); shapeFromIndex(n, ts.value); });
     ps.addEventListener("change", function () {
       packSels.forEach(function (o) { o.value = ps.value; });
-      send("wt_pack", ps.value);
-      refreshPickers();                 /* the table lists just changed */
+      schwungRemote.setParam(KP + "wt_pack", ps.value);
+      refreshPickers();
     });
-
-    CTL["wt" + n + "_select"] = { set: function (v) {
-      var i = ts.options.length ? [].findIndex.call(ts.options, function (o) {
-        return o.textContent === v;
-      }) : -1;
-      if (i < 0) { i = parseInt(v, 10); if (isNaN(i)) return; }
-      ts.value = String(i);
-      shapeFromIndex(n, i);          /* the pot moved on the device */
-    } };
+    EXTRA["wt" + n + "_select"] = function (v) {
+      var i = ts.options.length ? [].findIndex.call(ts.options, function (o) { return o.textContent === v; }) : -1;
+      if (i < 0) i = parseInt(v, 10);
+      if (isNaN(i)) return;
+      ts.value = String(i); shapeFromIndex(n, i);
+    };
   });
-
-  CTL.wt_pack = { set: function (v) {
+  EXTRA.wt_pack = function (v) {
     var i = pack.options.indexOf(v);
-    if (i < 0) { i = parseInt(v, 10); if (isNaN(i)) return; }
+    if (i < 0) i = parseInt(v, 10);
+    if (isNaN(i)) return;
     packSels.forEach(function (o) { o.value = String(i); });
-  } };
+  };
   return true;
 }
-
-/* The module republishes on its worker, so the new lists are not ready the
- * instant the pack is committed. It serves is_loading for exactly this. */
 function refreshPickers(tries) {
   tries = tries || 0;
-  schwungRemote.getParam(K + "is_loading").then(function (busy) {
-    if (busy === "1" && tries < 12)
-      return setTimeout(function () { refreshPickers(tries + 1); }, 150);
+  schwungRemote.getParam(KP + "is_loading").then(function (busy) {
+    if (busy === "1" && tries < 12) return setTimeout(function () { refreshPickers(tries + 1); }, 150);
     return schwungRemote.getChainParams().then(function (cp) {
       var pack = findParam(cp, "wt_pack");
-      if (pack && pack.options)
-        packSels.forEach(function (o) {
-          var keep = o.value; fillSelect(o, pack.options, keep);
-        });
+      if (pack && pack.options) packSels.forEach(function (o) { fillSelect(o, pack.options, o.value); });
       tableSels.forEach(function (t) {
         var sel = findParam(cp, "wt" + t.n + "_select");
         if (sel && sel.options) fillSelect(t.sel, sel.options, t.sel.value);
       });
     });
-  }).catch(function () { /* host without these keys: pickers stay as they are */ });
+  }).catch(function () {});
 }
 
-fetch("ui_pages.json").then(function (r) { return r.json(); }).then(function (d) {
-  d.pages.forEach(function (page) {
-    page.slots.forEach(function (s) { if (s) META[s.k] = s; });
+/* ---- preset browser -------------------------------------------------------
+ * The module publishes every bank with its preset names (preset_list) and the one the Move is on
+ * (preset_now, "bank,index"). Loading is the module's own: "bank" switches the bank and plays its
+ * first sound, "preset" is the index inside the bank. A load changes hundreds of values at once and
+ * the host only streams values it is told changed, so after a load the panel asks the host to
+ * resubscribe and reads everything again. */
+var PS = { banks: [], b: 0, i: 0, shown: [], sel: 0, q: "", viewBank: 0 };
+var pbarEl = null, brEl = null, brSearch = null, brBanks = null, brList = null, curEl = null, cntEl = null;
+
+function psFlat() {
+  var n = 0;
+  for (var b = 0; b < PS.b; b++) n += PS.banks[b].p.length;
+  return n + PS.i;
+}
+function psTotal() { return PS.banks.reduce(function (s, b) { return s + b.p.length; }, 0); }
+function psName() {
+  var b = PS.banks[PS.b];
+  return b && b.p[PS.i] !== undefined ? b.p[PS.i] : "";
+}
+
+var reloadTimer = null;
+function reseed() {
+  Object.keys(META).forEach(function (k) {
+    if (META[k].type === "filepath") return;
+    schwungRemote.getParam(KP + k).then(function (v) { if (v !== undefined && v !== null && v !== "") incoming(k, v); }).catch(function () {});
   });
-  build();
+}
+function afterLoad() {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(function () {
+    if (schwungRemote.resubscribe) { try { schwungRemote.resubscribe(); } catch (e) {} }
+    setTimeout(reseed, 700);
+  }, 500);
+}
+function loadPreset(b, i) {
+  if (!PS.banks[b] || PS.banks[b].p[i] === undefined) return;
+  if (b !== PS.b) {
+    send("bank", b);                       /* switches the bank and plays its first sound */
+    PS.b = b; PS.i = 0;
+    if (i !== 0) setTimeout(function () { send("preset", i); }, 150);
+    else send("preset", 0);
+  } else send("preset", i);
+  PS.i = i;
+  renderPbar(); renderBrowser();
+  afterLoad();
+}
+function stepPreset(d) {
+  var tot = psTotal();
+  if (!tot) return;
+  var f = ((psFlat() + d) % tot + tot) % tot;
+  for (var b = 0; b < PS.banks.length; b++) {
+    if (f < PS.banks[b].p.length) { loadPreset(b, f); return; }
+    f -= PS.banks[b].p.length;
+  }
+}
+
+function renderPbar() {
+  if (!pbarEl) return;
+  var have = PS.banks.length > 0;
+  pbarEl.classList.toggle("on", have);
+  if (!have) return;
+  curEl.querySelector(".bk").textContent = PS.banks[PS.b] ? PS.banks[PS.b].n : "";
+  curEl.querySelector(".nm").textContent = psName() || "-";
+  cntEl.textContent = (psFlat() + 1) + " / " + psTotal();
+}
+
+function renderBrowser() {
+  if (!brEl || !brEl.classList.contains("on")) return;
+  var q = PS.q.trim().toLowerCase();
+  brBanks.textContent = "";
+  PS.banks.forEach(function (b, bi) {
+    var d = el("div", bi === PS.viewBank && !q ? "on" : "", brBanks);
+    el("span", null, d, b.n); el("small", null, d, String(b.p.length));
+    d.addEventListener("click", function () { PS.viewBank = bi; PS.q = ""; brSearch.value = ""; PS.sel = 0; renderBrowser(); });
+  });
+  var rows = [];
+  PS.banks.forEach(function (b, bi) {
+    if (!q && bi !== PS.viewBank) return;
+    b.p.forEach(function (n, i) {
+      if (!q || n.toLowerCase().indexOf(q) >= 0 || b.n.toLowerCase().indexOf(q) >= 0) rows.push({ b: bi, i: i, n: n, bank: b.n });
+    });
+  });
+  PS.shown = rows;
+  if (PS.sel >= rows.length) PS.sel = Math.max(0, rows.length - 1);
+  brList.textContent = "";
+  if (!rows.length) { el("div", "empty", brList, "No presets match."); return; }
+  rows.forEach(function (r, k) {
+    var d = el("div", (r.b === PS.b && r.i === PS.i ? "cur " : "") + (k === PS.sel ? "sel" : ""), brList);
+    el("span", null, d, r.n);
+    if (q) el("small", null, d, r.bank);
+    d.addEventListener("click", function () { PS.sel = k; loadPreset(r.b, r.i); });
+  });
+  var s = brList.querySelector(".sel") || brList.querySelector(".cur");
+  if (s && s.scrollIntoView) s.scrollIntoView({ block: "nearest" });
+}
+function openBrowser(on) {
+  if (on === undefined) on = !brEl.classList.contains("on");
+  brEl.classList.toggle("on", on);
+  curEl.classList.toggle("open", on);
+  if (on) {
+    PS.viewBank = PS.b; PS.q = ""; brSearch.value = ""; PS.sel = 0;
+    renderBrowser();
+    var cur = brList.querySelector(".cur");
+    PS.sel = Math.max(0, PS.shown.findIndex(function (r) { return r.b === PS.b && r.i === PS.i; }));
+    renderBrowser();
+    brSearch.focus(); brSearch.select();
+  }
+}
+
+function buildBrowser() {
+  pbarEl = document.getElementById("pbar"); brEl = document.getElementById("browser");
+  var prev = el("button", null, pbarEl, "‹"), next;
+  prev.title = "Previous preset"; prev.addEventListener("click", function () { stepPreset(-1); });
+  curEl = el("div", "cur", pbarEl);
+  el("span", "bk", curEl); el("span", "nm", curEl);
+  curEl.title = "Browse presets";
+  curEl.addEventListener("click", function () { openBrowser(); });
+  next = el("button", null, pbarEl, "›");
+  next.title = "Next preset"; next.addEventListener("click", function () { stepPreset(1); });
+  cntEl = el("span", "cnt", pbarEl);
+
+  var head = el("div", "bhead", brEl);
+  brSearch = el("input", null, head);
+  brSearch.placeholder = "Search every bank…";
+  var x = el("button", "x", head, "✕"); x.title = "Close (Esc)";
+  x.addEventListener("click", function () { openBrowser(false); });
+  brBanks = el("div", "banks", brEl); brList = el("div", "list", brEl);
+  brSearch.addEventListener("input", function () { PS.q = brSearch.value; PS.sel = 0; renderBrowser(); });
+  brSearch.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown") { PS.sel = Math.min(PS.shown.length - 1, PS.sel + 1); renderBrowser(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { PS.sel = Math.max(0, PS.sel - 1); renderBrowser(); e.preventDefault(); }
+    else if (e.key === "Enter") { var r = PS.shown[PS.sel]; if (r) loadPreset(r.b, r.i); e.preventDefault(); }
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") openBrowser(false); });
+  document.addEventListener("pointerdown", function (e) {
+    if (brEl.classList.contains("on") && !brEl.contains(e.target) && !pbarEl.contains(e.target)) openBrowser(false);
+  });
+}
+
+/* chain_params entries the module adds for the host's own pages (pack and table lists, the preset
+ * browser): they are not sound parameters and have their own pickers or none here */
+var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|is_loading|wt_paths)$/;
+
+/* keys the host streams that are not controls */
+var EXTRA = {
+  wt_paths: function (v) { try { var a = JSON.parse(v); if (a && a.length) PATHS = a; } catch (e) {} },
+  wt1_shape: function (v) { ingestShape(1, v); },
+  wt2_shape: function (v) { ingestShape(2, v); },
+  wt3_shape: function (v) { ingestShape(3, v); },
+  preset_list: function (v) {
+    try { var d = JSON.parse(v); if (d && d.b) { PS.banks = d.b; renderPbar(); renderBrowser(); } } catch (e) {}
+  },
+  preset_now: function (v) {
+    var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
+    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); }
+  }
+};
+[1, 2, 3].forEach(function (n) {
+  EXTRA["wt" + n + "_table"] = function (p) { if (p) loadShapeFromFile(n, p); };
+});
+
+/* ------------------------------------------------------------------ start */
+function buildTabs() {
+  var tabs = document.getElementById("tabs"), pages = document.getElementById("pages");
+  var defs = [["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal]];
+  var ps = [], bs = [];
+  defs.forEach(function (d, i) {
+    var b = el("button", i ? null : "on", tabs, d[0]);
+    var p = el("div", "page" + (i ? "" : " on"), pages);
+    d[1](p);
+    ps.push(p); bs.push(b);
+    b.addEventListener("click", function () {
+      ps.forEach(function (x, j) { x.classList.toggle("on", j === i); bs[j].classList.toggle("on", j === i); });
+      try { localStorage.setItem("th_tab", String(i)); } catch (e) {}
+      redrawSoon();
+    });
+  });
+  try {
+    var t = parseInt(localStorage.getItem("th_tab"), 10);
+    if (t > 0 && t < defs.length) bs[t].click();
+  } catch (e) {}
+}
+
+function start(cp) {
+  cp.forEach(function (c) { if (c && c.key) META[c.key] = c; });
+  buildBrowser();
+  buildOsc();
+  buildTabs();
+  buildPickers(cp);
+  document.getElementById("hint").textContent = Object.keys(META).length + " parameters · live both ways";
   drawAll();
-  if (schwungRemote.getChainParams)
-    schwungRemote.getChainParams().then(buildPickers).catch(function () {});
-  fetchShape(1); fetchShape(2); fetchShape(3);
+
   schwungRemote.onParamChange(function (p) {
     for (var key in p) {
-      if (key.indexOf(K) !== 0) continue;
-      var c = CTL[key.substring(K.length)];
-      if (c) c.set(p[key]);
+      if (key.indexOf(KP) !== 0) continue;
+      var k = key.substring(KP.length);
+      if (EXTRA[k]) EXTRA[k](p[key]);
+      else if (META[k] && META[k].type !== "filepath") incoming(k, p[key]);
     }
   });
-});
+  /* seed from the host's cache, in case the first push was missed */
+  Object.keys(META).forEach(function (k) {
+    if (META[k].type === "filepath") return;
+    schwungRemote.getParam(KP + k).then(function (v) { if (v !== undefined && v !== null && v !== "") incoming(k, v); }).catch(function () {});
+  });
+  Object.keys(EXTRA).forEach(function (k) {
+    schwungRemote.getParam(KP + k).then(function (v) { if (v) EXTRA[k](v); }).catch(function () {});
+  });
+}
+
+function fail(msg) {
+  var e = el("div", "err", document.body, msg);
+  document.getElementById("hint").textContent = "not connected";
+}
+
+if (!window.schwungRemote || !schwungRemote.getChainParams) fail("The Schwung remote API is not available on this page.");
+else schwungRemote.getChainParams().then(start).catch(function () { fail("Could not read the module's parameters."); });
 })();
 </script>
 </body>

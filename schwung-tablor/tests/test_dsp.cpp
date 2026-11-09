@@ -18,6 +18,7 @@
 #include "../src/ported/wt_oscillator.h"
 #include "../src/ported/wav.h"
 #include "../src/dsp/sample.h"
+#include "../src/dsp/preset_digest.h"
 
 using namespace tb;
 
@@ -864,6 +865,18 @@ static void testHardSync()
     }
 }
 
+static void testPresetDigest()
+{
+    printf("\n== preset digest (the web panel's browser list) ==\n");
+    const std::string d = tb::presetDigest({ "Factory", "Deep \"House\"", "User" },
+                                           { { "BA - Foo", "CH - Bar" }, { "a\\b", "x\ty" }, {} });
+    const std::string want = "{\"b\":[{\"n\":\"Factory\",\"p\":[\"BA - Foo\",\"CH - Bar\"]},"
+                             "{\"n\":\"Deep \\\"House\\\"\",\"p\":[\"a\\\\b\",\"xy\"]},"
+                             "{\"n\":\"User\",\"p\":[]}]}";
+    CHECK(d == want, "digest is the expected JSON (quotes and backslashes escaped, control characters dropped): %s", d.c_str());
+    CHECK(tb::presetDigest({}, {}) == "{\"b\":[]}", "an empty store is an empty list");
+}
+
 int main()
 {
     testFilter();
@@ -878,6 +891,7 @@ int main()
     testHardSync();
     testSampleSetOutlivesItsEngineShare();
     testSampleVelocityLayers();
+    testPresetDigest();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

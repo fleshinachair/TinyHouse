@@ -521,6 +521,7 @@ FILTER_RES_POT = {            # resonance percentage -> engine resonance pot, by
 # Models fitted one by one against the engine's filter types (calibration/fit_filter_model.py): {model: {"type", "delta": [[cutoff, pots]], "poor", "rms_db"}}
 FILTER_MODELS_FILE = Path(__file__).resolve().parent / "calibration/filter_models.json"
 FILTER_MODELS: dict = json.loads(FILTER_MODELS_FILE.read_text(encoding="utf-8")) if FILTER_MODELS_FILE.exists() else {}
+FLAT_FILTER_DB = 1.5     # a model whose harmonic levels are within this of no filter at all (Serum's own noise is about 1 dB) is left open
 
 
 def filter_model_key(model: str, var) -> str:
@@ -1368,10 +1369,18 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 P[f"{fk}_out"] = d
             for b in (0, 1):
                 P[f"{fk}_bus{b + 1}"] = int(round(127.0 * (_clamp(bus_of.get(slot, [0.0, 0.0])[b], 0.0, 100.0) / 100.0) ** 3))
+    flat_filters = set()                                          # voice filters (by key id) whose model leaves the harmonics' levels alone: left open
     def voice_filter_pots(fl, key_id, prefix, label):
         """The engine pots for one Serum voice filter (cutoff law, model, resonance, drive, key tracking)."""
         idx, exact = FILTER_MAP.get(fl["model"], (None, False))
         fkey = filter_model_key(fl["model"], fl.get("var"))
+        if fkey in FILTER_MODELS and FILTER_MODELS[fkey].get("bypass_rms_db", 99.0) <= FLAT_FILTER_DB:
+            # Diffuser, PZ_SVF and the like: a held saw through the model comes out at the same harmonic levels as with no filter (the fit
+            # script's "filter open" distance is within Serum's own noise), so no engine filter is closer than none; the model's phase / time
+            # effect is not carried and the importer's A/B gate judges whether that matters.
+            flat_filters.add(key_id)
+            appr.append(f"{label} {fl['model']} does not change the harmonics' levels in Serum; the engine's filter is left open")
+            return
         if fkey in FILTER_MODELS:                                # measured against Serum: the engine filter type that matches, however it is named
             fm = FILTER_MODELS[fkey]
             idx, exact = int(fm["type"]), False
@@ -1426,7 +1435,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
 
     # ---- envelopes ----------------------------------------------------------
     P["vca_a"], P["vca_d"], P["vca_s"], P["vca_r"] = pot_env(ph["envs"][0])
-    flt_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 0)]
+    flt_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 0) and 0 not in flat_filters]
     if flt_routes and not bypassed:
         tot = Counter()
         for e, _, a in flt_routes:
@@ -1438,7 +1447,7 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             appr.append("only the strongest of several envelope->cutoff routes kept")
     else:
         P["flt_env"] = 64                     # no filter envelope depth
-    f2_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 1)]
+    f2_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 1) and 1 not in flat_filters]
     f2_me = None
     if (reaches2 or serial or serial2) and f2_routes:
         tot2 = Counter()

@@ -90,6 +90,10 @@ struct tablor_instance {
     };
     std::shared_ptr<const DemoList> demos { std::make_shared<DemoList>() };
     std::atomic<int> demo_pack { 0 }, demo_part { 0 }, demo_on { 0 };
+    /* What a restored state said the slot was playing: the pack and the part by NAME (an index shifts when a song is added or removed), and whether it
+     * was on. Held until the worker has scanned the demo store, then applied (apply_want_demo). */
+    struct WantDemo { std::string pack, part; bool on = false; };
+    std::shared_ptr<const WantDemo> want_demo;
     std::shared_ptr<const DemoList> demoList() const
     { return std::atomic_load(&demos); }
 
@@ -610,6 +614,40 @@ static void load_demo(tablor_instance *inst)
     inst->engine.setDemo(tb::parseDemo(raw.c_str()));
 }
 
+/* A state key's value: ';' is the separator of the state, so it cannot appear in a name. */
+static std::string state_safe(std::string s)
+{
+    std::replace(s.begin(), s.end(), ';', ',');
+    return s;
+}
+
+/* Put the slot back on the pack and part its restored state named, and switch the demo on if it was on. True when the demo list changed
+ * (the part list the Demo Part knob offers follows the pack). WORKER THREAD ONLY. Waits (keeps the request) until the store has been scanned. */
+static bool apply_want_demo(tablor_instance *inst)
+{
+    auto w = std::atomic_load(&inst->want_demo);
+    if (!w) return false;
+    auto dl = inst->demoList();
+    if (dl->packs.empty()) return false;                       /* not scanned yet: scan_demos asks again */
+    std::atomic_store(&inst->want_demo, std::shared_ptr<const tablor_instance::WantDemo>());
+    for (size_t p = 0; p < dl->packs.size(); p++) {
+        if (state_safe(dl->packs[p]) != w->pack) continue;
+        for (int i = 0; i < dl->pack_n[p]; i++) {
+            if (state_safe(dl->names[(size_t) (dl->pack_first[p] + i)]) != w->part) continue;
+            inst->demo_pack = (int) p;
+            inst->demo_part = i;
+            load_demo(inst);
+            if (w->on) {
+                inst->demo_on = 1;
+                inst->engine.setDemoOn(true);
+                demo_start_transport();
+            }
+            return true;
+        }
+    }
+    return false;                                              /* the song is gone: the slot stays as it is, demo off */
+}
+
 /* Every pack folder of the demo store with its .tdm parts in name order; loose files form the pack "Demos". WORKER THREAD ONLY. */
 static void scan_demos(tablor_instance *inst)
 {
@@ -654,6 +692,7 @@ static void scan_demos(tablor_instance *inst)
     inst->demo_pack = p;
     if (!next->packs.empty() && inst->demo_part.load() >= next->pack_n[(size_t) p]) inst->demo_part = 0;
     std::atomic_store(&inst->demos, std::shared_ptr<const tablor_instance::DemoList>(next));
+    apply_want_demo(inst);                                      /* a restored state may be waiting for this list (the caller republishes) */
     load_demo(inst);
 }
 
@@ -1142,6 +1181,14 @@ static void build_state_blob(tablor_instance *inst)
         o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "mac=%s;", inst->mac_str);
     if (inst->macn_str[0])
         o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "macn=%s;", inst->macn_str);
+    {   /* the slot's demo: the song's pack and part by name, and whether it is on (a slot that never used the demo says nothing) */
+        auto dl = inst->demoList();
+        const int dp = inst->demo_pack.load(), dpt = inst->demo_part.load();
+        if (dp >= 0 && dp < (int) dl->packs.size() && dpt >= 0 && dpt < dl->pack_n[(size_t) dp] && (inst->demo_on.load() || dp > 0 || dpt > 0))
+            o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "dmpk=%s;dmpt=%s;dmon=%d;",
+                          state_safe(dl->packs[(size_t) dp]).c_str(),
+                          state_safe(dl->names[(size_t) (dl->pack_first[(size_t) dp] + dpt)]).c_str(), inst->demo_on.load() ? 1 : 0);
+    }
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
         if (tb_params[i].type == TB_PATH) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
@@ -1221,6 +1268,8 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
     inst->engine.setMacroRoutes(nullptr, 0);
     for (int i = 0; i < 8; i++) inst->params()[TB_P_MAC1 + i] = 0.0f;
     char kbuf[64], vbuf[4096];
+    std::string dm_pack, dm_part;                     /* the demo the state names (only a host restore applies it: a preset taken from the store keeps the slot's demo) */
+    bool dm_on = false, dm_seen = false;
     while (*p) {
         const char *eq = strchr(p, '=');
         if (!eq) break;
@@ -1260,6 +1309,13 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
                 p = (*semi) ? semi + 1 : semi;
                 continue;
             }
+            if (!strcmp(kbuf, "dmpk") || !strcmp(kbuf, "dmpt") || !strcmp(kbuf, "dmon")) {
+                if (!strcmp(kbuf, "dmpk")) { dm_pack = vbuf; dm_seen = true; }
+                else if (!strcmp(kbuf, "dmpt")) dm_part = vbuf;
+                else dm_on = atoi(vbuf) != 0;
+                p = (*semi) ? semi + 1 : semi;
+                continue;
+            }
             const bool onBus = kbuf[0] == 'b' && (kbuf[1] == '1' || kbuf[1] == '2') && kbuf[2] == '.';
             int idx = param_index(onBus ? kbuf + 3 : kbuf);
             if (idx >= 0 && onBus) {
@@ -1277,6 +1333,12 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
     }
     inst->engine.macroSync();                         /* the macros sit where the state says; their routes move nothing until one is turned */
     republish_macro_names(inst);
+    if (host_restore && dm_seen) {                    /* back onto the song the slot was playing, once the demo store has been scanned */
+        auto w = std::make_shared<tablor_instance::WantDemo>();
+        w->pack = dm_pack; w->part = dm_part; w->on = dm_on;
+        std::atomic_store(&inst->want_demo, std::shared_ptr<const tablor_instance::WantDemo>(w));
+        inst->loader.post([inst] { if (inst->loader.stopping()) return; if (apply_want_demo(inst)) tb_publish_selection(inst); });
+    }
 }
 
 /* ------------------------------------------------------------------ */

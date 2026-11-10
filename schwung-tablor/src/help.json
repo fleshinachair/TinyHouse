@@ -237,7 +237,12 @@
         "and starts with it",
         "and joins at the",
         "next bar. Parts of",
-        "a song stay together."
+        "a song stay together.",
+        "",
+        "The slot remembers",
+        "its song and whether",
+        "Demo is on, and",
+        "comes back to them."
       ]
     },
     {

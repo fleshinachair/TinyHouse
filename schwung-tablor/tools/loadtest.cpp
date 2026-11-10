@@ -178,6 +178,36 @@ int main(int argc, char **argv)
         CHECK(unitOf(1) == "" && unitOf(3) == "", "a preset without macros clears the units (\"%s\"/\"%s\")", unitOf(1).c_str(), unitOf(3).c_str());
     }
 
+    /* The slot remembers its demo: pack and part by name, restored from the state once the demo store has been scanned. Two parts of a throwaway pack
+     * are written to the demo store, the slot is restored onto the second, and the state it then writes must name it again. */
+    {
+        const char *root = "/data/UserData/schwung/midi/tinyhouse", *dir = "/data/UserData/schwung/midi/tinyhouse/ZZ LoadTest";
+        mkdir("/data/UserData/schwung/midi", 0755); mkdir(root, 0755); mkdir(dir, 0755);
+        for (const char *f : { "/data/UserData/schwung/midi/tinyhouse/ZZ LoadTest/A Part.tdm", "/data/UserData/schwung/midi/tinyhouse/ZZ LoadTest/B Part.tdm" })
+            if (FILE *fp = fopen(f, "w")) { fputs("tdm1\n", fp); fclose(fp); }
+        api->set_param(inst, "rescan", "1");
+        settle(api, inst);
+        struct timespec ts = { 0, 5 * 1000000 };
+        for (int i = 0; i < 400; i++) { char lb[8] = {}; api->get_param(inst, "is_loading", lb, sizeof lb); if (lb[0] == '0') break; nanosleep(&ts, nullptr); }
+        api->set_param(inst, "state", "TBLR2;dmpk=ZZ LoadTest;dmpt=B Part;dmon=0;");
+        settle(api, inst);
+        for (int i = 0; i < 400; i++) { char lb[8] = {}; api->get_param(inst, "is_loading", lb, sizeof lb); if (lb[0] == '0') break; nanosleep(&ts, nullptr); }
+        char dn[64] = {};
+        api->get_param(inst, "demo_part", dn, sizeof dn);
+        CHECK(!strcmp(dn, "1"), "a restored state puts the demo back on its part (demo_part=\"%s\")", dn);
+        api->get_param(inst, "state", big, sizeof big);
+        CHECK(strstr(big, "dmpk=ZZ LoadTest;dmpt=B Part;dmon=0;") != nullptr, "and the state it writes names the pack and the part again");
+        api->set_param(inst, "state", "TBLR2;");                /* a restore without a demo leaves the slot's demo where it was */
+        settle(api, inst);
+        api->get_param(inst, "demo_part", dn, sizeof dn);
+        CHECK(!strcmp(dn, "1"), "a state without a demo does not reset it (demo_part=\"%s\")", dn);
+        unlink("/data/UserData/schwung/midi/tinyhouse/ZZ LoadTest/A Part.tdm");
+        unlink("/data/UserData/schwung/midi/tinyhouse/ZZ LoadTest/B Part.tdm");
+        rmdir(dir);
+        api->set_param(inst, "rescan", "1");
+        settle(api, inst);
+    }
+
     /* ---- the worker must not be born on the audio thread's scheduling ----
      * Every entry point runs on the SPI callback at SCHED_FIFO 90, and POSIX
      * defaults to PTHREAD_INHERIT_SCHED, so a thread spawned from one takes

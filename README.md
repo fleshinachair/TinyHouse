@@ -115,7 +115,7 @@ preset through the real Serum 2 plugin** and measures it, so it can do three thi
 - **Check the result**: it compares octave-band levels against the Serum render and leaves out a preset that ends up too far from it, with the reason in a
   `skipped_<bank>.md` report. It is stricter than the browser: a preset that uses something TinyHouse cannot carry is dropped, not imported with a part missing.
 
-You need Windows, the full Serum 2 plugin (VST3; it goes silent after about 20 minutes of audio, which the script works around by reloading it),
+You need Windows, the Serum 2 plugin (VST3),
 Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine).
 
 ```

@@ -90,8 +90,7 @@ a global constant measured with a controlled Serum probe patch, and a per-preset
 new pack is not a fix. The workflow is: find the rule with a probe in `calibration/probe_*.py`, put it in the converter or engine, check it with the stage
 audit, then look at the chain report across all presets (judge that by many presets, not one: it is noisy).
 
-**You need** Windows, Serum 2 (the full plugin, for the reference renders; it goes silent after about 1200 s of audio, which the importer works around by
-reloading), Python with the packages in `requirements.txt` (`pip install -r requirements.txt`), a zig compiler for the
+**You need** Windows, Serum 2 (the plugin, for the reference renders), Python with the packages in `requirements.txt` (`pip install -r requirements.txt`), a zig compiler for the
 ARM build, and an Ableton Move running Schwung. Serum's location is found by `serum_paths.py`: it looks in `~/Documents/Xfer/Serum 2 Presets` (and the
 OneDrive-redirected equivalent). If yours is elsewhere, set the `SERUM_ROOT` environment variable to that folder, and `SERUM_VST` to the plugin if it is
 not at `C:\Program Files\Common Files\VST3\Serum2.vst3`.

@@ -15,11 +15,13 @@ const check = (cond, what) => { checks++; if (!cond) { failures++; console.log("
 const W = 32, H = 15;
 function mockCtx() {
     const px = new Uint8Array(W * H);
-    let outOfBounds = 0;
+    let outOfBounds = 0, calls = 0;
     return {
         width: W, height: H, px,
+        get calls() { return calls; },
         get outOfBounds() { return outOfBounds; },
         fillRect(x, y, w, h, c) {
+            calls++;
             if (x < 0 || y < 0 || x + w > W || y + h > H) outOfBounds++;
             for (let j = Math.max(0, y); j < Math.min(H, y + h); j++) for (let i = Math.max(0, x); i < Math.min(W, x + w); i++) px[j * W + i] = c ? 1 : 0;
         },
@@ -33,19 +35,19 @@ for (let i = 1; i <= 8; i++) check(!!kinds["custom:tinyhouse_mac" + i] && kinds[
 const run = (i, values) => { const c = mockCtx(); kinds["custom:tinyhouse_mac" + i].draw(c, { values }); return c; };
 
 const names = "Cutoff||More Delay|||||";
-// names not read yet: a live dial; a used macro: a live dial; an unused one: the grey ring without a pointer
+// names not read yet or a used macro: a live dial; an unused one: an empty slot (a single dash, no ring, no pointer)
 const live0 = run(1, { mac1: 0 }), live127 = run(1, { macro_names: names, mac1: 127 }), live64 = run(1, { macro_names: names, mac1: 64 });
 const grey = run(2, { macro_names: names, mac2: 64 });
 check(lit(live0) > 20 && lit(live127) > 20, "a live dial draws a ring and a pointer");
-check(lit(grey) > 0 && lit(grey) < lit(live64) - 4, "an unused macro is a thinner, grey ring (" + lit(grey) + " vs " + lit(live64) + " pixels)");
-let greyAdj = 0;
-for (let y = 0; y < H; y++) for (let x = 0; x < W - 1; x++) if (grey.px[y * W + x] && grey.px[y * W + x + 1]) greyAdj++;
-check(greyAdj === 0, "grey ring: no two lit pixels side by side (every other pixel)");
+check(lit(grey) === 5 && grey.calls === 1, "an unused macro is one dash (" + lit(grey) + " pixels in " + grey.calls + " call)");
+// the cost: the host turns every primitive into a bridge call and a knob turn redraws the page, so a dial must stay cheap
+for (const c of [live0, live127, live64]) check(c.calls <= 20, "a live dial costs " + c.calls + " draw calls (<= 20)");
 // the pointer follows the value: 0 and 127 and 64 point to different places
 const same = (a, b) => a.px.every((v, i) => v === b.px[i]);
 check(!same(live0, live127) && !same(live127, live64) && !same(live0, live64), "the pointer follows the value");
 // the dial sits centred in the cell and stays inside it
 check(live64.px[7 * W + 16] === 1, "the pointer starts at the centre of the cell");
+check(grey.px[7 * W + 16] === 1 && grey.px[7 * W + 14] === 1 && grey.px[7 * W + 18] === 1, "the dash is centred in the cell");
 for (const c of [live0, live127, live64, grey]) check(c.outOfBounds === 0, "nothing drawn outside the frame");
 // an unused macro's value is irrelevant
 check(same(run(2, { macro_names: names, mac2: 0 }), run(2, { macro_names: names, mac2: 127 })), "unused: value does not matter");

@@ -2266,7 +2266,7 @@ function buildDemo(page) {
   var u = DM.ui = {};
   var g = el("div", "grid g2", page);
   var card = panel("Demo", g).body;
-  el("div", "demo-note", card, "Play a part of an uploaded song on this slot. Put bass on one slot and a lead on another and switch them on to hear the whole track. Switching on also starts the Move's transport (Play), so the clips in the set play with it; the part follows the transport, stopping and starting with it.");
+  el("div", "demo-note", card, "Play a part of an uploaded song on this slot. Put bass on one slot and a lead on another and switch them on to hear the whole track. Switching on does not start the Move's transport: the part is ready and joins at the next bar when you press Play, then follows the transport, stopping and starting with it.");
   var row = el("div", "demo-row", card);
   u.on = el("button", "demo-on", row, "Demo off");
   u.on.addEventListener("click", function () { DM.on = !DM.on; demoSend("demo_on", DM.on ? "On" : "Off"); demoRender(); });

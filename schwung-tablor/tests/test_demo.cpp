@@ -162,13 +162,24 @@ int main()
         t1.setDemoOn(false); t2.setDemoOn(false);
         for (int i = 0; i < 20; i++) step(true);
 
-        /* a host that reports a transport which never runs: after two seconds the demo plays on its own clock */
+        /* a host that reports a transport which is stopped: switching the demo on does not start it, and the demo does not play on a clock of its own however long it waits;
+         * it is ready, and joins at the next bar once the transport runs */
         Engine f;
         f.setHostBpm((float) bpm); f.setDemo(part); f.setDemoOn(true);
         std::vector<int16_t> of(256);
         bool played = false;
         for (int i = 0; i < 345 * 8; i++) { f.setHostBeat(-1.0, true); f.renderBlock(of.data(), 128); gWall += 128.0 / 44100.0; if (f.demoPlaying()) { played = true; break; } }
-        CHECK(played, "no transport ever appears: the demo falls back to its own clock");
+        CHECK(!played, "transport stopped: the demo stays ready for as long as it takes, and does not play on its own clock");
+        double fb = 0.0;
+        for (int i = 0; i < 345 * 5 && !f.demoPlaying(); i++) { f.setHostBeat(fb, true); f.renderBlock(of.data(), 128); fb += 128.0 / 44100.0 * bpm / 60.0; gWall += 128.0 / 44100.0; }
+        CHECK(f.demoPlaying(), "and once the transport runs it joins");
+
+        /* a host that reports no transport at all: the demo plays on the song clock of its own */
+        Engine g;
+        g.setHostBpm((float) bpm); g.setDemo(part); g.setDemoOn(true);
+        played = false;
+        for (int i = 0; i < 345 * 8; i++) { g.setHostBeat(-1.0, false); g.renderBlock(of.data(), 128); gWall += 128.0 / 44100.0; if (g.demoPlaying()) { played = true; break; } }
+        CHECK(played, "a host with no transport at all: the demo plays on its own clock");
     }
 
     printf(g_fail ? "FAILED %d\n" : "all passed\n", g_fail);

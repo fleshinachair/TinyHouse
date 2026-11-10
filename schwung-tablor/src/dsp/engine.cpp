@@ -428,11 +428,11 @@ void Engine::demoStop(bool noteOffs)
 
 /* Called every block: starts (on the next bar) or stops the player to follow the switch and the part.
  * The Move's transport is the clock when the host reports one: the part's position is the transport's beat (mod the part's length), so it plays in step with the set's clips,
- * starts when the transport starts, stops when it stops and takes up again when it restarts. If no transport shows up within kTransportWait seconds of switching on (a host that
- * reports none, or one that is not running its clock), the demo runs on the song clock of its own, as before. */
+ * starts when the transport starts, stops when it stops and takes up again when it restarts. Switching the demo on does not start the transport: it waits, ready, for Play (at
+ * the next bar after it). Only a host that reports no transport at all gets the song clock of its own. */
 void Engine::demoSync()
 {
-    constexpr double kTransportWait = 2.0, kBar = 4 * 96;
+    constexpr double kBar = 4 * 96;
     const int e = demoEpoch.load();
     if (e != demoEpochSeen) { demoEpochSeen = e; demoStop(true); }
     auto d = std::atomic_load(&demoSp);
@@ -456,9 +456,7 @@ void Engine::demoSync()
     }
     bool useTr = tr;
     if (!tr) {
-        const double now = demoWallNow();
-        if (demoWaitT < 0.0) demoWaitT = now;
-        if (hostBeatKnown && (demoTrSeen || now - demoWaitT < kTransportWait)) return;   /* wait for the transport to run */
+        if (hostBeatKnown) return;                                            /* the transport is the clock: wait for Play, however long it takes */
     }
     const double t = useTr ? hostBeat * 96.0 : demoSongTicks(hostBpm);
     const long bar = (long) std::floor(t / kBar);

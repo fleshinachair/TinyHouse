@@ -579,22 +579,6 @@ static void scan_store_presets(tablor_instance *inst)
 }
 
 /* ---- the demo parts ------------------------------------------------------------------- */
-/* Switching the demo on starts the Move's transport (its Play button, CC 85), so the set's clips play with the part. Only when the host says the transport is stopped, and not
- * again within a few seconds of the last press (slots are switched on one after another, and a second press would stop what the first started: Play toggles). */
-static void demo_start_transport()
-{
-    if (!g_host || !g_host->midi_inject_to_move || !g_host->get_beat_position) return;
-    if (g_host->get_beat_position() >= 0.0) return;                   /* already running */
-    static std::atomic<long long> last { 0 };
-    const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    long long prev = last.load();
-    if (prev && now - prev < 3000) return;
-    if (!last.compare_exchange_strong(prev, now)) return;
-    const uint8_t press[4] = { 0x0B, 0xB0, 85, 127 }, release[4] = { 0x0B, 0xB0, 85, 0 };
-    g_host->midi_inject_to_move(press, 4);
-    g_host->midi_inject_to_move(release, 4);
-}
-
 static constexpr const char *kDemoDir = "/data/UserData/schwung/midi/" TB_MODULE_ID;
 
 /* The part the pack and part indexes name, read and handed to the engine (null when there is none). WORKER THREAD ONLY. */
@@ -637,10 +621,9 @@ static bool apply_want_demo(tablor_instance *inst)
             inst->demo_pack = (int) p;
             inst->demo_part = i;
             load_demo(inst);
-            if (w->on) {
+            if (w->on) {                                              /* on again, and ready: it plays when the transport does (it never starts it) */
                 inst->demo_on = 1;
                 inst->engine.setDemoOn(true);
-                demo_start_transport();
             }
             return true;
         }
@@ -1399,8 +1382,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (!strcmp(k, "demo_on")) {
         const bool on = !strcasecmp(val, "on") || atoi(val) == 1;
         inst->demo_on = on ? 1 : 0;
-        inst->engine.setDemoOn(on);
-        if (on) demo_start_transport();
+        inst->engine.setDemoOn(on);                                 /* ready: the part joins at the next bar once the transport runs (it does not start it) */
         return;
     }
     if (!strcmp(k, "demo_pack")) {

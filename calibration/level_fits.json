@@ -560,17 +560,6 @@
   "limiter_loss_db": 0.13436515786034064,
   "kept": true
  },
- "Lead - Rollin": {
-  "sig": "5e8f0d78afa50075d1ceceba7a4e481d",
-  "volume": 35,
-  "start_volume": 40,
-  "start_rms_db": -11.023284512806327,
-  "rms_db": -13.15574656665046,
-  "serum_rms_db": -13.456447525521684,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.11316990624704104,
-  "kept": true
- },
  "Lead - Space & Time": {
   "sig": "d3db094d95e538d163d49e45bebaae94",
   "volume": 42,
@@ -635,17 +624,6 @@
   "serum_rms_db": -9.704887852600248,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.22377058104652292,
-  "kept": true
- },
- "Lead - Other Side": {
-  "sig": "92ff82d473b2fe46eee1618827f05cc7",
-  "volume": 51,
-  "start_volume": 49,
-  "start_rms_db": -13.649369856242346,
-  "rms_db": -13.014039251772916,
-  "serum_rms_db": -13.156404214192223,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.2135321813169444,
   "kept": true
  },
  "Keys - Lynnic": {
@@ -767,6 +745,28 @@
   "serum_rms_db": -15.93647169461857,
   "shortfall_db": 0.0,
   "limiter_loss_db": 0.020268636694339648,
+  "kept": true
+ },
+ "Lead - Other Side": {
+  "sig": "d09cc6b43661935e491c0d1234dd2946",
+  "volume": 51,
+  "start_volume": 49,
+  "start_rms_db": -13.645296080824568,
+  "rms_db": -13.012778250486733,
+  "serum_rms_db": -13.156404214192223,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.21336459652660977,
+  "kept": true
+ },
+ "Lead - Rollin": {
+  "sig": "fcfb31c8c7a189cdf2e0264f04ea20b7",
+  "volume": 35,
+  "start_volume": 40,
+  "start_rms_db": -10.690453161377924,
+  "rms_db": -13.51170275638103,
+  "serum_rms_db": -13.456447525521684,
+  "shortfall_db": 0.05525523085934658,
+  "limiter_loss_db": 0.14044101485361082,
   "kept": true
  }
 }

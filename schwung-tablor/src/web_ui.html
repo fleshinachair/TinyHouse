@@ -1214,6 +1214,8 @@ function buildOsc() {
     row([[pre + "uni", "Unison"], [pre + "detune", "Detune"], [pre + "spread", "Spread"], [pre + "sync", "Sync"], [pre + "bend", "Bend"], [pre + "formant", "Formant"]], p.body);
     sub(p.body, "Warp shaper");
     row([[pre + "wshape", "Shaper"], [pre + "sgain", "Gain"], [pre + "sout", "Out"]], p.body);
+    sub(p.body, "Warp (filter, FM / PD / RM from the Sub)");
+    row([[pre + "xw", "Warp"], [pre + "xa", "Amount"]], p.body);
     sub(p.body, "Routing");
     row([[pre + "post", "Route"], [pre + "bus1", "Bus 1"], [pre + "bus2", "Bus 2"]], p.body);
     placed[pre + "table"] = 1;

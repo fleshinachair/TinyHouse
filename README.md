@@ -87,14 +87,14 @@ On top of that there are **two FX buses**, each a full copy of the rack. Oscilla
 **Carried across**
 - Serum 2 presets and packs (`.SerumPreset`, `.SerumPack`).
 - Three wavetable oscillators with unison to 16 voices, a sub and a noise oscillator; Serum's wavetable position, stepped or interpolated.
-- Warps: bend, PWM, sync, even/odd.
+- Warps: bend, PWM, sync, even/odd, the filter (low-pass and high-pass) warps, and FM, phase-distortion and ring-mod warps driven by the Sub.
 - Sample and multisample oscillators (from your Samples folders).
 - Two filters, in parallel or in series: the common ladder, high-pass and low-pass models.
 - Envelopes, four LFOs, and the routes from macros, velocity, note number, mod wheel and random sources.
 - The whole effects chain above, and the two FX buses.
 
 **Not carried yet**
-- FM, ring-mod and phase-distortion warps, the filter warps, DLM, spectral tables, Sync Var.
+- FM, ring-mod and phase-distortion warps driven by another oscillator or the noise (the Sub-driven ones are carried), DLM, spectral tables, Sync Var.
 - Formant, comb and Diffuser filter models, and filters with a Var knob.
 - The granular oscillator (left silent).
 - A second distortion, compressor or delay; band-split (Split) branches; the Bode frequency shifter; a filter placed before the distortion; sends moved by an

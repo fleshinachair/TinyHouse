@@ -553,6 +553,61 @@ static double stackDb(VoicedWTOscillator &a, VoicedWTOscillator *silent, float n
 
 /* Serum's Dist* oscillator warps: a static shaper on every stream's sample. A sine through it gains odd harmonics, a pre-gain of 0.02 with an output gain of 50 is transparent,
  * and a hard clip at high gain squares the wave off at the output gain. */
+/* Serum's Sub-driven FM / PD / RM warps and its filter warps against what Serum measured (calibration/probe_warp_fm.py, probe_filterwarp.py): a sine oscillator at
+ * note 48, the Sub a sine a fifth above it, read as the carrier and its first sidebands re the unwarped carrier. */
+static void testXwarp()
+{
+    printf("== oscillator FM / PD / RM / filter warps ==\n");
+    Wavetable wt;
+    buildSineTable(wt);
+    const double sr = 44100.0, f0 = 130.8128, fm = f0 * std::pow(2.0, 7.0 / 12.0);
+    auto render = [&](float note, int xw, float a, std::vector<float> &out) {
+        VoicedWTOscillator o(kMaxUnison);
+        o.setSampleRate(sr); o.setWavetable(&wt); o.noteOn(0.0f);
+        VoicedWTParams vp; vp.voices = 1; vp.xwarp = xw; vp.xamount = a;
+        out.clear();
+        double ph = 0.0;
+        for (int blk = 0; blk < 44100 / 128; blk++) {
+            float l[128] = {}, r[128] = {}, sub[128];
+            for (int i = 0; i < 128; i++) { sub[i] = (float) std::sin(6.283185307179586 * ph); ph += fm / sr; }
+            o.processAdding(note, vp, l, r, 128, sub);
+            if (blk * 128 > 8192) out.insert(out.end(), l, l + 128);
+        }
+    };
+    auto amp = [&](const std::vector<float> &x, double hz) {
+        double re = 0, im = 0;
+        for (size_t i = 0; i < x.size(); i++) { const double ph = 6.283185307179586 * hz * (double) i / sr; const double w = 0.5 - 0.5 * std::cos(6.283185307179586 * (double) i / (double) x.size()); re += w * x[i] * std::cos(ph); im += w * x[i] * std::sin(ph); }
+        return std::sqrt(re * re + im * im) * 4.0 / (double) x.size();
+    };
+    std::vector<float> ref, x;
+    render(48.0f, 0, 0.0f, ref);
+    const double a0 = amp(ref, f0);
+    auto line = [&](double hz) { return amp(x, hz) / a0; };
+    struct Case { const char *name; int xw; float a; double c, p1, p2; };
+    /* Serum's numbers (carrier, fc + fm, fc + 2 fm), each re the unwarped carrier */
+    const Case cases[] = {
+        { "FM 0.20", 3, 0.20f, 0.944, 0.230, 0.028 }, { "FM 0.30", 3, 0.30f, 0.001, 0.517, 0.432 },
+        { "PD 0.40", 4, 0.40f, 0.828, 0.386, 0.085 }, { "PD 0.50", 4, 0.50f, 0.183, 0.569, 0.369 },
+        { "RM 0.50", 5, 0.50f, 0.500, 0.329, 0.000 }, { "RM 1.00", 5, 1.00f, 0.000, 0.657, 0.000 },
+    };
+    for (const Case &c : cases) {
+        render(48.0f, c.xw, c.a, x);
+        const double lc = line(f0), l1 = line(f0 + fm), l2 = line(f0 + 2 * fm);
+        CHECK(std::fabs(lc - c.c) < 0.06 && std::fabs(l1 - c.p1) < 0.05 && std::fabs(l2 - c.p2) < 0.05,
+              "%s: carrier %.3f (Serum %.3f), +fm %.3f (%.3f), +2fm %.3f (%.3f)", c.name, lc, c.c, l1, c.p1, l2, c.p2);
+    }
+    /* filter warps: a first-order filter at an absolute corner (amount 0.4 = 663 Hz): a sine at 1046 Hz passes at 1/sqrt(1 + (f/c)^2) low, the complement high */
+    {
+        std::vector<float> lo, hi, dry;
+        render(84.0f, 0, 0.0f, dry); render(84.0f, 1, 0.4f, lo); render(84.0f, 2, 0.4f, hi);
+        const double f = 1046.502, gl = amp(lo, f) / amp(dry, f), gh = amp(hi, f) / amp(dry, f), c = 663.0;
+        const double wl = 1.0 / std::sqrt(1.0 + (f / c) * (f / c)), wh = (f / c) * wl;
+        CHECK(std::fabs(gl - wl) < 0.04 && std::fabs(gh - wh) < 0.04, "filter warp at 0.4: low %.3f (first order %.3f), high %.3f (%.3f)", gl, wl, gh, wh);
+        render(84.0f, 1, 1.0f, lo);
+        CHECK(std::fabs(amp(lo, f) / amp(dry, f) - 1.0) < 0.03, "low-pass warp at 1.0 is open (%.3f)", amp(lo, f) / amp(dry, f));
+    }
+}
+
 static void testWarpShaper()
 {
     printf("== oscillator warp shaper ==\n");
@@ -888,6 +943,7 @@ int main()
     testAnalogTables();
     testUnisonKeepsTheBass();
     testWarpShaper();
+    testXwarp();
     testHardSync();
     testSampleSetOutlivesItsEngineShare();
     testSampleVelocityLayers();

@@ -322,11 +322,27 @@ public:
         };
         static const int kOscPost[kOscs] = { TB_P_WT1_POST, TB_P_WT2_POST, TB_P_WT3_POST };
         static const int kOscBal[kOscs] = { TB_P_WT1_BAL, TB_P_WT2_BAL, TB_P_WT3_BAL };
+        /* The FM / PD / RM warps take the Sub as their modulator, at unit level whatever its own level (even silent). It is rendered once here, and the
+         * audible Sub, if any, is this same signal scaled, so the two stay in step. */
+        float subSig[kBlock];
+        bool subSigOn = false;
+        for (int o = 0; o < kOscs; o++)
+            subSigOn |= oscGain[o] > 0.0f && vp[o].xwarp >= 3 && vp[o].xamount > 0.0f;
+        if (subSigOn) {
+            float unusedR[kBlock] = {};
+            for (int i = 0; i < n; i++) subSig[i] = 0.0f;
+            StereoOscillator::Params unit = subParams;
+            unit.leftGain = 1.0f; unit.rightGain = 0.0f;
+            sub.processAdding(subNote, unit, subSig, unusedR, n);
+        }
         for (int o = 0; o < kOscs; o++)
             if (oscGain[o] > 0.0f)
-                addSource(P[kOscPost[o]], kOscBal[o], TB_P_WT1_BUS1 + 2 * o, [&](float *l, float *r) { osc[o].processAdding(oscNote[o], vp[o], l, r, n); });
+                addSource(P[kOscPost[o]], kOscBal[o], TB_P_WT1_BUS1 + 2 * o, [&](float *l, float *r) { osc[o].processAdding(oscNote[o], vp[o], l, r, n, subSigOn ? subSig : nullptr); });
         if (subParams.leftGain + subParams.rightGain > 0.0f)
-            addSource(P[TB_P_SUB_POST], TB_P_SUB_BAL, TB_P_SUB_BUS1, [&](float *l, float *r) { sub.processAdding(subNote, subParams, l, r, n); });
+            addSource(P[TB_P_SUB_POST], TB_P_SUB_BAL, TB_P_SUB_BUS1, [&](float *l, float *r) {
+                if (!subSigOn) { sub.processAdding(subNote, subParams, l, r, n); return; }
+                for (int i = 0; i < n; i++) { l[i] += subSig[i] * subParams.leftGain; r[i] += subSig[i] * subParams.rightGain; }
+            });
         if (noiseParams.leftGain + noiseParams.rightGain > 0.0f)
             addSource(P[TB_P_NOISE_POST], TB_P_NOISE_BAL, TB_P_NOISE_BUS1, [&](float *l, float *r) {
                 if (noiseHpHz <= 0.0f && noiseLpHz <= 0.0f) { noise.processAdding(60.0f, noiseParams, l, r, n); return; }
@@ -570,19 +586,19 @@ private:
         static const struct OscKeys {
             int pos, level, tune, uni, det, spread, pan, sync, bend, form;
             int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync;
-            int shape, sgain, sout;
+            int shape, sgain, sout, xw, xa;
         } kOsc[kOscs] = {
             { TB_P_WT1_POS, TB_P_WT1_LEVEL, TB_P_WT1_TUNE, TB_P_WT1_UNI, TB_P_WT1_DETUNE,
               TB_P_WT1_SPREAD, TB_P_WT1_PAN, TB_P_WT1_SYNC, TB_P_WT1_BEND, TB_P_WT1_FORMANT,
               MD_WT1_POS, MD_WT1_LEVEL, MD_WT1_TUNE, MD_WT1_BEND, MD_WT1_FORMANT, MD_WT1_PAN,
-              MD_WT1_SYNC, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT },
+              MD_WT1_SYNC, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA },
             { TB_P_WT2_POS, TB_P_WT2_LEVEL, TB_P_WT2_TUNE, TB_P_WT2_UNI, TB_P_WT2_DETUNE,
               TB_P_WT2_SPREAD, TB_P_WT2_PAN, TB_P_WT2_SYNC, TB_P_WT2_BEND, TB_P_WT2_FORMANT,
               MD_WT2_POS, MD_WT2_LEVEL, MD_WT2_TUNE, MD_WT2_BEND, MD_WT2_FORMANT, MD_WT2_PAN,
-              MD_WT2_SYNC, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT },
+              MD_WT2_SYNC, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA },
             { TB_P_WT3_POS, TB_P_WT3_LEVEL, TB_P_WT3_TUNE, TB_P_WT3_UNI, TB_P_WT3_DETUNE,
               TB_P_WT3_SPREAD, TB_P_WT3_PAN, TB_P_WT3_SYNC, -1, -1,
-              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT },
+              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA },
         };
 
         int unison[kOscs];
@@ -610,6 +626,8 @@ private:
             v.shape = std::clamp((int) P[k.shape], 0, 4);
             v.shapeGain = 0.02f * std::pow(15000.0f, P[k.sgain] / 127.0f);
             v.shapeOut = 0.5f * std::pow(120.0f, P[k.sout] / 127.0f);
+            v.xwarp = std::clamp((int) P[k.xw], 0, 5);                   /* Serum's filter / FM / PD / RM warp (wt_oscillator.h), the amount in thousandths */
+            v.xamount = std::clamp(P[k.xa] * 0.001f, 0.0f, 1.0f);
             oscGain[o] = v.gain;
 
             /* An oscillator counts from its pot and its routing, not its live

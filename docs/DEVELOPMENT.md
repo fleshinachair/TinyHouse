@@ -40,7 +40,7 @@ built on wavetables.
 **Oscillators and voice.**
 - Three wavetable oscillators with unison up to 16 voices, plus a sub and a noise oscillator (white, pink, brown and Serum's colour filters).
 - Wavetable position is stepped or interpolated per table, as Serum does it (the WAV `clm ` chunk).
-- Warps: bend, PWM, sync and even/odd. Not carried: FM, RM and PD warps, the filter warps, DLM, spectral tables, Sync Var.
+- Warps: bend, PWM, sync, even/odd, the filter warps and the Sub-driven FM, RM and PD warps. Not carried: FM, RM and PD warps driven by another oscillator or the noise, DLM, spectral tables, Sync Var.
 - Sample and multisample oscillators, from SFZ or audio, as `.tbs` sample sets (`sample_export.py`). Warps, unison and their own release are not modelled.
 - Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched; formant, comb and Diffuser models are not, nor filters with a Var knob.
 - Envelopes, 4 LFOs, and the modulation routes of macros, velocity, note number, mod wheel and random sources. Macros, velocity and note are folded

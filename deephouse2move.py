@@ -676,6 +676,9 @@ BEND_WARPS = {"kBendPos": +1, "kBendPosNeg": +1, "kBendNeg": -1, "kPD_OSC": +1, 
 SYNC_POT = [(0.0, 0.0), (0.15, 0.0), (0.2, 6.0), (0.3, 20.0), (0.4, 44.0), (0.5, 64.0), (0.6, 88.0), (0.7, 108.0), (0.8, 124.0), (1.0, 127.0)]
 PWM_BEND_POT = [(0.0, 64.0), (0.2, 90.0), (0.4, 104.0), (0.6, 122.0), (0.8, 127.0), (1.0, 127.0)]
 WARP_NOISE_FLOOR = 0.02    # a warp mode with ~0 amount is not audible
+# Serum's Filter LP / HP warps and its FM / PD / RM warps from the Sub, which the engine carries as one more warp per oscillator (wtN_xw, wtN_xa = Serum's amount in
+# thousandths; the laws are in wt_oscillator.h: calibration/probe_filterwarp.py, probe_warp_fm.py). One per oscillator: a second one stays unsupported.
+XWARP_MODES = {"kFilterLPF": 1, "kFilterHPF": 2, "kFM_SUB": 3, "kPD_SUB": 4, "kRM_SUB": 5}
 WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves.json"
 
 
@@ -1434,6 +1437,9 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             elif w["mode"] in WARP_SHAPERS() and not P.get(f"{k}_shape"):
                 P.update(warp_shaper_pots(k, w["mode"], _clamp(w["amount"], 0, 1)))
                 appr.append(f"{k} warp {w['mode'][1:]} carried as a static waveshaper (fitted to Serum's harmonics, a few dB)")
+            elif w["mode"] in XWARP_MODES and not P.get(f"{k}_xw"):
+                P[f"{k}_xw"] = XWARP_MODES[w["mode"]]
+                P[f"{k}_xa"] = int(round(_clamp(w["amount"], 0, 1) * 1000))
             elif w["mode"] == "kSync":
                 P[f"{k}_sync"] = round(interp(SYNC_POT, _clamp(w["amount"], 0, 1)))
             elif w["mode"] in BEND_WARPS and n == 3:
@@ -1868,9 +1874,17 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
     return notes
 
 
+# The Filter FX stage's cutoff against Serum's, measured model by model (calibration/probe_fxf_static.py, merged by fit_fxf_cutoff.py): the engine model whose type stands in
+# (Serum's default type is a 6 dB/octave low-pass, closer to an L12 than to the MgL24 it used to be given) and the semitones the formula below is short of putting the filter's
+# -10 dB point where Serum's is: +2 to +4 for MgL18, about -2 for MgL24 and MgL12, +10 for the default. A model with no entry keeps the formula alone.
+FXF_CUTOFF_FILE = Path(__file__).resolve().parent / "calibration/fxf_cutoff.json"
+FXF_CUTOFF: dict = json.loads(FXF_CUTOFF_FILE.read_text(encoding="utf-8")) if FXF_CUTOFF_FILE.exists() else {}
+
+
 def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
     """The envelope-moved Filter FX as the engine's Filter FX stage (after the distortion; its cutoff follows the filter envelope), cutoff law and models as for the voice filter."""
-    model = "MgL24" if dyn["model"] == "default" else dyn["model"]
+    fit = FXF_CUTOFF.get(dyn["model"])
+    model = fit["engine"] if fit else "MgL24" if dyn["model"] == "default" else dyn["model"]
     fkey = filter_model_key(model, None)
     idx, _ = FILTER_MAP.get(model, (None, False))
     if fkey in FILTER_MODELS:
@@ -1880,7 +1894,8 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
     cut = _clamp(dyn["norm"], 0, 1)
     P["fxf_on"] = 1
     P["fxf_type"] = idx
-    P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut), 0, 127))
+    corr = interp([tuple(x) for x in fit["corr"]], cut) if fit else 0.0
+    P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut) + corr, 0, 127))
     P["fxf_res"] = filter_res_pot(model, dyn["reso"])
     if not dyn["envs"]:
         out = [f"Filter FX carried as the effects block's filter: {model}, moved by LFO(s) {', '.join(str(s - 5) for s in sorted(set(dyn['lfos'])))} (route to FX Filter Freq)"]

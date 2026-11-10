@@ -53,7 +53,7 @@ def main():
     for name, (c, a, d, s, r, *amt) in CASES.items():
         t = copy.deepcopy(tree0)
         nd = copy.deepcopy(node)
-        nd["FXFilter"]["plainParams"] = {"kParamFreq": c, "kParamType": TYPE, "kParamReso": 10.0}
+        nd["FXFilter"]["plainParams"] = {"kParamFreq": c, "kParamReso": 10.0} | ({} if TYPE == "default" else {"kParamType": TYPE})
         t["FXRack0"]["FX"] = [nd]
         t["Env1"]["plainParams"] = {"kParamAttack": a, "kParamDecay": d, "kParamSustain": s, "kParamRelease": r}
         t["ModSlot0"] = {"destModuleID": 0, "destModuleParamID": 3, "destModuleParamName": "kParamFreq", "destModuleTypeString": "FXFilter",

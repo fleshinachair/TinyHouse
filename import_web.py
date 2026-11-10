@@ -78,7 +78,7 @@ def _store(rel: str, data: bytes) -> None:
     low = rel.lower()
     w = _work()
     if low.endswith(".serumpreset"):
-        (w / "presets" / (Path(rel).name)).write_bytes(data)
+        (w / "presets" / (Path(rel).name[:-len(".SerumPreset")] + ".SerumPreset")).write_bytes(data)      # Pyodide's file system is case-sensitive and the globs below look for this spelling
     elif low.endswith(".wav"):
         for pre in ("s2 tables/", "tables/"):          # the path Serum stores starts under Tables; a folder pick adds its own prefix
             i = low.find("/" + pre)

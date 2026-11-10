@@ -1023,10 +1023,12 @@ static void tb_publish_selection(tablor_instance *inst)
            ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}";
     /* The web panel's preset browser: the store's banks and preset names (read-only, built when the store is scanned), the
      * current bank and index, and the index to load. `bank` is declared above; `preset` is the index within the current bank. */
-    out += ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}"
+    /* ORDER MATTERS. The manager's initial value fetch sends in batches of 8 and flushes the last partial batch only when the LAST declared key
+     * reads back fine: if it does not, the tail of the list is dropped. So the list ends on keys that always read (preset, then preset_now). */
+    out += ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}"
+           ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}"
-           ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}";
+           ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}";
     out += "]";
 
     /* The macro knobs carry the preset's macro names as their `unit`: the cell label stays "MCR 1", and touching a knob shows the
@@ -1602,6 +1604,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         snprintf(tmp, sizeof tmp, "%d,%d", std::max(b, 0), std::max(inst->store_index.load() - first, 0));
         return write_str(buf, buf_len, tmp);
     }
+    /* Write-only in effect (any value rescans), but it is DECLARED, and the manager's initial fetch reads every declared key in batches of 8:
+     * a key that fails to read skips the final flush and the last few values of the list never reach the page (the preset browser's
+     * preset_list / preset_now among them). Every declared key must read back. */
+    if (!strcmp(key, "rescan"))
+        return write_str(buf, buf_len, "0");
     if (!strcmp(key, "preset_name")) {
         auto ps = inst->storeList();
         const int i = inst->store_index.load();

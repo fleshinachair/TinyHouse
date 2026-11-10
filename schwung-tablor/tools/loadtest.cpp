@@ -141,6 +141,25 @@ int main(int argc, char **argv)
     static char big[64 * 1024];
     static char saved[64 * 1024];   /* a state blob held across a round-trip */
 
+    /* Every key chain_params declares must read back: the Schwung manager's initial fetch sends values in batches of 8 and, when the
+     * LAST declared key fails to read, skips the final flush, so the tail of the list never reaches the remote UI (the preset browser
+     * vanished that way). */
+    {
+        api->get_param(inst, "chain_params", big, sizeof big);
+        std::string cp(big);
+        int n = 0, bad = 0;
+        std::string badkeys;
+        for (size_t p = 0; (p = cp.find("\"key\":\"", p)) != std::string::npos;) {
+            p += 7;
+            std::string k = cp.substr(p, cp.find('"', p) - p);
+            static char vb[64 * 1024];
+            n++;
+            if (api->get_param(inst, k.c_str(), vb, sizeof vb) < 0) { bad++; badkeys += " " + k; }
+        }
+        { std::string tail; size_t q = cp.size(); for (int i = 0; i < 5; i++) { q = cp.rfind("\"key\":\"", q - 1); tail = cp.substr(q + 7, cp.find('"', q + 7) - q - 7) + " " + tail; } printf("  [last declared keys: %s]%c", tail.c_str(), 10); }
+        CHECK(n > 300 && bad == 0, "every declared key reads back (%d keys, %d unreadable:%s)", n, bad, badkeys.c_str());
+    }
+
     /* The macro knobs carry the preset's macro names as their unit: the cell label stays "Macro 1" and touching the knob shows the value
      * with the name beside it. A preset's names republish chain_params on the worker; a macro it does not use has no unit. */
     {

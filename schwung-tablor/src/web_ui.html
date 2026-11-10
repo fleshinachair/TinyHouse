@@ -1555,9 +1555,10 @@ function buildBrowser() {
   brSearch = el("input", null, head);
   brSearch.placeholder = "Search every bank…";
   var imp = el("button", "imp", head, "＋ Import"); imp.title = "Import Serum 2 presets"; imp.addEventListener("click", function () { openImport(true); });
+  var del = el("button", "imp", head, "Delete bank"); del.title = "Delete the bank shown on the left, with its wavetables and samples"; del.addEventListener("click", function () { deleteBank(); });
   var x = el("button", "x", head, "✕"); x.title = "Close (Esc)";
   x.addEventListener("click", function () { openBrowser(false); });
-  brBanks = el("div", "banks", brEl); brList = el("div", "list", brEl);
+  brBanks =el("div", "banks", brEl); brList = el("div", "list", brEl);
   brSearch.addEventListener("input", function () { PS.q = brSearch.value; PS.sel = 0; renderBrowser(); });
   brSearch.addEventListener("keydown", function (e) {
     if (e.key === "ArrowDown") { PS.sel = Math.min(PS.shown.length - 1, PS.sel + 1); renderBrowser(); e.preventDefault(); }
@@ -1724,6 +1725,38 @@ async function uploadRemote(dir, name, blob) {
   fd.append("file", blob, name);
   var r = await fetch("/files/upload", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": csrf() } });
   if (!r.ok) throw new Error("upload " + name + " failed (" + r.status + ")");
+}
+/* Delete a bank: its preset folder, and the wavetable and sample folders of the same name (where imports put them). Uses the manager's
+ * /files/delete (form field "path"; it removes a folder with everything in it). The loose "User" bank is not a folder and cannot go. */
+async function deleteRemote(path) {
+  var fd = new FormData();
+  fd.append("csrf_token", csrf()); fd.append("path", path);
+  return fetch("/files/delete", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": csrf() } });
+}
+async function deleteBank() {
+  var bk = PS.banks[PS.viewBank];
+  if (!bk) return;
+  var name = bk.n;
+  if (name === "User" || /[\/\\]|^\.+$/.test(name)) { alert("“" + name + "” is not a bank folder, so it cannot be deleted here."); return; }
+  var wasCurrent = PS.banks[PS.b] && PS.banks[PS.b].n === name;
+  if (!confirm("Delete the bank “" + name + "” with its " + bk.p.length + " presets?\n\nThe wavetables and samples in folders of the same name (UserLibrary/Wavetables/" + name + ", UserLibrary/Samples/" + name + ") go too. This cannot be undone.")) return;
+  try {
+    var r = await deleteRemote(PRESET_ROOT + "/" + name);
+    if (!r.ok) throw new Error("the Move refused (" + r.status + ")");
+    var more = ["/data/UserData/UserLibrary/Wavetables/", "/data/UserData/UserLibrary/Samples/"];
+    for (var i = 0; i < more.length; i++) { try { await deleteRemote(more[i] + name); } catch (e) {} }   /* a bank without them: the manager says no, which is fine */
+    send("rescan", 1);
+    for (var t = 0; t < 10; t++) {
+      await sleep(t ? 700 : 1200);
+      try {
+        var v = await schwungRemote.getParam(KP + "preset_list");
+        if (v) { var d = JSON.parse(v); if (d && d.b && !d.b.some(function (b) { return b.n === name; })) { EXTRA.preset_list(v); break; } }
+      } catch (e) {}
+    }
+    PS.viewBank = Math.min(PS.viewBank, Math.max(0, PS.banks.length - 1));
+    if (wasCurrent) { PS.b = 0; PS.i = 0; }
+    renderPbar(); renderBrowser();
+  } catch (e) { alert("Could not delete “" + name + "”: " + e.message); }
 }
 function b64bytes(s) {
   var bin = atob(s), a = new Uint8Array(bin.length);
@@ -2322,7 +2355,7 @@ var EXTRA = {
 /* ------------------------------------------------------------------ start */
 function buildTabs() {
   var tabs = document.getElementById("tabs"), pages = document.getElementById("pages");
-  var defs = [["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Macros", buildMacros], ["Globals", buildGlobal], ["Demo", buildDemo]];
+  var defs = [["Macros", buildMacros], ["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
   var ps = [], bs = [];
   defs.forEach(function (d, i) {
     var b = el("button", i ? null : "on", tabs, d[0]);

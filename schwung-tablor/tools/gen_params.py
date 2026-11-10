@@ -707,9 +707,9 @@ assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim
 PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The root is the preset browser (TinyK's pattern).
     ("Main",    0, "Main"),
     ("Tone",    0, "Tone"),
+    ("Macros",  0, "Macros"),
     ("Effects", 0, "Effects"),
     ("Mod FX",  0, "Mod FX"),
-    ("Macros",  0, "Macros"),
 ]
 
 def page_slot(p):

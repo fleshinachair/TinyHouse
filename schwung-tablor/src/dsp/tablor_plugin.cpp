@@ -942,6 +942,11 @@ static void tb_publish_selection(tablor_instance *inst)
         return;                              /* not the shape we expect */
     out.pop_back();                          /* drop the closing ] */
 
+    /* The keys the Move turns (the wavetable selects, bank, the demo switch, pack and part, preset) go in `hand` and are inserted right after the
+     * page keys at the end, not appended: the host caches only the first 256 declared keys, and a set of one past that makes it re-fetch and re-parse
+     * this whole list on the SPI callback (23 ms, four times a second). See tools/gen_params.py. */
+    std::string hand;
+
     out += ",{\"key\":\"wt_pack\",\"name\":\"WT Pack\",\"type\":\"enum\",\"options\":[";
     for (size_t i = 0; i < snap->packs.size(); i++) {
         if (i) out += ",";
@@ -954,49 +959,50 @@ static void tb_publish_selection(tablor_instance *inst)
         snprintf(head, sizeof head,
                  ",{\"key\":\"wt%d_select\",\"name\":\"WT%d Table\",\"type\":\"enum\",\"options\":[",
                  osc + 1, osc + 1);
-        out += head;
+        hand += head;
         for (size_t i = 0; i < snap->filtered.size(); i++) {
             int g = snap->filtered[i];
-            if (i) out += ",";
-            out += "\"";
-            tb_json_append(out, g == 0 ? std::string("Init")
-                                       : tb_leaf_of(l[(size_t) g].name));
-            out += "\"";
+            if (i) hand += ",";
+            hand += "\"";
+            tb_json_append(hand, g == 0 ? std::string("Init")
+                                        : tb_leaf_of(l[(size_t) g].name));
+            hand += "\"";
         }
-        out += "]}";
+        hand += "]}";
     }
 
     /* The Bank knob: one option per preset folder in the store (scanned before the second publish). */
     {
         auto ps = inst->storeList();
-        out += ",{\"key\":\"bank\",\"name\":\"Bank\",\"type\":\"enum\",\"options\":[";
-        if (ps->banks.empty()) out += "\"User\"";
+        hand += ",{\"key\":\"bank\",\"name\":\"Bank\",\"type\":\"enum\",\"options\":[";
+        if (ps->banks.empty()) hand += "\"User\"";
         for (size_t i = 0; i < ps->banks.size(); i++) {
-            if (i) out += ",";
-            out += "\""; tb_json_append(out, ps->banks[i]); out += "\"";
+            if (i) hand += ",";
+            hand += "\""; tb_json_append(hand, ps->banks[i]); hand += "\"";
         }
-        out += "]}";
+        hand += "]}";
     }
 
     /* The demo mode: the switch, the pack and the part inside it (enums whose options are what the scan found), and the list and the current pick for the web panel. */
     {
         auto dl = inst->demoList();
-        out += ",{\"key\":\"demo_on\",\"name\":\"Demo\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"default\":\"Off\"}";
-        out += ",{\"key\":\"demo_pack\",\"name\":\"Demo Pack\",\"type\":\"enum\",\"options\":[";
-        if (dl->packs.empty()) out += "\"None\"";
+        hand += ",{\"key\":\"demo_on\",\"name\":\"Demo\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"default\":\"Off\"}";
+        hand += ",{\"key\":\"demo_pack\",\"name\":\"Demo Pack\",\"type\":\"enum\",\"options\":[";
+        if (dl->packs.empty()) hand += "\"None\"";
         for (size_t i = 0; i < dl->packs.size(); i++) {
-            if (i) out += ",";
-            out += "\""; tb_json_append(out, dl->packs[i]); out += "\"";
+            if (i) hand += ",";
+            hand += "\""; tb_json_append(hand, dl->packs[i]); hand += "\"";
         }
-        out += "]},{\"key\":\"demo_part\",\"name\":\"Demo Part\",\"type\":\"enum\",\"options\":[";
+        hand += "]},{\"key\":\"demo_part\",\"name\":\"Demo Part\",\"type\":\"enum\",\"options\":[";
         const int dp = inst->demo_pack.load();
         const int dn = dp >= 0 && dp < (int) dl->packs.size() ? dl->pack_n[(size_t) dp] : 0;
-        if (dn <= 0) out += "\"None\"";
+        if (dn <= 0) hand += "\"None\"";
         for (int i = 0; i < dn; i++) {
-            if (i) out += ",";
-            out += "\""; tb_json_append(out, dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]); out += "\"";
+            if (i) hand += ",";
+            hand += "\""; tb_json_append(hand, dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]); hand += "\"";
         }
-        out += "]},{\"key\":\"demo_list\",\"name\":\"Demo List\",\"type\":\"string\",\"access\":\"read\"}"
+        hand += "]}";
+        out += ",{\"key\":\"demo_list\",\"name\":\"Demo List\",\"type\":\"string\",\"access\":\"read\"}"
                ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}"
                ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
                ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}";
@@ -1024,16 +1030,17 @@ static void tb_publish_selection(tablor_instance *inst)
     /* The web panel's preset browser: the store's banks and preset names (read-only, built when the store is scanned), the
      * current bank and index, and the index to load. `bank` is declared above; `preset` is the index within the current bank. */
     /* ORDER MATTERS. The manager's initial value fetch sends in batches of 8 and flushes the last partial batch only when the LAST declared key
-     * reads back fine: if it does not, the tail of the list is dropped. So the list ends on keys that always read (preset, then preset_now). */
+     * reads back fine: if it does not, the tail of the list is dropped. So the list ends on a key that always reads (preset_now); `preset` moved up with the other keys the Move turns (see `hand`). */
     out += ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}"
            ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}"
            ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}";
+    hand += ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
+    out.insert(tb_chain_params_prio_len, hand);      /* right after the page keys: inside the host's 256-key cache */
     out += "]";
 
     /* The macro knobs carry the preset's macro names as their `unit`: the cell label stays "MCR 1", and touching a knob shows the
      * value with the name beside it ("64 More Delay") in the top bar. A macro the preset does not use gets no unit. The key's entry
-     * is found by its key; the unit goes in before its viz. */
+     * is found by its key; the unit goes in right after the key (so it does not depend on the knob having a custom widget). */
     {
         const std::string names = *std::atomic_load(&inst->macn_pub);
         size_t pos = 0;
@@ -1048,12 +1055,10 @@ static void tb_publish_selection(tablor_instance *inst)
             const std::string key = "\"key\":\"mac" + std::to_string(m + 1) + "\"";
             const size_t k = out.find(key);
             if (k == std::string::npos) continue;
-            const size_t v = out.find(",\"viz\"", k);
-            if (v == std::string::npos) continue;
             std::string unit = ",\"unit\":\"";
             tb_json_append(unit, nm);
             unit += "\"";
-            out.insert(v, unit);
+            out.insert(k + key.size(), unit);
         }
     }
 
@@ -1334,6 +1339,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
 /* ------------------------------------------------------------------ */
 /* set / get                                                           */
 /* ------------------------------------------------------------------ */
+
 
 static void tb_set_param(void *instance, const char *key, const char *val)
 {

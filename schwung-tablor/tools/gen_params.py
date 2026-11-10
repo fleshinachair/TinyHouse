@@ -670,8 +670,12 @@ VIZ = {
 }
 # Macros page: one widget per knob (src/ui/canvas.js). It draws the value, or a dimmed "N/A" when the preset does not use that macro; it
 # learns that from macro_names (a declared read-only key, "Cutoff||Wet|||||"), which the host reads as an extra key.
-for _i in range(1, 9):
-    VIZ[f"mac{_i}"] = {"kind": f"custom:tinyhouse_mac{_i}", "group": f"mac{_i}", "role": "a", "extra_keys": ["macro_names"]}
+# The custom dials (canvas.js). Set False to fall back to the host's stock dials. (A glitch when turning a macro was NOT caused by this widget: it
+# glitched with the stock dials too.)
+MACRO_WIDGETS = True
+if MACRO_WIDGETS:
+    for _i in range(1, 9):
+        VIZ[f"mac{_i}"] = {"kind": f"custom:tinyhouse_mac{_i}", "group": f"mac{_i}", "role": "a", "extra_keys": ["macro_names"]}
 def chain_param(p):
     if p["type"] == "file":
         d = {"key": p["key"], "name": p["full"], "type": "filepath",
@@ -715,6 +719,27 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The roo
     ("Effects", 0, "Effects"),
     ("Mod FX",  0, "Mod FX"),
 ]
+
+# THE HOST CACHES ONLY THE FIRST 256 DECLARED KEYS (MAX_CHAIN_PARAMS in Schwung's chain host). A set of a key past that is a cache miss, and a miss
+# makes the host fetch the whole chain_params again and re-parse it on the SPI callback (~23 ms here, at most once per 250 ms), which is a dropout of every
+# slot each time. Schwung's automation lanes look the key up on every set, so any key a hand can turn must be inside the first 256. The pages on the Move
+# come first, then the rest in the old order; the module adds the dynamic keys the Move turns (the wavetable selects, bank, the demo keys, preset) right
+# after them, at `tb_chain_params_prio_len`. What is left past 256 are the remote UI's own controls and the data channels.
+DEVICE_KEYS = []
+_rows = {(name, i): r for name, _, rws in BANKS for i, r in enumerate(rws)}
+for _bank, _ri, _title in PAGE_MAP:
+    for _s in _rows[(_bank, _ri)]:
+        if _s and _s["type"] != "file" and _s["key"] not in DEVICE_KEYS:
+            DEVICE_KEYS.append(_s["key"])
+DYNAMIC_DEVICE_KEYS = ["wt1_select", "wt2_select", "wt3_select", "bank", "demo_on", "demo_pack", "demo_part", "preset"]
+_head = [d for d in chain if d["key"] in DEVICE_KEYS]
+_rest = [d for d in chain if d["key"] not in DEVICE_KEYS]
+assert len(_head) == len(DEVICE_KEYS), "a page key is missing from chain_params"
+chain = _head + _rest
+chain_json = json.dumps(chain, separators=(",", ":"))
+CHAIN_PRIO_LEN = len(json.dumps(_head, separators=(",", ":"))) - 1      # offset of the comma that starts the first non-page entry
+assert chain_json[CHAIN_PRIO_LEN] == ","
+assert len(_head) + len(DYNAMIC_DEVICE_KEYS) <= 200, "the keys the Move turns must stay well inside the host's 256-key cache"
 
 def page_slot(p):
     if p is None:
@@ -950,6 +975,10 @@ lines += [
     "/* chain_params: fully static, served verbatim. It MUST stay cheap —",
     " * get_param runs on the SPI callback. */",
     f'static const char *tb_chain_params_json =\n    "{c_escape(chain_json)}";',
+    "/* Where the module inserts the dynamic keys the Move turns (see gen_params.py: the host caches only the first 256 declared keys). */",
+    f"static const unsigned tb_chain_params_prio_len = {CHAIN_PRIO_LEN};",
+    "/* Every key a hand can turn on the Move: all of them must sit inside the first 256 declared (tools/loadtest.cpp checks it). */",
+    "static const char *const tb_device_keys[] = { " + ", ".join(f'"{k}"' for k in DEVICE_KEYS + DYNAMIC_DEVICE_KEYS) + " };",
     "",
     "/* ui_hierarchy for the STOCK Shadow UI (Schwung 0.12+): knob pages",
     " * with declared viz graphics, native preset browser, file browser,",

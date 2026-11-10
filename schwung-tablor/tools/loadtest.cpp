@@ -22,6 +22,8 @@
 #include <ctime>
 #include <sys/stat.h>
 #include <initializer_list>
+#include <vector>
+#include "../src/dsp/params.h"      /* tb_device_keys */
 #include <dirent.h>
 #include <unistd.h>
 #include <sched.h>
@@ -149,15 +151,28 @@ int main(int argc, char **argv)
         std::string cp(big);
         int n = 0, bad = 0;
         std::string badkeys;
+        std::vector<std::string> declared;
         for (size_t p = 0; (p = cp.find("\"key\":\"", p)) != std::string::npos;) {
             p += 7;
             std::string k = cp.substr(p, cp.find('"', p) - p);
+            declared.push_back(k);
             static char vb[64 * 1024];
             n++;
             if (api->get_param(inst, k.c_str(), vb, sizeof vb) < 0) { bad++; badkeys += " " + k; }
         }
         { std::string tail; size_t q = cp.size(); for (int i = 0; i < 5; i++) { q = cp.rfind("\"key\":\"", q - 1); tail = cp.substr(q + 7, cp.find('"', q + 7) - q - 7) + " " + tail; } printf("  [last declared keys: %s]%c", tail.c_str(), 10); }
         CHECK(n > 300 && bad == 0, "every declared key reads back (%d keys, %d unreadable:%s)", n, bad, badkeys.c_str());
+
+        /* The host (Schwung's chain host) caches only the first 256 declared keys. A set of a key past that is a cache miss, and a miss
+         * re-fetches and re-parses this whole list on the SPI callback: a 23 ms dropout, four times a second while a knob is turned (the macro
+         * knobs sat at 281..288). Every key a hand can turn on the Move must be inside it. */
+        std::string late;
+        for (const char *dk : tb_device_keys) {
+            size_t at = 0;
+            while (at < declared.size() && declared[at] != dk) at++;
+            if (at >= 256) late += std::string(" ") + dk + (at >= declared.size() ? "(missing)" : "");
+        }
+        CHECK(late.empty(), "every key the Move turns is inside the host's 256-key cache (%d declared; outside:%s)", n, late.c_str());
     }
 
     /* The macro knobs carry the preset's macro names as their unit: the cell label stays "Macro 1" and touching the knob shows the value
@@ -168,7 +183,7 @@ int main(int argc, char **argv)
             std::string cp(big), key = "\"key\":\"mac" + std::to_string(m) + "\"";
             size_t k = cp.find(key);
             if (k == std::string::npos) return "<no entry>";
-            size_t e = cp.find("}}", k);                      /* the entry ends after its viz object */
+            size_t e = cp.find('}', k);                       /* the entry ends at its first closing brace (its fields are flat) */
             size_t u = cp.find("\"unit\":\"", k);
             if (u == std::string::npos || (e != std::string::npos && u > e)) return "";
             u += 8;

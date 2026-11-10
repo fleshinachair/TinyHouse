@@ -29,11 +29,12 @@ in a slot. This page is where you import and fine-tune sounds. (Use a normal bro
 
 ![The import dialog](docs/img/remote-import.png)
 
-- Choose single `.SerumPreset` files, a `.SerumPack`, or a whole folder (or drop them on the dialog). Serum 2 keeps yours in
-  `Documents\Xfer\Serum 2 Presets` (`~/Documents/Xfer/Serum 2 Presets` on a Mac).
-- If your presets use Serum's own wavetables, point **Tables folder** at that folder's `Tables`. Only the tables your presets use are copied to the Move.
-  Presets in a pack bring their own.
-- If they use sample or multisample oscillators, point **Samples** (and **Multisamples**) at the matching folders in the same place.
+- The easiest way: press **Serum 2 Presets folder…** and choose your whole Serum 2 folder (`Documents\Xfer\Serum 2 Presets`, or
+  `~/Documents/Xfer/Serum 2 Presets` on a Mac). Tick which presets to bring in (Factory, User, each pack). The wavetables, samples and multisamples they
+  use are found in that folder for you, and only the ones the presets use are copied to the Move.
+- Or choose single `.SerumPreset` files, a `.SerumPack` or any folder (or drop them on the dialog). Then, if the presets use Serum's own wavetables, point
+  **Tables folder** at the `Tables` folder, and for sample or multisample oscillators point **Samples** (and **Multisamples**) at the matching folders.
+  Presets in a pack bring their own wavetables.
 - Press **Import**. The presets are converted in your browser and stored on the Move, loose presets in a bank called *Imports* and a pack or folder in a
   bank of its own name. A report lists every preset as *imported*, *imported with parts missing* (and which parts) or *not imported* (and why).
 

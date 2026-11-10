@@ -78,3 +78,31 @@ calibration/census_*.json
 calibration/classify_*.json
 calibration/import_*.log
 calibration/dh_convert_*.log
+
+# Per-preset fits and raw data derived from a particular pack (the converter reads them if present: calibration/level_fits.json is the one tracked fit file)
+calibration/chain_fits.json
+calibration/filter_fits.json
+calibration/stereo_fits.json
+calibration/tune_fits.json
+calibration/width_fits.json
+calibration/fx_law_data.json
+# run output: logs of runs and the experiment/audit JSONs they write. The measured data tables the converter reads are listed below
+calibration/*.log
+reports/*.log
+calibration/*.json
+!calibration/cal_final.json
+!calibration/cal_fitted.json
+!calibration/dist_curves.json
+!calibration/dist_scales.json
+!calibration/filter_models.json
+!calibration/filter_res.json
+!calibration/fx_laws.json
+!calibration/fx_tablor_cache.json
+!calibration/fxfilter_drive_probe2.json
+!calibration/fxfilter_models_probe.json
+!calibration/level_fits.json
+!calibration/level_law.json
+!calibration/lfo_scales.json
+!calibration/warp_dist_curves.json
+# the original Tablor wavetable packs are third-party: never commit wavetables
+schwung-tablor/src/wavetables/

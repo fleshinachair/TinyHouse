@@ -65,7 +65,7 @@ A preset's macros come across live: turning a macro moves the same parameters Se
 Most Serum presets get half their character from the effects rack, so the rack is not an afterthought. TinyHouse has a full effects chain, and each stage was
 measured against Serum with controlled test patches (not tuned by ear), so the effects follow Serum's own curves:
 
-![The FX tab: distortion and compressor, with their transfer curves](docs/img/remote-fx.png)
+![The FX tab on a Deep House preset: the stages in use with their controls, and the bypassed ones listed underneath](docs/img/remote-fx.png)
 
 | Stage | Serum effect | |
 |---|---|---|

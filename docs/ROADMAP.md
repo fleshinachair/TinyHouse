@@ -1,6 +1,6 @@
 # Roadmap: what is left to make the Loopsy Deep House pack play faithfully
 
-State on 2026-11-04. Everything described here is committed; the measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md). Work the way the README says:
+State on 2026-11-04. Everything described here is committed; the measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md). Work the way DEVELOPMENT.md says:
 find the rule with a Serum probe, put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 ## Heard close to Serum (by ear, on the Move or in renders)

@@ -1,6 +1,6 @@
 # Working on TinyHouse together
 
-Read [README.md](README.md) (the rule: translate from Serum's own settings, no per-preset fits) and [docs/ROADMAP.md](docs/ROADMAP.md) (what is left) first.
+Read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (the rule: translate from Serum's own settings, no per-preset fits) and [docs/ROADMAP.md](docs/ROADMAP.md) (what is left) first.
 [docs/TRANSLATION_RULES.md](docs/TRANSLATION_RULES.md) holds every fact measured on Serum so far.
 
 ## Taking a piece of work

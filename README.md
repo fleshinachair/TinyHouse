@@ -1,135 +1,160 @@
 # TinyHouse
 
-Serum 2 presets on the Ableton Move.
+**A wavetable synth for the Ableton Move, inspired by Serum 2, that plays your own Serum 2 presets.**
 
-TinyHouse converts Serum 2 presets (`.SerumPreset` / `.SerumPack`) into presets for **tablor-dh**, a modified build of
-[Tablor](https://github.com/athousanddetails/schwung-tablor) (a wavetable synth module for the Move's [Schwung](https://github.com/charlesvestal/schwung)
-host).
+TinyHouse is a sound-generator module for [Schwung](https://github.com/charlesvestal/schwung) (the Move's open module host). It is built for people who already
+have Serum 2 presets they like and want to take them on the Move. You bring the presets; TinyHouse converts them, and they play on the Move as native
+wavetable patches: polyphonic, with unison, filters, modulation, eight macros and a full effects rack.
 
-**The initial aim** was narrow: make the Loopsy *DEEP HOUSE* Serum preset bank (70 presets) play faithfully on the Move. That bank is the
-reference the engine, the converter and the calibration were built and measured against, and it is still the main test of whether a change helps.
-The project then grew into a general goal: a **drop-in importer** that takes a folder of any Serum presets and gives back a Move bank, with every
-setting translated from what Serum itself does, not tuned by ear per preset. That is why no preset is fitted individually: a rule that only fixes
-one Deep House preset would not carry over to other packs.
+It is a re-creation, not Serum. Every setting is translated from what Serum itself does, and the filters, effects and levels were measured against the real
+plugin, but it is a different engine on a small ARM box: **expect presets to sound close, and a little different.** Some features are not built yet
+(see [What is supported](#what-is-supported)), and a preset that leans on one of them will lose that part of its sound.
 
-```
- Serum 2 preset ──► deephouse2move.py / import_pack.py ──► tablor-dh preset (.json) + wavetables + sample sets
-   (.SerumPreset)        (translate, measure, level)                       │
-        │                                                                  ▼
-        └── rendered headlessly in Serum (DawDreamer) ──► compared with the engine's render ──► Ableton Move
-```
+**This is experimental.** TinyHouse is young and the converter is still being tuned. Importing in the browser is the easy route, but it has no copy of
+Serum to measure against, so it sets loudness, reverb and width from general rules. If you have Serum 2 on a Windows computer and want a preset to come
+out as close as possible to the original, use the Python scripts instead: they render each preset through the real plugin and match the level, reverb and width to it
+(see [More accurate conversion with the Python scripts](#more-accurate-conversion-with-the-python-scripts)).
 
-## Where it stands
+![The TinyHouse remote UI: three wavetable oscillators, with the tabs for the macros, filters, envelopes and effects below](docs/img/remote-ui.png)
 
-| | |
+## Getting started
+
+**1. Install the module.** TinyHouse installs beside any other Schwung modules, under its own name (`tinyhouse`). Build it and copy it to the Move
+(you need the Move on your network, SSH access to it, and a zig compiler; see [Installing](#installing)).
+
+**2. Open the remote UI.** On a computer on the same network, open the Schwung manager at `http://move.local:7700`, go to **Remote UI**, and put TinyHouse
+in a slot. This page is where you import and fine-tune sounds. (Use a normal browser window: the import needs one.)
+
+**3. Import your Serum 2 presets.** Click the preset name in the header to open the browser, then **Import**:
+
+![The import dialog](docs/img/remote-import.png)
+
+- Choose single `.SerumPreset` files, a `.SerumPack`, or a whole folder (or drop them on the dialog). Serum 2 keeps yours in
+  `Documents\Xfer\Serum 2 Presets` (`~/Documents/Xfer/Serum 2 Presets` on a Mac).
+- If your presets use Serum's own wavetables, point **Tables folder** at that folder's `Tables`. Only the tables your presets use are copied to the Move.
+  Presets in a pack bring their own.
+- If they use sample or multisample oscillators, point **Samples** (and **Multisamples**) at the matching folders in the same place.
+- Press **Import**. The presets are converted in your browser and stored on the Move, loose presets in a bank called *Imports* and a pack or folder in a
+  bank of its own name. A report lists every preset as *imported*, *imported with parts missing* (and which parts) or *not imported* (and why).
+
+**4. Play.** The new bank is in the preset browser. Pick a sound and it loads on the Move.
+
+Your presets go nowhere but your Move: the converter runs inside the browser page (which downloads the Python runtime it uses from a public CDN the first time).
+
+## Tweaking and playing
+
+**Fine-tuning is on the remote UI.** It is laid out after Serum: three oscillators with 3D wavetable displays, then tabs for macros, filters, envelopes,
+effects, mix and globals. Every control is live in both directions with the Move. Drag the filter curve and envelopes, pick wavetables from the
+list, set the effects, and save the result as a preset of your own. The import report's loudness, reverb and width are set from general rules (the
+importer has no Serum to compare against), so set **Volume** and the effects to taste.
+
+**Playing live is on the Move itself.** The pages are built for performance, with no menus:
+
+| Page | What is on it |
 |---|---|
-| Engine module | `schwung-tablor/`, version `1.11.0-th`, 315 parameters, ARM `dsp.so` built with zig |
-| Deep House bank | 70 presets (the Loopsy *Deep House* pack), all converted; none dropped |
-| Factory Picks bank | 25 presets from Serum's 626 factory presets (37 tried, 12 dropped by the quality gate) |
-| Fidelity, Deep House | mean full-chain spectral loss about 14 (lower is better; it moves by +-4 between renders of the same state because unison phases are random); level within 0.9 dB of Serum on average |
-| Fidelity, Factory Picks | octave bands 9.2 dB rms from Serum on average, level within 1.2 dB |
-| By ear | a first ear A/B against Serum (same-player WAV pairs, `calibration/midi_ab.py` for the pack's demo MIDI): Bass - BUNT and Lead - Sleepless sound great, Catching Flies and I'll Be Yours are close; Lynnic is less brassy and Kisaya less vocal than Serum (Kisaya's formant filter is not built; Lynnic's LFO pitch route was over-deep and is fixed in the staged set, not yet auditioned) |
+| **Main** | filter freq, res and envelope amount, decay, sub, width, space, bank |
+| **Tone** | the two wavetable positions, attack, release, drive, shelves |
+| **Macros** | the preset's eight Serum macros, as dials. A macro the preset does not use is shown as an empty slot. Touch a knob and the top bar shows its name and value |
+| **Effects**, **Mod FX** | each effect on or off, with its main controls |
+| **Demo** | plays a MIDI part from a folder on the Move so you can audition a bank: it waits for Play and joins on the next bar |
+
+A preset's macros come across live: turning a macro moves the same parameters Serum's would (cutoff, effect mix, wavetable position and so on).
+
+## The effects chain
+
+Most Serum presets get half their character from the effects rack, so the rack is not an afterthought. TinyHouse has a full effects chain, and each stage was
+measured against Serum with controlled test patches (not tuned by ear), so the effects follow Serum's own curves:
+
+![The FX tab: distortion and compressor, with their transfer curves](docs/img/remote-fx.png)
+
+| Stage | Serum effect | |
+|---|---|---|
+| Distortion | Distortion | tanh, biased, hard clip and sine curves, with Serum's wet law |
+| Filter FX | Filter | static or following the filter envelope; low-pass, high-pass, band, notch |
+| Compressor | Comp | single band and three-band multiband |
+| Mod FX | Chorus, Flanger, Phaser | real modulated stages |
+| Width | HyperDimension | spread and level |
+| Delay | Delay | tempo-synced to the Move, band-pass in the feedback, ping-pong |
+| Reverb | Reverb | size, decay and damping |
+| EQ | EQ | four bands |
+| Master | Utils | width, mono-below, soft output clipper |
+
+On top of that there are **two FX buses**, each a full copy of the rack. Oscillators and filters have their own sends to each bus, as in Serum.
 
 ## What is supported
 
-**Presets.** Serum 2 only (decoded with `serum2-preset-loader`; tested on a 2.0.24 pack, unit curves measured on 2.1.5). A preset is converted only
-if the engine can carry everything audible in it (`unsupported_reasons` in `deephouse2move.py`); `import_pack.py` writes a `skipped_<bank>.md`
-saying why each rejected preset was dropped. Packs with most of their presets in the supported set import best: basses, leads, keys, plucks and pads
-built on wavetables.
+**Carried across**
+- Serum 2 presets and packs (`.SerumPreset`, `.SerumPack`).
+- Three wavetable oscillators with unison to 16 voices, a sub and a noise oscillator; Serum's wavetable position, stepped or interpolated.
+- Warps: bend, PWM, sync, even/odd.
+- Sample and multisample oscillators (from your Samples folders).
+- Two filters, in parallel or in series: the common ladder, high-pass and low-pass models.
+- Envelopes, four LFOs, and the routes from macros, velocity, note number, mod wheel and random sources.
+- The whole effects chain above, and the two FX buses.
 
-**Oscillators and voice.**
-- Three wavetable oscillators with unison up to 16 voices, plus a sub and a noise oscillator (white, pink, brown and Serum's colour filters).
-- Wavetable position is stepped or interpolated per table, as Serum does it (the WAV `clm ` chunk).
-- Warps: bend, PWM, sync and even/odd. Not carried: FM, RM and PD warps, the filter warps, DLM, spectral tables, Sync Var.
-- Sample and multisample oscillators, from SFZ or audio, as `.tbs` sample sets (`sample_export.py`). Warps, unison and their own release are not modelled.
-- Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched; formant, comb and Diffuser models are not, nor filters with a Var knob.
-- Envelopes, 4 LFOs, and the modulation routes of macros, velocity, note number, mod wheel and random sources. Macros, velocity and note are folded
-  at their saved values (there is no live macro); a route gated by something that is closed at rest is switched off, as it would be in Serum.
-- Source routing: filter, master, direct (past the effects) and none, and Serum's outputs of Filter 1 / Filter 2 as sources.
+**Not carried yet**
+- FM, ring-mod and phase-distortion warps, the filter warps, DLM, spectral tables, Sync Var.
+- Formant, comb and Diffuser filter models, and filters with a Var knob.
+- The granular oscillator (left silent).
+- A second distortion, compressor or delay; band-split (Split) branches; the Bode frequency shifter; a filter placed before the distortion; sends moved by an
+  LFO or envelope.
+- Tempo-synced LFOs are read as plain rates in Hz.
+- Convolution (Space) reverbs.
+- Serum 1 presets. Serum 2 only.
 
-**Effects.** The engine's effect chain runs in this order. Each stage is calibrated on Serum with controlled probe patches (`calibration/probe_*.py`).
+A preset using something in the second list still imports, with that part left out, and the import report says which. How closely it then sounds like
+the original depends on how much of the sound that was.
 
-| # | Stage | Serum effect | Notes |
-|---|---|---|---|
-| 1 | Distortion | Distortion | tanh / biased tanh / hard clip / sine curves measured per mode and drive; Serum's wet law (smoothstep, with dry kept) and level out; one stage only, the strongest in the rack. Poor fits: Diode2, Asym at high drive, SineShaper |
-| 2 | Filter FX | Filter | static or following the filter envelope; LP / HP / band / notch with Serum's pole counts |
-| 3 | Compressor | Comp | single band and 3-band multiband; thresholds follow the master gain; one stage only |
-| 4 | Mod FX | Chorus, Flanger, Phaser | real modulated stages; rate / depth defaults were guessed, not measured |
-| 5 | Width | HyperDimension | spread and level |
-| 6 | Delay | Delay | tempo-synced to the Move's BPM, band-pass in the feedback, ping-pong; one delay only |
-| 7 | Reverb | Reverb, convolution reverb | measured per preset (size, decay, damping). Tails on played notes now run about 1 to 3 dB under Serum's (see Open issues) |
-| 8 | EQ | EQ | four bands, with Serum's static Filter FX folded in as bands |
-| 9 | Tone and master | Utils | master width, mono-below, soft output clipper |
+## More accurate conversion with the Python scripts
 
-Two **FX buses** each hold a full copy of this rack. Sources and filter outputs have per-bus sends (`level^3`, as in Serum); the bus output joins the
-main path ahead of the main rack.
+The browser import is the easy way in, and it is deliberately approximate. The Python importer in this repo does the same conversion but also **plays each
+preset through the real Serum 2 plugin** and measures it, so it can do three things the browser cannot:
 
-**Not carried:** a second distortion or compressor stage, a second delay, SplitMS branches holding anything but EQs (EQs in the Mid / Side branches are the engine's mid/side EQs), band-split (Split) branches,
-Bode frequency shifter, Utils width inside a bus rack, a filter placed before the distortion, sends moved by an LFO or envelope.
+- **Match the loudness** of every preset to what Serum produces, instead of using one general offset.
+- **Match the reverb and width** to Serum's own (the browser sets them from fitted rules, so they are close but not measured per preset).
+- **Check the result**: it compares octave-band levels against the Serum render and leaves out a preset that ends up too far from it, with the reason in a
+  `skipped_<bank>.md` report. It is stricter than the browser: a preset that uses something TinyHouse cannot carry is dropped, not imported with a part missing.
 
-## Repo layout
+You need Windows, the full Serum 2 plugin (VST3; it goes silent after about 20 minutes of audio, which the script works around by reloading it),
+Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine).
 
-| Path | What it is |
-|---|---|
-| `deephouse2move.py` | the converter: Serum preset to engine parameters. Every translation rule has a comment saying what was measured |
-| `import_pack.py` | import a folder of Serum presets into a bank: convert, drop what cannot be carried, set loudness from a Serum render, gate on the result |
-| `fxmap.py`, `fxmetrics.py` | effect mapping (rack to engine stages) and the metrics used to fingerprint Serum's effects |
-| `sample_export.py` | Serum sample / multisample oscillators to `.tbs` sample sets |
-| `calibration/` | the measurement harness: probes against Serum, per-stage audits, chain report, level fits. `probe_*.py` find Serum's rules; `fx_audit.py`, `stage_audit.py`, `chain_report.py` check the result |
-| `schwung-tablor/` | the engine (a fork of Tablor): `src/dsp/` is the voice, FX and plugin; `tests/` are native tests |
-| `deploy_all.sh`, `deploy_presets.sh`, `deploy_wavetables.sh`, `deploy_samples.sh` | install a bank on the Move over SSH, with checksums and a rollback copy |
-| `docs/TRANSLATION_RULES.md` | the measured Serum facts and the translation rules built on them |
-| `serum_paths.py`, `requirements.txt` | where Serum is found (environment variables override), and the Python packages |
-| `calibration/midi_ab.py` | play a preset's own demo MIDI through Serum and through TinyHouse and compare (writes paired WAVs); `reports/2026-11-04-demo-midi-ab.md` has the results for the Loopsy pack |
-| `reports/` | what each round of work changed and measured. `2026-11-04-*.md` are the newest; `FX_COVERAGE.md` and `MISSING_FEATURES.md` predate the compressor, distortion, LFO and bus work and are out of date |
-
-## Working on it
-
-**The rule.** Presets are translated from Serum's own settings. No per-preset fits against a loss function, no special-casing a preset by name. Allowed:
-a global constant measured with a controlled Serum probe patch, and a per-preset loudness fit. A fix that helps one preset and does not transfer to a
-new pack is not a fix. The workflow is: find the rule with a probe in `calibration/probe_*.py`, put it in the converter or engine, check it with the stage
-audit, then look at the chain report across all presets (judge that by many presets, not one: it is noisy).
-
-**You need** Windows, Serum 2 (the full plugin, for the reference renders; it goes silent after about 1200 s of audio, which the importer works around by
-reloading), Python with the packages in `requirements.txt` (`pip install -r requirements.txt`), a zig compiler for the
-ARM build, and an Ableton Move running Schwung. Serum's location is found by `serum_paths.py`: it looks in `~/Documents/Xfer/Serum 2 Presets` (and the
-OneDrive-redirected equivalent). If yours is elsewhere, set the `SERUM_ROOT` environment variable to that folder, and `SERUM_VST` to the plugin if it is
-not at `C:\Program Files\Common Files\VST3\Serum2.vst3`.
-
-**Working with others:** see [CONTRIBUTING.md](CONTRIBUTING.md) (branches, what a change must show, what never to commit).
-
-**Read first:** [docs/TRANSLATION_RULES.md](docs/TRANSLATION_RULES.md) holds every fact measured on Serum so far (units, curves, routing, effect laws) and
-why each rule exists. Read it before changing a rule.
-
-**Typical loop**
 ```
-python import_pack.py "<folder of .SerumPreset>" --bank "My Pack"      # writes out_import/My Pack/ and its wavetables
-BANK="My Pack" sh ./deploy_wavetables.sh
+pip install -r requirements.txt
+python import_pack.py "C:\path\to\folder of .SerumPreset" --bank "My Pack"      # converts, renders in Serum, fits levels; writes out_import/My Pack/
+BANK="My Pack" sh ./deploy_wavetables.sh                                         # copy to the Move over SSH (each step keeps a rollback copy)
 sh ./deploy_samples.sh
-SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh          # the bank then shows on the Bank knob (8th knob of the Main page)
-bash schwung-tablor/scripts/zig-build.sh arm                            # after an engine change; then schwung-tablor/scripts/deploy.sh
+SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh
 ```
-`deploy_all.sh` installs a whole bank and the module, and runs the on-device load test. Never overwrite the live `dsp.so` in place (the host maps it):
-`schwung-tablor/scripts/deploy.sh` uploads under a temporary name and renames.
 
-## Open issues
+Reload the slot afterwards and the bank is in the preset browser next to your imported ones. `deephouse2move.py` converts a `.SerumPack` directly and
+`serum_paths.py` explains how Serum's folders are found (set `SERUM_ROOT` and `SERUM_VST` if yours are elsewhere). The first run on a pack is slow because
+every preset is rendered; the renders are cached, so a second run is fast. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) goes into the options and the rules behind them.
 
-Ordered by how much they matter for the Deep House pack; [docs/ROADMAP.md](docs/ROADMAP.md) has the full list with what each one takes.
+## Installing
 
-- **Effects racks with a Comp / Distortion inside a SplitMS branch, band-split (Split) branches and bus-rack Mono-below**: not carried. EQs inside SplitMS branches are carried (mid/side EQ stage).
-- **Formant voice filters** (FormantONE / TWO / TWB) are measured (`calibration/probe_formant.py`, `docs/TRANSLATION_RULES.md`) but not built; the importer drops presets that use them.
-- **Tempo-synced LFOs** are read as Hz (Lead - Loop, Pluck - Deep In The Water); needs a Serum probe of the Rate scale and an engine sync option.
-- Unsupported warps (FM, RM, PD, filter, DLM), non-wavetable oscillator kinds, Bode, a filter before the distortion, and filter-model gaps are the largest groups among the factory presets the importer drops.
-- Second distortion / compressor / delay stage; chorus / flanger / phaser default rates and depths; delay and reverb corner cases are listed in the notes next to each rule.
-- **Reverb tails (mostly done).** The wet gain is now 2.25 (was 1.50), which brings the median tail of a played note to within 1 to 3 dB of Serum's (it was 2 to 5 dB under). A hotter
-  gain would centre it but puts steady noise too loud. Still open and minor: Serum's wet holds its peak 50 to 100 ms longer, and the spread between presets is 4 to 6 dB, so a
-  build-up stage in `processReverb` (sized from Size) may still help. `calibration/reverb_engine_only.py` measures it without re-rendering Serum.
+TinyHouse is not in Schwung's module catalogue yet, so for now it is installed from this repo. You need Windows, macOS or Linux, a Move running Schwung that you
+can reach over SSH, and [zig](https://ziglang.org) to build the ARM module.
 
+```
+bash schwung-tablor/scripts/zig-build.sh arm           # builds schwung-tablor/build/dsp.so
+python schwung-tablor/tools/build_import_bundle.py     # the converter the remote UI's Import runs
+bash schwung-tablor/scripts/deploy.sh ableton@move.local
+```
+
+Then reload the slot (or restart the Shadow UI) so the new module loads. `deploy.sh` replaces the module safely while the Move is running.
+
+## For developers
+
+The converter and the importer that runs on a computer with Serum 2 installed, which matches loudness, reverb and width against Serum, the calibration
+harness, the translation rules and the roadmap are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licences and what is not here
 
-The engine is BSD-3-Clause (Tablor, FigBug's Wavetable and gin, AudioFilter, dr_flac: see `schwung-tablor/LICENSE`).
+The engine is a fork of [Tablor](https://github.com/athousanddetails/schwung-tablor), itself a port of FigBug's [Wavetable](https://github.com/FigBug/Wavetable),
+under BSD-3-Clause (see `schwung-tablor/LICENSE` for all the components).
 
-Serum presets, packs, wavetables and samples are Xfer's and the pack authors', and **are not redistributed**. The repo does not contain any `.SerumPack`,
-`.SerumPreset`, Serum wavetable, `.tbs` sample set or Serum render. Bring your own and keep the outputs (`out/`, `out_*/`, `calibration/refs/`) local.
-Check the licence of a pack before sharing the presets you convert from it.
+This repository contains **no Serum presets, packs, wavetables, samples or renders**, and no presets converted from them: those belong to Xfer and to the
+preset authors. You convert your own. Check the licence of a pack before sharing presets you converted from it.
+
+TinyHouse is not affiliated with or endorsed by Xfer Records, Ableton or the Schwung project. "Serum" is a trademark of Xfer Records; "Move" is a trademark of
+Ableton AG.

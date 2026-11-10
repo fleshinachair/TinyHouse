@@ -13,7 +13,8 @@ import fx_probe as P
 import test_render_calibration as H
 from serum2_preset_loader.codec import decode_preset_file
 SR = H.SR
-FACT = Path("C:/Users/Mat/OneDrive/Documents/Xfer/Serum 2 Presets/Presets/Factory")
+import serum_paths
+FACT = serum_paths.SERUM_ROOT / "Presets" / "Factory"
 EDGES = [60, 120, 250, 500, 1000, 2000, 4000, 8000, 16000]
 def bands(x):
     m = x.mean(axis=0)[int(0.4 * SR):int(1.8 * SR)]

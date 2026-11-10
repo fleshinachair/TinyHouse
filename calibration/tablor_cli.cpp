@@ -62,6 +62,8 @@ int main(int argc, char **argv)
         p = semi + 1;
         if (k == "clip") { e.setClip(parseClip(v.c_str())); continue; }
         if (k == "arp") { e.setArp(parseArp(v.c_str())); continue; }
+        if (k == "macn") continue;
+        if (k == "mac") { MacroRouteSpec r[Engine::kMaxMacroRoutes]; e.setMacroRoutes(r, parseMacroRoutes(v.c_str(), r, Engine::kMaxMacroRoutes)); continue; }
         if (k == "smp_set" || k == "smp2_set" || k == "smp3_set") {
             if (v.empty()) continue;
             auto set = std::make_shared<SampleSet>();
@@ -83,6 +85,20 @@ int main(int argc, char **argv)
         for (int i = 0; i < TB_PARAM_COUNT; i++)
             if (pk == tb_params[i].key) { (onBus ? e.busPots[k[1] - '1'][i] : e.pots[i]) = std::stof(v); found = true; break; }
         if (!found) { fprintf(stderr, "unknown key %s\n", k.c_str()); return 3; }
+    }
+
+    /* TB_MACRO="1=127,3=0": the macros are turned to these positions (0..127) before the notes: their routed parameters move by the change. */
+    e.macroSync();
+    if (const char *mc = getenv("TB_MACRO")) {
+        std::stringstream ms(mc);
+        for (std::string t; std::getline(ms, t, ',');) {
+            const size_t q = t.find('=');
+            if (q == std::string::npos) continue;
+            const int i = atoi(t.c_str()) - 1;
+            if (i < 0 || i > 7) continue;
+            e.pots[TB_P_MAC1 + i] = std::stof(t.substr(q + 1));
+            e.macroMoved(i, e.pots[TB_P_MAC1 + i]);
+        }
     }
 
     std::vector<int> notes;

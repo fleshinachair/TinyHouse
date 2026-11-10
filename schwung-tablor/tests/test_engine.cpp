@@ -1015,8 +1015,37 @@ static void testSampleVoicePlaysThrough()
     CHECK(rms(tail) > 0.5 * rms(head), "and so are blocks 500-600, a second and a half in (rms %.0f against %.0f)", rms(tail), rms(head));
 }
 
+/* Macros: a macro pot moves its routed parameters by travel x change / 127 and leaves the rest; the preset's own values are where the macro sat when it loaded. */
+static void testMacros()
+{
+    Engine e;
+    e.pots[TB_P_FLT_FREQ] = 60;
+    e.pots[TB_P_REV_MIX] = 10;
+    e.pots[TB_P_MAC1] = 32; e.pots[TB_P_MAC2] = 100;
+    e.macroSync();
+    const Engine::MacroRoute r[] = { { 0, TB_P_FLT_FREQ, 40.0f }, { 0, TB_P_REV_MIX, -127.0f }, { 1, TB_P_FLT_FREQ, -20.0f } };
+    e.setMacroRoutes(r, 3);
+    CHECK(e.macroRouteCount() == 3, "three routes are taken");
+    e.macroMoved(0, 32.0f);
+    CHECK(e.pots[TB_P_FLT_FREQ] == 60.0f && e.pots[TB_P_REV_MIX] == 10.0f, "a macro that has not moved moves nothing");
+    e.pots[TB_P_MAC1] = 127; e.macroMoved(0, 127.0f);
+    CHECK(std::fabs(e.pots[TB_P_FLT_FREQ] - (60.0f + 40.0f * 95.0f / 127.0f)) < 1e-3f, "macro 1 up: the cutoff moves by travel x change / 127 (%.2f)", e.pots[TB_P_FLT_FREQ]);
+    CHECK(e.pots[TB_P_REV_MIX] == 0.0f, "and a pot stops at its own floor");
+    e.pots[TB_P_MAC1] = 32; e.macroMoved(0, 32.0f);
+    CHECK(std::fabs(e.pots[TB_P_FLT_FREQ] - 60.0f) < 1e-3f, "back where it was, the cutoff is back (%.3f)", e.pots[TB_P_FLT_FREQ]);
+    e.pots[TB_P_MAC2] = 0; e.macroMoved(1, 0.0f);
+    CHECK(std::fabs(e.pots[TB_P_FLT_FREQ] - (60.0f + 20.0f * 100.0f / 127.0f)) < 1e-3f, "macro 2 moves the same cutoff on its own (%.2f)", e.pots[TB_P_FLT_FREQ]);
+    e.pots[TB_P_FLT_FREQ] = 5; e.pots[TB_P_MAC1] = 0; e.macroSync();
+    e.pots[TB_P_MAC1] = 127; e.macroMoved(0, 127.0f);
+    CHECK(std::fabs(e.pots[TB_P_FLT_FREQ] - 45.0f) < 1e-3f, "a macro turned from a synced state moves from there (%.2f)", e.pots[TB_P_FLT_FREQ]);
+    e.setMacroRoutes(nullptr, 0);
+    e.pots[TB_P_MAC1] = 0; e.macroMoved(0, 0.0f);
+    CHECK(std::fabs(e.pots[TB_P_FLT_FREQ] - 45.0f) < 1e-3f, "no routes: nothing moves");
+}
+
 int main()
 {
+    testMacros();
     testThirdOscillator();
     testSampleVoicePlaysThrough();
     testDestinationOrder();

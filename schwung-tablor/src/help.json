@@ -241,6 +241,32 @@
       ]
     },
     {
+      "title": "Macros",
+      "lines": [
+        "Imported Serum",
+        "presets bring their",
+        "macros: each knob",
+        "on the Macros page",
+        "moves what the",
+        "preset routes to it",
+        "(cutoff, effect",
+        "mix, wavetable",
+        "position...).",
+        "",
+        "The sound at load",
+        "is the preset's own;",
+        "the knobs move",
+        "from there. The web",
+        "remote UI shows the",
+        "macros by name and",
+        "the other tabs",
+        "follow them.",
+        "",
+        "Sounds without",
+        "macros ignore them."
+      ]
+    },
+    {
       "title": "Credits",
       "lines": [
         "Sound engine after",

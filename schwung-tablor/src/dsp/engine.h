@@ -122,6 +122,11 @@ done:
     return d;
 }
 
+/* The macro routes a state's "mac" key holds, "macro:key:travel,..." (macro 1..8, an integer parameter's key, its travel over the macro's range): up to `max` routes, the
+ * macro as a 0-based index. A route naming a key this build lacks, or a parameter that is not a plain number, is skipped. */
+struct MacroRouteSpec { int macro; int pot; float travel; };
+int parseMacroRoutes(const char *text, MacroRouteSpec *out, int max);
+
 /* The clock the song clock follows (seconds): the steady clock unless a test supplies its own. */
 void demoSetWallClock(double (*fn)());
 
@@ -142,6 +147,16 @@ public:
     void setHostBpm(float bpm) { hostBpm = bpm; }
     /* The Move's transport: beats since it started (< 0: stopped). `known` says the host reports it at all; without that the demo runs on a clock of its own. */
     void setHostBeat(double beats, bool known) { hostBeat = beats; hostBeatKnown = known; }
+
+    /* Macros. A route says that parameter `pot` travels `travel` pot steps over the macro's whole range (0..127). Moving a macro pot moves each of its parameters
+     * by travel x (the macro's change) / 127, so the preset's own settings are where the macro sat when it was saved. The routes belong to the preset
+     * (the state's "mac" key); set them from the thread that sets pots. */
+    using MacroRoute = MacroRouteSpec;
+    static constexpr int kMaxMacroRoutes = 96;
+    void setMacroRoutes(const MacroRoute *r, int n);
+    void macroMoved(int macro, float now);                   /* the macro pot has just been set to `now`: move its parameters by the change */
+    void macroSync();                                        /* take the macro pots as they are (a state was loaded): nothing moves */
+    int macroRouteCount() const { return nMacroRoutes; }
 
     void onMidi(const uint8_t *msg, int len);
     void renderBlock(int16_t *outInterleavedLr, int frames);
@@ -184,6 +199,9 @@ private:
     double demoOff = 0.0, demoWaitT = -1.0;        /* transport ticks minus demoPos at the start; the wall time the wait for a transport began */
     double hostBeat = -1.0;
     bool hostBeatKnown = false;
+    MacroRoute macroRoutes[kMaxMacroRoutes] = {};
+    int nMacroRoutes = 0;
+    float macroSeen[8] = {};                                 /* each macro's position as the routes last saw it */
     double demoPos = 0.0, demoFiredTo = 0.0;       /* ticks of the song since the loop's first lap began; the note-ons below demoFiredTo have been sent */
     int dAct[64];
     double dActEnd[64];

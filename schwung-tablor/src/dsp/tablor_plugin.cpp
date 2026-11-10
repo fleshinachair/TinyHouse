@@ -97,6 +97,8 @@ struct tablor_instance {
     char  state_buf[16 * 1024];
     char  arp_str[4096] = {};                 /* the preset's arpeggiator, likewise */
     char  clip_str[4096] = {};                /* the preset's note pattern as the state carried it (kept to write it back out) */
+    char  mac_str[3072] = {};                 /* the preset's macro routes ("macro:key:travel,..."), kept to write back out */
+    char  macn_str[512] = {};                 /* the macros' names ("a|b|c|..."), likewise */
 
     /* ---- Turnable wavetable selection -------------------------------
      * The filepath control (wt1_table/wt2_table) is OPAQUE to the host:
@@ -969,7 +971,9 @@ static void tb_publish_selection(tablor_instance *inst)
             out += "\""; tb_json_append(out, dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]); out += "\"";
         }
         out += "]},{\"key\":\"demo_list\",\"name\":\"Demo List\",\"type\":\"string\",\"access\":\"read\"}"
-               ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}";
+               ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}"
+               ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
+               ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}";
     }
 
     /* The shape digests are DECLARED here so they reach a browser at all:
@@ -1079,6 +1083,13 @@ static float clamp_param(const tb_param_t *p, float v)
     return v;
 }
 
+/* The macro routes the state carries ("macro:key:travel,...") into the engine. */
+static void apply_macro_routes(tablor_instance *inst, const char *text)
+{
+    tb::MacroRouteSpec r[tb::Engine::kMaxMacroRoutes];
+    inst->engine.setMacroRoutes(r, tb::parseMacroRoutes(text, r, tb::Engine::kMaxMacroRoutes));
+}
+
 /* Serialize the current sound into inst->state_buf (TBLR1 blob). */
 static void build_state_blob(tablor_instance *inst)
 {
@@ -1097,6 +1108,10 @@ static void build_state_blob(tablor_instance *inst)
         o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "clip=%s;", inst->clip_str);
     if (inst->arp_str[0])
         o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "arp=%s;", inst->arp_str);
+    if (inst->mac_str[0])
+        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "mac=%s;", inst->mac_str);
+    if (inst->macn_str[0])
+        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "macn=%s;", inst->macn_str);
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
         if (tb_params[i].type == TB_PATH) {   /* wavetable: store the path */
             const char *path = inst->wt_path[tb_path_slot(i)];
@@ -1128,9 +1143,12 @@ static void reset_to_defaults(tablor_instance *inst)
     inst->engine.setClip(nullptr);
     inst->arp_str[0] = 0;
     inst->engine.setArp(nullptr);
+    inst->mac_str[0] = inst->macn_str[0] = 0;
+    inst->engine.setMacroRoutes(nullptr, 0);
     for (int i = 0; i < TB_PARAM_COUNT; i++)
         if (tb_params[i].type != TB_PATH)
             inst->params()[i] = tb_params[i].def;
+    inst->engine.macroSync();
     set_table_path(inst, 0, "");
     set_table_path(inst, 1, "");
     set_table_path(inst, 2, "");
@@ -1155,6 +1173,9 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
     inst->engine.setClip(nullptr);
     inst->arp_str[0] = 0;
     inst->engine.setArp(nullptr);
+    inst->mac_str[0] = inst->macn_str[0] = 0;         /* nor macros: a preset says where its macros sit and what they move */
+    inst->engine.setMacroRoutes(nullptr, 0);
+    for (int i = 0; i < 8; i++) inst->params()[TB_P_MAC1 + i] = 0.0f;
     char kbuf[64], vbuf[4096];
     while (*p) {
         const char *eq = strchr(p, '=');
@@ -1184,6 +1205,17 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
                 p = (*semi) ? semi + 1 : semi;
                 continue;
             }
+            if (!strcmp(kbuf, "mac")) {
+                snprintf(inst->mac_str, sizeof inst->mac_str, "%s", vbuf);
+                apply_macro_routes(inst, vbuf);
+                p = (*semi) ? semi + 1 : semi;
+                continue;
+            }
+            if (!strcmp(kbuf, "macn")) {
+                snprintf(inst->macn_str, sizeof inst->macn_str, "%s", vbuf);
+                p = (*semi) ? semi + 1 : semi;
+                continue;
+            }
             const bool onBus = kbuf[0] == 'b' && (kbuf[1] == '1' || kbuf[1] == '2') && kbuf[2] == '.';
             int idx = param_index(onBus ? kbuf + 3 : kbuf);
             if (idx >= 0 && onBus) {
@@ -1199,6 +1231,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
         }
         p = (*semi) ? semi + 1 : semi;
     }
+    inst->engine.macroSync();                         /* the macros sit where the state says; their routes move nothing until one is turned */
 }
 
 /* ------------------------------------------------------------------ */
@@ -1352,6 +1385,8 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     }
 
     inst->params()[idx] = clamp_param(p, v);
+    if (idx >= TB_P_MAC1 && idx <= TB_P_MAC8)
+        inst->engine.macroMoved(idx - TB_P_MAC1, inst->params()[idx]);       /* the macro's parameters move by its change */
 }
 
 static int write_str(char *buf, int buf_len, const char *s)
@@ -1461,6 +1496,10 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         return write_str(buf, buf_len, std::to_string(inst->demo_part.load()).c_str());
     if (!strcmp(key, "demo_list"))
         return write_str(buf, buf_len, inst->demoList()->digest.c_str());
+    if (!strcmp(key, "macro_names"))              /* eight names between bars, as the preset gave them; an empty one is a macro that moves nothing ("Cutoff||Wet|||||") */
+        return write_str(buf, buf_len, inst->macn_str);
+    if (!strcmp(key, "macro_routes"))             /* "macro:key:travel,..." as the preset gave them: the remote UI re-reads the keys a macro moves */
+        return write_str(buf, buf_len, inst->mac_str);
     if (!strcmp(key, "demo_now")) {
         char tmp[48];
         snprintf(tmp, sizeof tmp, "%d,%d,%d", inst->demo_pack.load(), inst->demo_part.load(), inst->engine.demoPlaying() ? 1 : 0);

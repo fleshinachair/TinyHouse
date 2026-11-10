@@ -439,7 +439,8 @@ def physical(tree: dict, header: dict) -> dict:
                     "keytrack": flt2.get("kParamKeyTrack", 0.0),
                     "var": flt2.get("kParamVar")},
         "balance": balance,
-        "envs": envs, "mods": mods, "macros": macros, "lfos": lfos, "fx": fx, "routed": routed,
+        "envs": envs, "mods": mods, "macros": macros, "macro_names": [str(tree.get(f"Macro{i}", {}).get("name", "") or "") for i in range(8)],
+        "lfos": lfos, "fx": fx, "routed": routed,
         "fx_nodes": fx_nodes, "bus_fx": bus_fx,
         "route_none": none, "route_out": out, "bus": bus, "filter_dest": fdest, "bus_nodes": [[dict(n) for n in (tree.get(f"FXRack{i}", {}).get("FX", []) or [])] for i in (1, 2)],
     }
@@ -1178,7 +1179,95 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
     return left
 
 
-def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
+def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir, _macros: bool = True) -> dict:
+    m = _map_to_tablor(vital, pack, serum_tables, wt_out, subdir)
+    if _macros and MAP_MACROS:
+        attach_macros(m, vital, (pack, serum_tables, wt_out, subdir))
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Macros. The converter folds every macro at its saved position (above). To let the macro knobs still move the sound, each macro a preset routes is mapped a
+# second time at the far end of its range; the integer parameters that differ become that macro's routes, as the parameter's travel over the macro's whole range.
+# Moving the macro in the engine then moves those parameters by travel x change / 127 (Engine::macroMoved), so the sound at the saved position is untouched.
+# Linear between the two mappings: a law that bends (an oscillator's volume, a cutoff) is followed only on average.
+MAP_MACROS = True
+MACRO_POT = re.compile(
+    r"^(wt[123]_(pos|level|tune|detune|spread|pan|bend|formant|sync|sgain|sout|bal|bus[12])|sub_(level|bal|bus[12])|noise_(level|hp|lp|bal|bus[12])|smp[23]?_(level|tune|fine|bal|bus[12])"
+    r"|flt[12]?_(freq|res|drive|env|key|gain|bus[12])|vca_[adsr]|flt_[adsr]|me[12]_[adsr]|me[12]_amt|vca_vel|flt_vel|fxf_(freq|res|env)|lr[1-8]_amt"
+    r"|dly2?_(mix|time|timer|fb|lo|hi)|rev_(mix|decay|damp|width|lo)|fx_(space|wide|wrate|wdepth)|dist_(drive|mix|out|level|pre_freq|pre_q)"
+    r"|comp_(thresh|thresh2|thresh3|ratio|attack|release|makeup|mix|knee|gain[123]|below)|chor_(mix|rate|depth|d1|d2|fb|filt)|flan_(mix|rate|depth|fb|phase)"
+    r"|phas_(mix|rate|depth|depth2|freq|fb|phase)|hyd_(det|rate|wet)|eq[1-4]_(freq|gain|q)|eq[ms][1-4]_(freq|gain|q)|glide|mwidth|monohz|lo_shelf|hi_shelf)$")
+# An effect's on-switch and the parameters that go with it: a macro that raises a wet from 0 turns the effect on, and the effect's other settings are the preset's.
+MACRO_FX_GROUPS = {"rev_on": ("rev_",), "dly_on": ("dly_", "dly2_"), "chor_on": ("chor_",), "flan_on": ("flan_",), "phas_on": ("phas_",), "comp_on": ("comp_",),
+                   "wide_on": ("fx_wide", "fx_wrate", "fx_wdepth"), "eq_on": ("eq1_", "eq2_", "eq3_", "eq4_")}
+MACRO_WET = re.compile(r"(_mix|_wet)$|^fx_wide$")
+MAX_MACRO_ROUTES = 96
+
+
+def _macro_name(s: str) -> str:
+    return re.sub(r"[;=|,:\x00-\x1f]", " ", s).strip()[:14]
+
+
+def macro_travel(P0: dict, P1: dict, paths0: dict, paths1: dict, span: float):
+    """What a macro does, from the preset mapped at its saved position (P0) and at the far end of its range (P1, `span` of the range away, signed):
+    ([(key, travel over the whole range)], {key: value to store}, reason or None when the macro changes the sound's structure)."""
+    if paths0 != paths1:
+        return [], {}, "it changes which wavetable an oscillator plays"
+    flips = {k: g for k, g in MACRO_FX_GROUPS.items() if P0.get(k) != P1.get(k)}
+    routes, store = [], {}
+    for key, a in P0.items():
+        b = P1.get(key, a)
+        if a == b or key == "volume":
+            continue
+        flag = next((f for f, gs in flips.items() for g in gs if key.startswith(g)), None)
+        if key in flips:
+            if P1[key] > a:                              # the macro turns the effect on: it is on all along, its wet at the saved position is what the preset has
+                store[key] = P1[key]
+            continue
+        if flag is not None and not MACRO_WET.search(key):
+            if P1[flag] > P0[flag]:                      # an effect that was off: the preset's own settings for it are the far end's
+                store[key] = b
+            continue
+        if not MACRO_POT.match(key):
+            return [], {}, f"it changes {key}"
+        if abs(b - a) >= 1:
+            routes.append((key, (b - a) / span))
+    return routes, store, None
+
+
+def attach_macros(m: dict, vital: dict, args: tuple) -> None:
+    """Map each routed macro again at the far end of its range, add the routes and the macro positions to `m` (m["macro"]) and its params (mac1..mac8)."""
+    ph = vital["serum2move"]
+    stored = list(ph["macros"][:8])
+    used = sorted({s - 25 for md in ph["mods"] for s in (md["source"], md.get("aux") or 0) if isinstance(s, int) and 25 <= s <= 32})
+    names = list(ph.get("macro_names") or [""] * 8)
+    for k in range(8):
+        m["params"][f"mac{k + 1}"] = round(_clamp(stored[k], 0, 100) * 127 / 100)
+    routes, moved_names, notes = [], [""] * 8, []
+    for k in used:
+        far = 100.0 if stored[k] < 50.0 else 0.0
+        v2 = dict(vital); p2 = dict(ph); p2["macros"] = list(ph["macros"]); p2["macros"][k] = far; v2["serum2move"] = p2
+        m1 = map_to_tablor(v2, *args, _macros=False)
+        label = names[k] or f"Macro {k + 1}"
+        found, store, why = macro_travel(m["params"], m1["params"], m["paths"], m1["paths"], (far - stored[k]) / 100.0)
+        if why:
+            notes.append(f"{label} (macro {k + 1}) is left at its saved position: {why}")
+            continue
+        if not found:
+            continue
+        m["params"].update(store)
+        routes += [(k + 1, key, travel) for key, travel in found]
+        moved_names[k] = _macro_name(names[k]) or f"Macro {k + 1}"
+    routes.sort(key=lambda r: -abs(r[2]))
+    routes = sorted(routes[:MAX_MACRO_ROUTES])
+    m["macro"] = {"routes": routes, "names": moved_names, "stored": stored}
+    m["notes"] += notes
+    if any(moved_names):
+        m["notes"].append("macros: " + "; ".join(f"{n} moves {', '.join(key for mk, key, _ in routes if mk == i + 1)}" for i, n in enumerate(moved_names) if n))
+
+
+def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     ph = vital["serum2move"]
     P = dict(TABLOR_DEFAULTS)
     crit: list[str] = []      # audibly changes the sound -> tier C
@@ -1375,7 +1464,10 @@ def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P["sub_tune"] = round(_clamp(sub["octave"] * 12, -48, 48))
     nz = ph["noise"]
     if nz.get("click"):
-        note.append("noise osc plays a short one-shot click in Serum; not carried")
+        if any(s[0].get("noise") for s in smps):
+            note.append("noise osc plays a short one-shot click in Serum; a sample oscillator plays it")
+        else:
+            note.append("noise osc plays a short one-shot click in Serum; not carried")
     noise_db = 0.0                    # the slot's level against the engine's White at the same volume, for a route into its volume as well
     if nz["enabled"]:
         P["noise_level"] = pot_level(level_of(3, nz["level"]))
@@ -1844,6 +1936,10 @@ def trim_for_headroom(m: dict, move_root: Path) -> None:
 def blob(m: dict) -> str:
     parts = [f"{k}={v}" for k, v in m["params"].items()]
     parts += [f"{k}={v}" for k, v in m["paths"].items()]
+    mc = m.get("macro")
+    if mc and mc["routes"]:
+        parts.append("mac=" + ",".join(f"{k}:{key}:{travel:.1f}" for k, key, travel in mc["routes"]))
+        parts.append("macn=" + "|".join(mc["names"]))
     return "TBLR2;" + ";".join(parts) + ";"
 
 

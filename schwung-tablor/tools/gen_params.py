@@ -472,6 +472,10 @@ TONE = dict(
     cbl    = pot("comp_below",   "CBLW", "Comp Below",      0),
 )
 
+# The eight macros of an imported Serum preset. A macro pot moves the parameters its preset routes to it (the state's "mac" key lists the routes: macro,
+# parameter, the parameter's travel over the macro's whole range); the pots hold the macro's position, and a preset is saved with them where they sit.
+MACROS = [pot(f"mac{i}", f"MC{i}", f"Macro {i}", 0) for i in range(1, 9)]
+
 # ---------------------------------------------------------------- pages
 def row(*slots):
     out = list(slots) + [None] * (8 - len(slots))
@@ -594,6 +598,8 @@ BANKS = [
         row(SAMPLE3["set"], SAMPLE3["level"], SAMPLE3["tune"], SAMPLE3["fine"], SAMPLE3["post"], SAMPLE3["fixed"]),
         row(BALANCES["smp3"], BUSES["smp3_1"], BUSES["smp3_2"]),
     ]),
+    # Last, so no earlier parameter's number moves. The page is on the device (PAGE_MAP).
+    ("Macros", False, [row(*MACROS)]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -703,6 +709,7 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The roo
     ("Tone",    0, "Tone"),
     ("Effects", 0, "Effects"),
     ("Mod FX",  0, "Mod FX"),
+    ("Macros",  0, "Macros"),
 ]
 
 def page_slot(p):

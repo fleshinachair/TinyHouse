@@ -921,7 +921,19 @@ def fit_one(target: np.ndarray, kind: str, centre: float, spread: float = 1.2) -
     return best[1], best[0]
 
 
+_REDUCE_CACHE: dict = {}
+
+
 def reduce_bands(bands: list[dict], slots: int = EQ_SLOTS) -> tuple[list[dict], float]:
+    """_reduce_bands, remembered: the same bands give the same answer, and a preset is mapped again for each of its macros."""
+    key = (json.dumps(bands, sort_keys=True, default=float), slots)
+    hit = _REDUCE_CACHE.get(key)
+    if hit is None:
+        hit = _REDUCE_CACHE[key] = _reduce_bands(bands, slots)
+    return [dict(b) for b in hit[0]], hit[1]
+
+
+def _reduce_bands(bands: list[dict], slots: int = EQ_SLOTS) -> tuple[list[dict], float]:
     """At most `slots` bands whose summed response is as close to the original as it gets.
     Cuts are kept first, since nothing else can stand in for one; shaped bands are merged
     pairwise, cheapest merge first. Returns the bands and the rms error (dB) over the grid."""

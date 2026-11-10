@@ -24,6 +24,59 @@ Engine::Engine()
 
 }
 
+int parseMacroRoutes(const char *text, MacroRouteSpec *out, int max)
+{
+    int n = 0;
+    const char *p = text;
+    while (*p && n < max) {
+        char *end = nullptr;
+        const long macro = strtol(p, &end, 10);
+        if (end == p || *end != ':') break;
+        const char *k = end + 1;
+        const char *c2 = strchr(k, ':');
+        if (!c2) break;
+        const size_t kl = (size_t) (c2 - k);
+        const float travel = strtof(c2 + 1, &end);
+        for (int i = 0; i < TB_PARAM_COUNT; i++)
+            if (tb_params[i].type == TB_INT && strlen(tb_params[i].key) == kl && !strncmp(tb_params[i].key, k, kl)) {
+                if (macro >= 1 && macro <= 8) out[n++] = { (int) macro - 1, i, travel };
+                break;
+            }
+        p = end;
+        if (*p == ',') p++;
+        else break;
+    }
+    return n;
+}
+
+void Engine::setMacroRoutes(const MacroRoute *r, int n)
+{
+    n = std::max(0, std::min(n, kMaxMacroRoutes));
+    nMacroRoutes = 0;                                         /* the audio thread never reads the routes, so this is only ordering for the next macro move */
+    for (int i = 0; i < n; i++)
+        if (r[i].macro >= 0 && r[i].macro < 8 && r[i].pot >= 0 && r[i].pot < TB_PARAM_COUNT)
+            macroRoutes[nMacroRoutes++] = r[i];
+}
+
+void Engine::macroMoved(int macro, float now)
+{
+    if (macro < 0 || macro >= 8) return;
+    const float change = now - macroSeen[macro];
+    macroSeen[macro] = now;
+    if (change == 0.0f) return;
+    for (int i = 0; i < nMacroRoutes; i++) {
+        const MacroRoute &r = macroRoutes[i];
+        if (r.macro != macro) continue;
+        const tb_param_t &p = tb_params[r.pot];
+        pots[r.pot] = std::min(std::max(pots[r.pot] + r.travel * change / 127.0f, p.min), p.max);
+    }
+}
+
+void Engine::macroSync()
+{
+    for (int i = 0; i < 8; i++) macroSeen[i] = pots[TB_P_MAC1 + i];
+}
+
 Engine::Tables Engine::loadTables() const
 {
     Tables t;

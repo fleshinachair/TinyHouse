@@ -1936,7 +1936,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
   var bad = list.filter(function (p) { return !p.json || !sent[p.file]; });
   function lines(p) {
     var out = p.gaps.map(function (g) { return g; });
-    p.not_carried.forEach(function (g) { out.push(g + " not carried"); });
+    p.not_carried.forEach(function (g) { out.push(/not carried|not imported/.test(g) ? g : g + " not carried"); });
     p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
     p.missing_samples.forEach(function (t) { out.push("Sample not found: " + t + " (that oscillator stays silent)"); });
     return out;
@@ -2185,6 +2185,50 @@ async function demoRun() {
   } catch (e) { u.res.textContent = "Stopped: " + e.message; u.notes.textContent = notes.join("\n"); }
   DM.busy = false; demoSummary();
 }
+
+/* ---------------------------------------------------------------- macros
+ * The preset's own macros (an imported Serum preset's): a macro knob moves the parameters the preset routes to it. The module does the moving; the page asks it for the
+ * parameters' new values afterwards, so the knobs on the other tabs follow. */
+var MAC = { names: [], routes: [], labs: [], wraps: [], note: null, timer: null };
+function macRender() {
+  var any = false;
+  for (var i = 0; i < 8; i++) {
+    var nm = MAC.names[i] || "", w = MAC.wraps[i];
+    if (!w) continue;
+    w.style.display = nm ? "" : "none";
+    if (nm) { any = true; MAC.labs[i].textContent = nm; }
+  }
+  if (MAC.note) MAC.note.style.display = any ? "none" : "";
+}
+function macKeys(i) {
+  var seen = {}, out = [];
+  MAC.routes.forEach(function (r) { if (r.m === i + 1 && !seen[r.k]) { seen[r.k] = 1; out.push(r.k); } });
+  return out;
+}
+function macFollow(i) {
+  clearTimeout(MAC.timer);
+  MAC.timer = setTimeout(function () {
+    macKeys(i).forEach(function (k) {
+      schwungRemote.getParam(KP + k).then(function (v) { if (v !== undefined && v !== null && v !== "") incoming(k, v); }).catch(function () {});
+    });
+  }, 120);
+}
+function macReload() {
+  schwungRemote.getParam(KP + "macro_names").then(function (v) { EXTRA.macro_names(v || ""); }).catch(function () {});
+  schwungRemote.getParam(KP + "macro_routes").then(function (v) { EXTRA.macro_routes(v || ""); }).catch(function () {});
+}
+function buildMacros(page) {
+  var g = el("div", "grid g2", page);
+  var p = panel("Macros", g);
+  var r = row(["mac1", "mac2", "mac3", "mac4", "mac5", "mac6", "mac7", "mac8"], p.body);
+  var wraps = r.querySelectorAll(".knob");
+  for (var i = 0; i < wraps.length; i++) {
+    MAC.wraps[i] = wraps[i]; MAC.labs[i] = wraps[i].querySelector(".lab");
+    (function (n) { on("mac" + (n + 1), function () { macFollow(n); }); })(i);
+  }
+  MAC.note = el("div", "demo-note", p.body, "This sound has no macros. Imported Serum presets bring theirs: each knob moves what the preset routes to it (cutoff, effect mix, wavetable position and so on), and the knobs on the other tabs follow.");
+  macRender();
+}
 function buildDemo(page) {
   var u = DM.ui = {};
   var g = el("div", "grid g2", page);
@@ -2243,7 +2287,7 @@ function buildDemo(page) {
 
 /* chain_params entries the module adds for the host's own pages (pack and table lists, the preset
  * browser): they are not sound parameters and have their own pickers or none here */
-var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_pack|demo_part|demo_list|demo_now)$/;
+var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_pack|demo_part|demo_list|demo_now|mac[1-8]|macro_names|macro_routes)$/;
 
 /* keys the host streams that are not controls */
 var EXTRA = {
@@ -2262,9 +2306,13 @@ var EXTRA = {
     if (!isNaN(b) && !isNaN(i)) { DM.b = b; DM.p = i; DM.playing = p[2] === "1"; demoRender(); }
   },
   demo_on: function (v) { DM.on = String(v).toLowerCase() === "on" || String(v) === "1"; demoRender(); },
+  macro_names: function (v) { MAC.names = String(v || "").split("|"); macRender(); },
+  macro_routes: function (v) {
+    MAC.routes = String(v || "").split(",").map(function (t) { var a = t.split(":"); return { m: parseInt(a[0], 10), k: a[1] }; }).filter(function (r) { return r.k; });
+  },
   preset_now: function (v) {
     var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
-    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); }
+    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); macReload(); }
   }
 };
 [1, 2, 3].forEach(function (n) {
@@ -2274,7 +2322,7 @@ var EXTRA = {
 /* ------------------------------------------------------------------ start */
 function buildTabs() {
   var tabs = document.getElementById("tabs"), pages = document.getElementById("pages");
-  var defs = [["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
+  var defs = [["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Macros", buildMacros], ["Globals", buildGlobal], ["Demo", buildDemo]];
   var ps = [], bs = [];
   defs.forEach(function (d, i) {
     var b = el("button", i ? null : "on", tabs, d[0]);

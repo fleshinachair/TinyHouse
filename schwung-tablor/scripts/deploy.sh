@@ -26,6 +26,7 @@ scp -q "$SRC/src/module.json"       "$HOST:$DEST/module.json.new"
 scp -q "$SRC/src/ui_pages.json"     "$HOST:$DEST/ui_pages.json.new"
 scp -q "$SRC/src/help.json"         "$HOST:$DEST/help.json"
 scp -q "$SRC/src/web_ui.html"       "$HOST:$DEST/web_ui.html"
+scp -q "$SRC/src/ui/canvas.js"      "$HOST:$DEST/canvas.js"      # the Macros page cells (greys out unused macros)
 # The remote UI's Import runs the converter from this bundle (python tools/build_import_bundle.py makes it)
 if [ -f "$SRC/build/import_bundle.zip" ]; then
     scp -q "$SRC/build/import_bundle.zip" "$HOST:$DEST/import_bundle.zip"

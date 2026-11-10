@@ -668,6 +668,10 @@ VIZ = {
     "volume": {"kind": "fader"},
     "legato": {"kind": "switch"},
 }
+# Macros page: one widget per knob (src/ui/canvas.js). It draws the value, or a dimmed "N/A" when the preset does not use that macro; it
+# learns that from macro_names (a declared read-only key, "Cutoff||Wet|||||"), which the host reads as an extra key.
+for _i in range(1, 9):
+    VIZ[f"mac{_i}"] = {"kind": f"custom:tinyhouse_mac{_i}", "group": f"mac{_i}", "role": "a", "extra_keys": ["macro_names"]}
 def chain_param(p):
     if p["type"] == "file":
         d = {"key": p["key"], "name": p["full"], "type": "filepath",

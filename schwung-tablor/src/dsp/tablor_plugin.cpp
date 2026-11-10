@@ -99,6 +99,10 @@ struct tablor_instance {
     char  clip_str[4096] = {};                /* the preset's note pattern as the state carried it (kept to write it back out) */
     char  mac_str[3072] = {};                 /* the preset's macro routes ("macro:key:travel,..."), kept to write back out */
     char  macn_str[512] = {};                 /* the macros' names ("a|b|c|..."), likewise */
+    /* The macro names as chain_params last described them. A preset with other names republishes chain_params (the names ride the macro
+     * knobs' `unit`, which the host shows beside the value when a knob is touched), on the worker; is_loading says "1" until that is done. */
+    std::shared_ptr<const std::string> macn_pub { std::make_shared<std::string>() };
+    std::atomic<int> pub_pending { 0 };
 
     /* ---- Turnable wavetable selection -------------------------------
      * The filepath control (wt1_table/wt2_table) is OPAQUE to the host:
@@ -1003,6 +1007,32 @@ static void tb_publish_selection(tablor_instance *inst)
            ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}";
     out += "]";
 
+    /* The macro knobs carry the preset's macro names as their `unit`: the cell label stays "MCR 1", and touching a knob shows the
+     * value with the name beside it ("64 More Delay") in the top bar. A macro the preset does not use gets no unit. The key's entry
+     * is found by its key; the unit goes in before its viz. */
+    {
+        const std::string names = *std::atomic_load(&inst->macn_pub);
+        size_t pos = 0;
+        for (int m = 0; m < 8; m++) {
+            size_t end = names.find('|', pos);
+            std::string nm = names.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+            pos = end == std::string::npos ? names.size() : end + 1;
+            while (!nm.empty() && nm.back() == ' ') nm.pop_back();
+            while (!nm.empty() && nm.front() == ' ') nm.erase(nm.begin());
+            if (nm.empty()) continue;
+            if (nm.size() > 20) nm.resize(20);
+            const std::string key = "\"key\":\"mac" + std::to_string(m + 1) + "\"";
+            const size_t k = out.find(key);
+            if (k == std::string::npos) continue;
+            const size_t v = out.find(",\"viz\"", k);
+            if (v == std::string::npos) continue;
+            std::string unit = ",\"unit\":\"";
+            tb_json_append(unit, nm);
+            unit += "\"";
+            out.insert(v, unit);
+        }
+    }
+
     std::atomic_store(&inst->sel,
                       std::shared_ptr<const tablor_instance::SelSnapshot>(snap));
 }
@@ -1137,6 +1167,19 @@ static void build_state_blob(tablor_instance *inst)
         }
 }
 
+/* The macro names changed (a preset loaded, or the sound reset): publish chain_params again so the knobs' units follow. On the worker; the host
+ * re-reads the contract a moment after a preset change and is_loading holds it off until this is done. */
+static void republish_macro_names(tablor_instance *inst)
+{
+    if (*std::atomic_load(&inst->macn_pub) == inst->macn_str) return;
+    std::atomic_store(&inst->macn_pub, std::make_shared<const std::string>(inst->macn_str));
+    inst->pub_pending.fetch_add(1);
+    inst->loader.post([inst] {
+        if (!inst->loader.stopping()) tb_publish_selection(inst);
+        inst->pub_pending.fetch_sub(1);
+    });
+}
+
 static void reset_to_defaults(tablor_instance *inst)
 {
     inst->clip_str[0] = 0;
@@ -1155,6 +1198,7 @@ static void reset_to_defaults(tablor_instance *inst)
     set_table_path(inst, TB_WT_SLOTS, "");
     set_table_path(inst, TB_WT_SLOTS + 1, "");
     set_table_path(inst, TB_WT_SLOTS + 2, "");
+    republish_macro_names(inst);
 }
 
 /* Version-tagged blob: "TBLR1;…" or "TBLR2;…". Anything without a known
@@ -1232,6 +1276,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
         p = (*semi) ? semi + 1 : semi;
     }
     inst->engine.macroSync();                         /* the macros sit where the state says; their routes move nothing until one is turned */
+    republish_macro_names(inst);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1454,7 +1499,7 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "is_loading"))
         return write_str(buf, buf_len,
                          (!inst->ready.load(std::memory_order_relaxed) ||
-                          inst->loader.busy()) ? "1" : "0");
+                          inst->loader.busy() || inst->pub_pending.load() > 0) ? "1" : "0");
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */

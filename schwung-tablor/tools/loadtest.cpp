@@ -141,6 +141,43 @@ int main(int argc, char **argv)
     static char big[64 * 1024];
     static char saved[64 * 1024];   /* a state blob held across a round-trip */
 
+    /* The macro knobs carry the preset's macro names as their unit: the cell label stays "Macro 1" and touching the knob shows the value
+     * with the name beside it. A preset's names republish chain_params on the worker; a macro it does not use has no unit. */
+    {
+        auto unitOf = [&](int m) -> std::string {
+            api->get_param(inst, "chain_params", big, sizeof big);
+            std::string cp(big), key = "\"key\":\"mac" + std::to_string(m) + "\"";
+            size_t k = cp.find(key);
+            if (k == std::string::npos) return "<no entry>";
+            size_t e = cp.find("}}", k);                      /* the entry ends after its viz object */
+            size_t u = cp.find("\"unit\":\"", k);
+            if (u == std::string::npos || (e != std::string::npos && u > e)) return "";
+            u += 8;
+            return cp.substr(u, cp.find('"', u) - u);
+        };
+        api->set_param(inst, "state", "TBLR2;mac=1:flt_freq:20.0,3:dly_mix:30.0;macn=More Delay||Cutoff|||||;");
+        settle(api, inst);
+        char lb[8] = {};
+        for (int i = 0; i < 400; i++) {                         /* is_loading holds while the republish is owed */
+            api->get_param(inst, "is_loading", lb, sizeof lb);
+            if (lb[0] == '0') break;
+            struct timespec ts = { 0, 5 * 1000000 };
+            nanosleep(&ts, nullptr);
+        }
+        CHECK(lb[0] == '0', "is_loading falls once the macro names are published");
+        CHECK(unitOf(1) == "More Delay", "macro 1 carries its name as unit (\"%s\")", unitOf(1).c_str());
+        CHECK(unitOf(2) == "", "an unused macro has no unit (\"%s\")", unitOf(2).c_str());
+        CHECK(unitOf(3) == "Cutoff", "macro 3 carries its name (\"%s\")", unitOf(3).c_str());
+        api->set_param(inst, "state", "TBLR2;");
+        for (int i = 0; i < 400; i++) {
+            api->get_param(inst, "is_loading", lb, sizeof lb);
+            if (lb[0] == '0') break;
+            struct timespec ts = { 0, 5 * 1000000 };
+            nanosleep(&ts, nullptr);
+        }
+        CHECK(unitOf(1) == "" && unitOf(3) == "", "a preset without macros clears the units (\"%s\"/\"%s\")", unitOf(1).c_str(), unitOf(3).c_str());
+    }
+
     /* ---- the worker must not be born on the audio thread's scheduling ----
      * Every entry point runs on the SPI callback at SCHED_FIFO 90, and POSIX
      * defaults to PTHREAD_INHERIT_SCHED, so a thread spawned from one takes
@@ -354,8 +391,9 @@ int main(int argc, char **argv)
     for (const char *k : { "wt1_shape", "wt2_shape", "wt_paths" }) {
         char pat[64]; snprintf(pat, sizeof pat, "\"key\":\"%s\"", k);
         const char *at = strstr(big, pat);
-        CHECK(at && strstr(at, "\"type\":\"string\"") && strstr(at, "\"access\":\"read\"") &&
-              !strstr(at, "\"min\""),
+        std::string ent = at ? std::string(at, strchr(at, '}') ? (size_t) (strchr(at, '}') - at) : strlen(at)) : std::string();   /* this entry only */
+        CHECK(at && ent.find("\"type\":\"string\"") != std::string::npos && ent.find("\"access\":\"read\"") != std::string::npos &&
+              ent.find("\"min\"") == std::string::npos,
               "%s is a read-only string, not an int with an empty range", k);
     }
     /* put the hierarchy back in `big` -- the checks below read it from there */
@@ -374,8 +412,8 @@ int main(int argc, char **argv)
             if (!strncmp(c, "\"level\":", 8)) levels++;
             if (!strncmp(c, "\"key\":", 6)) keys++;
         }
-        CHECK(levels == 4 && keys == 0 && end && !strncmp(end, "\"knobs\":[]", 10),
-              "and holds the four pages as levels, with no knobs of its own (%d levels, %d params)", levels, keys);
+        CHECK(levels == 6 && keys == 0 && end && !strncmp(end, "\"knobs\":[]", 10),
+              "and holds the six pages (Main, Tone, Macros, Effects, Mod FX, Demo) as levels, with no knobs of its own (%d levels, %d params)", levels, keys);
     }
     n = api->get_param(inst, "chain_params", big, sizeof big);
     CHECK(strstr(big, "\"viz\"") && strstr(big, "\"group\":\"amp\"") &&

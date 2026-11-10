@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -183,6 +184,7 @@ void Engine::allNotesOff(bool allowTail)
 {
     clipKillAll(false);
     arpStop(false);
+    nDAct = 0;                                  /* the demo keeps playing; what it had sounding is cut with the rest */
     for (auto &v : voices)
         if (v.isActive())
             allowTail ? v.stop(true) : v.kill();
@@ -327,6 +329,145 @@ void Engine::clipAdvance(int frames)
 {
     const double d = clipTicksPerFrame() * frames;
     for (auto &p : players) if (p.used) p.pos += d;
+}
+
+
+/* ---------------------------------------------------------------- demo player */
+/* The song clock: ticks of 1/96 beat, advanced by wall time at the host tempo, one for the whole process (dsp.so is loaded once, so every slot's engine reads the same).
+ * A demo that starts takes its place in its part from this clock, so bass and lead switched on at different moments still play the same bar. */
+static std::atomic_flag gSongLock = ATOMIC_FLAG_INIT;
+static double gSongTicks = 0.0, gSongWall = -1.0;
+
+static double (*gWallClock)() = nullptr;
+void demoSetWallClock(double (*fn)()) { gWallClock = fn; }
+
+static double demoWallNow()
+{
+    return gWallClock ? gWallClock() : std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static double demoSongTicks(float hostBpm)
+{
+    const double bpm = hostBpm >= 20.0f ? std::clamp((double) hostBpm, 40.0, 300.0) : 120.0;
+    const double now = demoWallNow();
+    while (gSongLock.test_and_set(std::memory_order_acquire)) {}
+    if (gSongWall < 0.0) gSongWall = now;
+    gSongTicks += (now - gSongWall) * bpm / 60.0 * 96.0;
+    gSongWall = now;
+    const double t = gSongTicks;
+    gSongLock.clear(std::memory_order_release);
+    return t;
+}
+
+void Engine::demoSend(int note, int vel)
+{
+    uint8_t m[3] = { (uint8_t) (vel > 0 ? 0x90 : 0x80), (uint8_t) std::clamp(note, 0, 127), (uint8_t) vel };
+    onMidi(m, 3);                               /* as a played key, so an arpeggiator or clip in the preset answers it */
+}
+
+void Engine::demoStop(bool noteOffs)
+{
+    if (noteOffs) for (int i = 0; i < nDAct; i++) demoSend(dAct[i], 0);
+    nDAct = 0;
+    demoRun = false;
+    demoArmed = false;
+}
+
+/* Called every block: starts (on the next bar) or stops the player to follow the switch and the part.
+ * The Move's transport is the clock when the host reports one: the part's position is the transport's beat (mod the part's length), so it plays in step with the set's clips,
+ * starts when the transport starts, stops when it stops and takes up again when it restarts. If no transport shows up within kTransportWait seconds of switching on (a host that
+ * reports none, or one that is not running its clock), the demo runs on the song clock of its own, as before. */
+void Engine::demoSync()
+{
+    constexpr double kTransportWait = 2.0, kBar = 4 * 96;
+    const int e = demoEpoch.load();
+    if (e != demoEpochSeen) { demoEpochSeen = e; demoStop(true); }
+    auto d = std::atomic_load(&demoSp);
+    if (demoWant.load() == 0 || !d) {
+        if (demoRun || demoArmed) demoStop(true);
+        demoTrSeen = false; demoWaitT = -1.0;
+        return;
+    }
+    const bool tr = hostBeatKnown && hostBeat >= 0.0;
+    if (tr) demoTrSeen = true;
+    if (demoRun) {
+        if (demoOnTr) {
+            if (!tr) { demoStop(true); return; }                              /* the transport stopped: so does the demo; it takes up again at the next bar after a restart */
+            const double diff = (hostBeat * 96.0 - demoOff) - demoPos;
+            if (std::fabs(diff) > 48.0) { demoStop(true); return; }           /* a jump: start over at the next bar */
+            if (std::fabs(diff) > 2.0) demoPos += diff;                       /* drift (a tempo change): held to the transport */
+        } else if (tr) {
+            demoStop(true);                                                   /* a transport has appeared under a demo on its own clock: lock to it */
+        }
+        if (demoRun) return;
+    }
+    bool useTr = tr;
+    if (!tr) {
+        const double now = demoWallNow();
+        if (demoWaitT < 0.0) demoWaitT = now;
+        if (hostBeatKnown && (demoTrSeen || now - demoWaitT < kTransportWait)) return;   /* wait for the transport to run */
+    }
+    const double t = useTr ? hostBeat * 96.0 : demoSongTicks(hostBpm);
+    const long bar = (long) std::floor(t / kBar);
+    if (demoArmed && demoArmTr != useTr) demoArmed = false;                   /* armed on the other clock: its bar numbers mean nothing here */
+    if (!demoArmed) { demoArmed = true; demoArmTr = useTr; demoArmBar = bar; return; }
+    if (bar <= demoArmBar) return;
+    const double boundary = (double) bar * kBar;
+    demoFiredTo = std::fmod(boundary, (double) d->len);
+    demoPos = demoFiredTo + (t - boundary);
+    demoOff = t - demoPos;
+    demoOnTr = useTr;
+    nDAct = 0;
+    demoRun = true;
+}
+
+void Engine::demoFire()
+{
+    auto d = std::atomic_load(&demoSp);
+    if (!d || !demoRun) return;
+    constexpr double eps = 1e-6;
+    for (int i = 0; i < nDAct;) {
+        if (dActEnd[i] < demoPos + eps) {
+            demoSend(dAct[i], 0);
+            dAct[i] = dAct[nDAct - 1]; dActEnd[i] = dActEnd[nDAct - 1]; nDAct--;
+        } else i++;
+    }
+    const double to = demoPos + eps;
+    if (to <= demoFiredTo) return;
+    const long k0 = (long) std::floor(demoFiredTo / d->len), k1 = (long) std::floor(to / d->len);
+    for (long k = k0; k <= k1; k++) {
+        const double lo = std::max(demoFiredTo - (double) k * d->len, 0.0), hi = std::min(to - (double) k * d->len, (double) d->len);
+        auto it = std::lower_bound(d->notes.begin(), d->notes.end(), lo, [](const DemoNote &n, double v) { return (double) n.tick < v; });
+        for (; it != d->notes.end() && (double) it->tick < hi; ++it) {
+            demoSend(it->note, it->vel);
+            if (nDAct >= 64) { demoSend(dAct[0], 0); for (int j = 1; j < nDAct; j++) { dAct[j - 1] = dAct[j]; dActEnd[j - 1] = dActEnd[j]; } nDAct--; }
+            dAct[nDAct] = it->note; dActEnd[nDAct] = (double) k * d->len + it->tick + std::max(it->dur, 1); nDAct++;
+        }
+    }
+    demoFiredTo = to;
+}
+
+/* Frames until the next note start or end, so the block is cut there. */
+int Engine::demoLimit(int frames)
+{
+    auto d = std::atomic_load(&demoSp);
+    if (!d || !demoRun) return frames;
+    const double tpf = clipTicksPerFrame();
+    double next = 1e300;
+    for (int i = 0; i < nDAct; i++) next = std::min(next, dActEnd[i]);
+    const long k = (long) std::floor(demoFiredTo / d->len);
+    const double p = demoFiredTo - (double) k * d->len;
+    auto it = std::lower_bound(d->notes.begin(), d->notes.end(), p, [](const DemoNote &n, double v) { return (double) n.tick < v; });
+    next = std::min(next, it != d->notes.end() ? (double) k * d->len + it->tick : (double) (k + 1) * d->len + d->notes.front().tick);
+    const double f = std::ceil((next - demoPos - 1e-6) / tpf);
+    return f < (double) frames ? std::max(1, (int) f) : frames;
+}
+
+void Engine::demoAdvance(int frames)
+{
+    if (!demoRun) return;
+    demoPos += clipTicksPerFrame() * frames;
+    demoSongTicks(hostBpm);                     /* keep the shared clock current while something plays (a tempo change is then integrated as it happens) */
 }
 
 
@@ -736,6 +877,9 @@ void Engine::renderBlock(int16_t *out, int frames)
         arpSync();
         arpFire();
         n = arpLimit(n);
+        demoSync();
+        demoFire();
+        n = demoLimit(n);
         std::memset(L, 0, (size_t) n * sizeof(float));
         std::memset(R, 0, (size_t) n * sizeof(float));
 
@@ -878,6 +1022,7 @@ void Engine::renderBlock(int16_t *out, int frames)
         }
         clipAdvance(n);
         arpAdvance(n);
+        demoAdvance(n);
         done += n;
     }
 }

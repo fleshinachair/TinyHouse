@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <vector>
 #include <atomic>
+#include <chrono>
 #include <memory>
 
 #include "../host/plugin_api_v1.h"
@@ -78,6 +79,19 @@ struct tablor_instance {
 
     std::shared_ptr<const PresetList> storeList() const
     { return std::atomic_load(&store); }
+
+    /* The demo parts: MIDI parts of songs the remote UI uploaded, /data/UserData/schwung/midi/<module>/<Pack>/<Part>.tdm. Scanned on the worker and published as a
+     * snapshot like the presets. `demo_pack` and `demo_part` (the index inside the pack) pick the part the engine plays when `demo_on` is set. */
+    struct DemoList {
+        std::vector<std::string> packs;
+        std::vector<int> pack_first, pack_n;
+        std::vector<std::string> names, paths;         /* by global index */
+        std::string digest;                            /* {"b":[{"n":pack,"p":[parts]}]} for the web panel */
+    };
+    std::shared_ptr<const DemoList> demos { std::make_shared<DemoList>() };
+    std::atomic<int> demo_pack { 0 }, demo_part { 0 }, demo_on { 0 };
+    std::shared_ptr<const DemoList> demoList() const
+    { return std::atomic_load(&demos); }
 
     /* state blob scratch */
     char  state_buf[16 * 1024];
@@ -554,6 +568,89 @@ static void scan_store_presets(tablor_instance *inst)
     std::atomic_store(&inst->store, std::shared_ptr<const tablor_instance::PresetList>(next));
 }
 
+/* ---- the demo parts ------------------------------------------------------------------- */
+/* Switching the demo on starts the Move's transport (its Play button, CC 85), so the set's clips play with the part. Only when the host says the transport is stopped, and not
+ * again within a few seconds of the last press (slots are switched on one after another, and a second press would stop what the first started: Play toggles). */
+static void demo_start_transport()
+{
+    if (!g_host || !g_host->midi_inject_to_move || !g_host->get_beat_position) return;
+    if (g_host->get_beat_position() >= 0.0) return;                   /* already running */
+    static std::atomic<long long> last { 0 };
+    const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    long long prev = last.load();
+    if (prev && now - prev < 3000) return;
+    if (!last.compare_exchange_strong(prev, now)) return;
+    const uint8_t press[4] = { 0x0B, 0xB0, 85, 127 }, release[4] = { 0x0B, 0xB0, 85, 0 };
+    g_host->midi_inject_to_move(press, 4);
+    g_host->midi_inject_to_move(release, 4);
+}
+
+static constexpr const char *kDemoDir = "/data/UserData/schwung/midi/" TB_MODULE_ID;
+
+/* The part the pack and part indexes name, read and handed to the engine (null when there is none). WORKER THREAD ONLY. */
+static void load_demo(tablor_instance *inst)
+{
+    auto dl = inst->demoList();
+    const int p = inst->demo_pack.load();
+    if (p < 0 || p >= (int) dl->packs.size() || dl->pack_n[(size_t) p] <= 0) { inst->engine.setDemo(nullptr); return; }
+    const int i = dl->pack_first[(size_t) p] + std::min(std::max(inst->demo_part.load(), 0), dl->pack_n[(size_t) p] - 1);
+    std::string raw;
+    if (FILE *f = fopen(dl->paths[(size_t) i].c_str(), "r")) {
+        char chunk[8192];
+        size_t got;
+        while ((got = fread(chunk, 1, sizeof chunk, f)) > 0 && raw.size() < 2 * 1024 * 1024) raw.append(chunk, got);
+        fclose(f);
+    }
+    inst->engine.setDemo(tb::parseDemo(raw.c_str()));
+}
+
+/* Every pack folder of the demo store with its .tdm parts in name order; loose files form the pack "Demos". WORKER THREAD ONLY. */
+static void scan_demos(tablor_instance *inst)
+{
+    auto next = std::make_shared<tablor_instance::DemoList>();
+    auto add_pack = [&](const std::string &name, const std::string &dir) {
+        std::vector<std::pair<std::string, std::string>> found;
+        if (DIR *d = ::opendir(dir.c_str())) {
+            while (dirent *e = ::readdir(d)) {
+                const char *dot = strrchr(e->d_name, '.');
+                if (!dot || e->d_name[0] == '.' || strcasecmp(dot, ".tdm") != 0) continue;
+                found.push_back({ std::string(e->d_name, (size_t) (dot - e->d_name)), dir + "/" + e->d_name });
+            }
+            ::closedir(d);
+        }
+        if (found.empty()) return;
+        std::sort(found.begin(), found.end(), [](const auto &a, const auto &b) { return strcasecmp(a.first.c_str(), b.first.c_str()) < 0; });
+        next->packs.push_back(name);
+        next->pack_first.push_back((int) next->names.size());
+        next->pack_n.push_back((int) found.size());
+        for (auto &f : found) { next->names.push_back(f.first); next->paths.push_back(f.second); }
+    };
+    std::vector<std::string> dirs;
+    if (DIR *d = ::opendir(kDemoDir)) {
+        while (dirent *e = ::readdir(d)) {
+            if (e->d_name[0] == '.') continue;
+            struct stat st;
+            if (::stat((std::string(kDemoDir) + "/" + e->d_name).c_str(), &st) == 0 && S_ISDIR(st.st_mode)) dirs.push_back(e->d_name);
+        }
+        ::closedir(d);
+    }
+    std::sort(dirs.begin(), dirs.end(), [](const std::string &a, const std::string &b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
+    for (const auto &b : dirs) add_pack(b, std::string(kDemoDir) + "/" + b);
+    add_pack("Demos", kDemoDir);
+    {
+        std::vector<std::vector<std::string>> names(next->packs.size());
+        for (size_t k = 0; k < next->packs.size(); k++)
+            for (int i = next->pack_first[k]; i < next->pack_first[k] + next->pack_n[k]; i++) names[k].push_back(next->names[(size_t) i]);
+        next->digest = tb::presetDigest(next->packs, names);
+    }
+    int p = inst->demo_pack.load();
+    if (p < 0 || p >= (int) next->packs.size()) p = 0;
+    inst->demo_pack = p;
+    if (!next->packs.empty() && inst->demo_part.load() >= next->pack_n[(size_t) p]) inst->demo_part = 0;
+    std::atomic_store(&inst->demos, std::shared_ptr<const tablor_instance::DemoList>(next));
+    load_demo(inst);
+}
+
 /* Which preset the page shows is not part of the sound, so a state restored by the host (a reboot, a reloaded slot) carried the sound
  * back and left the page on the first preset. The state now names its preset as "pk=<bank>/<name>"; ';' is the state's separator. */
 static std::string preset_key(const tablor_instance::preset &p)
@@ -853,6 +950,28 @@ static void tb_publish_selection(tablor_instance *inst)
         out += "]}";
     }
 
+    /* The demo mode: the switch, the pack and the part inside it (enums whose options are what the scan found), and the list and the current pick for the web panel. */
+    {
+        auto dl = inst->demoList();
+        out += ",{\"key\":\"demo_on\",\"name\":\"Demo\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"default\":\"Off\"}";
+        out += ",{\"key\":\"demo_pack\",\"name\":\"Demo Pack\",\"type\":\"enum\",\"options\":[";
+        if (dl->packs.empty()) out += "\"None\"";
+        for (size_t i = 0; i < dl->packs.size(); i++) {
+            if (i) out += ",";
+            out += "\""; tb_json_append(out, dl->packs[i]); out += "\"";
+        }
+        out += "]},{\"key\":\"demo_part\",\"name\":\"Demo Part\",\"type\":\"enum\",\"options\":[";
+        const int dp = inst->demo_pack.load();
+        const int dn = dp >= 0 && dp < (int) dl->packs.size() ? dl->pack_n[(size_t) dp] : 0;
+        if (dn <= 0) out += "\"None\"";
+        for (int i = 0; i < dn; i++) {
+            if (i) out += ",";
+            out += "\""; tb_json_append(out, dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]); out += "\"";
+        }
+        out += "]},{\"key\":\"demo_list\",\"name\":\"Demo List\",\"type\":\"string\",\"access\":\"read\"}"
+               ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}";
+    }
+
     /* The shape digests are DECLARED here so they reach a browser at all:
      * schwung-manager only streams values for keys chain_params declares
      * (its standalone getParam answers from that cache and never asks the
@@ -876,7 +995,8 @@ static void tb_publish_selection(tablor_instance *inst)
      * current bank and index, and the index to load. `bank` is declared above; `preset` is the index within the current bank. */
     out += ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
+           ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}"
+           ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}";
     out += "]";
 
     std::atomic_store(&inst->sel,
@@ -1121,6 +1241,43 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         return;
     }
 
+    /* The remote UI's Import has written presets and wavetables into the store: look again. The scan and the republish run on the worker
+     * (the same ones the load does), so nothing here touches a folder; the preset list the page reads is replaced when they finish. */
+    if (!strcmp(k, "rescan")) {
+        inst->loader.post([inst] {
+            if (inst->loader.stopping()) return;
+            inst->scanner.scan();
+            tb_publish_selection(inst);
+            scan_store_presets(inst);
+            scan_demos(inst);
+            tb_publish_selection(inst);
+        });
+        return;
+    }
+
+    /* Demo mode: the switch is the engine's; a pack or part change loads the part on the worker (a pack change also republishes the part list). */
+    if (!strcmp(k, "demo_on")) {
+        const bool on = !strcasecmp(val, "on") || atoi(val) == 1;
+        inst->demo_on = on ? 1 : 0;
+        inst->engine.setDemoOn(on);
+        if (on) demo_start_transport();
+        return;
+    }
+    if (!strcmp(k, "demo_pack")) {
+        auto dl = inst->demoList();
+        if (dl->packs.empty()) return;
+        const int n = std::min(std::max(atoi(val), 0), (int) dl->packs.size() - 1);
+        inst->demo_pack = n;
+        inst->demo_part = 0;
+        inst->loader.post([inst] { if (inst->loader.stopping()) return; load_demo(inst); tb_publish_selection(inst); });
+        return;
+    }
+    if (!strcmp(k, "demo_part")) {
+        inst->demo_part = std::max(atoi(val), 0);
+        inst->loader.post([inst] { if (inst->loader.stopping()) return; load_demo(inst); });
+        return;
+    }
+
     /* The bank knob: another bank's list, starting at its first sound (which plays, as a scroll would). */
     if (!strcmp(k, "bank")) {
         auto ps = inst->storeList();
@@ -1296,6 +1453,19 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
      * the page shows. */
     if (!strcmp(key, "preset_list"))
         return write_str(buf, buf_len, inst->storeList()->digest.c_str());
+    if (!strcmp(key, "demo_on"))
+        return write_str(buf, buf_len, inst->demo_on.load() ? "On" : "Off");
+    if (!strcmp(key, "demo_pack"))
+        return write_str(buf, buf_len, std::to_string(inst->demo_pack.load()).c_str());
+    if (!strcmp(key, "demo_part"))
+        return write_str(buf, buf_len, std::to_string(inst->demo_part.load()).c_str());
+    if (!strcmp(key, "demo_list"))
+        return write_str(buf, buf_len, inst->demoList()->digest.c_str());
+    if (!strcmp(key, "demo_now")) {
+        char tmp[48];
+        snprintf(tmp, sizeof tmp, "%d,%d,%d", inst->demo_pack.load(), inst->demo_part.load(), inst->engine.demoPlaying() ? 1 : 0);
+        return write_str(buf, buf_len, tmp);
+    }
     if (!strcmp(key, "preset_now")) {
         auto ps = inst->storeList();
         const int b = inst->bank_index.load();
@@ -1379,6 +1549,10 @@ static void tb_render_block(void *instance, int16_t *out_lr, int frames)
     FlushToZero ftz;
     if (g_host && g_host->get_bpm)
         inst->engine.setHostBpm(g_host->get_bpm());
+    if (g_host && g_host->get_beat_position)                 /* the Move's transport, for the demo (guarded: an older host has no such entry) */
+        inst->engine.setHostBeat(g_host->get_beat_position(), true);
+    else
+        inst->engine.setHostBeat(-1.0, false);
     inst->engine.renderBlock(out_lr, frames);
 }
 
@@ -1412,6 +1586,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
         load_presets(inst);                                /* fopen + scan   */
         export_presets_to_schwung(inst);   /* into Schwung's own preset store */
         scan_store_presets(inst);          /* the list the preset page shows */
+        scan_demos(inst);                  /* the demo parts */
         /* AGAIN, now that the presets exist. The first call publishes the
          * wavetable lists, but the PRESET cell's options ARE the preset list,
          * and load_presets runs after it -- so a single early call left that

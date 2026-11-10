@@ -210,6 +210,37 @@
       ]
     },
     {
+      "title": "Demo",
+      "lines": [
+        "Play a part of a",
+        "MIDI song on this",
+        "slot. Bass on one",
+        "slot, lead on",
+        "another: switch",
+        "them on to hear",
+        "the whole track.",
+        "",
+        "Upload MIDI in the",
+        "web remote UI:",
+        "Demo tab > Import.",
+        "",
+        "Pages > Demo:",
+        "Demo on/off,",
+        "pack, part.",
+        "",
+        "Switching on starts",
+        "the Move's transport",
+        "(Play), so the set's",
+        "clips play too. The",
+        "part follows the",
+        "transport: it stops",
+        "and starts with it",
+        "and joins at the",
+        "next bar. Parts of",
+        "a song stay together."
+      ]
+    },
+    {
       "title": "Credits",
       "lines": [
         "Sound engine after",

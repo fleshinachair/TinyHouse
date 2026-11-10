@@ -206,17 +206,138 @@ canvas.gr.drag{cursor:crosshair}
 #browser .list div.cur::before{content:""; width:5px; height:5px; border-radius:50%; background:var(--g); align-self:center; margin-left:-10px; margin-right:5px}
 #browser .list small{color:var(--faint); margin-left:auto; font-size:10px; letter-spacing:.1em; text-transform:uppercase}
 #browser .empty{padding:24px; color:var(--faint)}
+
+/* ---- demo mode ---- */
+.demo-row{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0}
+.demo-note{color:var(--faint); font-size:11px; margin-bottom:4px}
+.demo-stat{color:var(--dim); font-size:12px; margin-top:6px}
+.demo-notes{color:var(--faint); font-size:11px; margin-top:8px; white-space:pre-wrap}
+.demo-sum{color:var(--hi); margin:6px 0 4px}
+.demo-h{color:var(--dim); letter-spacing:.16em; text-transform:uppercase; font-size:10px; margin:14px 0 4px}
+.demo-on,.demo-b,.demo-go,.demo-sel,.demo-name{background:#0c0e0f; border:1px solid var(--line2); color:var(--txt); font:inherit; font-size:12px; padding:7px 14px; border-radius:4px}
+.demo-on,.demo-b,.demo-go{cursor:pointer}
+.demo-on.on{background:var(--g3); border-color:var(--g2); color:var(--hi)}
+.demo-b:hover,.demo-on:hover{color:var(--g); border-color:var(--g2)}
+.demo-go{background:var(--g3); border-color:var(--g2); color:var(--hi); margin-top:12px; min-width:110px}
+.demo-go:disabled,.demo-on:disabled{opacity:.4; cursor:default}
+.demo-sel{max-width:100%}
+.demo-name{width:100%; color:var(--hi); font-size:13px; padding:6px 10px}
+.demo-drop{border:1px dashed var(--line2); border-radius:6px; padding:16px; text-align:center; color:var(--faint); margin:8px 0}
+.demo-drop.over{border-color:var(--g); color:var(--g)}
+
+/* ---- import dialog ---- */
+#browser .bhead .imp{background:#0c0e0f; border:1px solid var(--line2); color:var(--dim); font:inherit; font-size:11px; letter-spacing:.06em; cursor:pointer; height:28px; padding:0 12px; border-radius:4px; white-space:nowrap}
+#browser .bhead .imp:hover{color:var(--g); border-color:var(--g2)}
+#imp{
+  display:none; position:fixed; z-index:30; left:50%; top:48px; transform:translateX(-50%);
+  width:min(640px,calc(100vw - 24px)); max-height:calc(100vh - 72px); flex-direction:column;
+  background:var(--panel); border:1px solid var(--line2); border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.75); overflow:hidden;
+}
+#imp.on{display:flex}
+#imp .imp-head{display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); color:var(--hi); letter-spacing:.16em; text-transform:uppercase; font-size:11px}
+#imp .imp-head .x{background:none; border:0; color:var(--dim); font-size:16px; cursor:pointer}
+#imp .imp-body{padding:14px 16px 18px; overflow:auto; flex:1 1 auto; min-height:0}
+#imp .imp-intro{color:var(--dim); font-size:12px; margin-bottom:12px}
+#imp .imp-row{display:flex; gap:8px; flex-wrap:wrap; margin:6px 0}
+#imp .imp-b,#imp .imp-go{background:#0c0e0f; border:1px solid var(--line2); color:var(--txt); font:inherit; font-size:12px; cursor:pointer; padding:7px 14px; border-radius:4px}
+#imp .imp-b:hover{color:var(--g); border-color:var(--g2)}
+#imp .imp-go{background:var(--g3); border-color:var(--g2); color:var(--hi); margin-top:12px; min-width:110px}
+#imp .imp-go:disabled{opacity:.4; cursor:default}
+#imp .imp-drop{border:1px dashed var(--line2); border-radius:6px; padding:16px; text-align:center; color:var(--faint); margin:8px 0}
+#imp .imp-drop.over{border-color:var(--g); color:var(--g)}
+#imp .imp-sum{color:var(--hi); margin:6px 0 4px}
+#imp .imp-h{color:var(--dim); letter-spacing:.16em; text-transform:uppercase; font-size:10px; margin:16px 0 4px}
+#imp .imp-note{color:var(--faint); font-size:11px; margin-bottom:4px}
+#imp .imp-name{width:100%; background:#0a0c0d; border:1px solid var(--line2); border-radius:4px; color:var(--hi); font:inherit; font-size:13px; padding:6px 10px}
+#imp .imp-name:focus{outline:none; border-color:var(--g)}
+#imp .imp-bar{height:4px; background:var(--line); border-radius:2px; margin-top:12px; overflow:hidden}
+#imp .imp-bar i{display:block; height:100%; width:0; background:var(--g); transition:width .25s}
+#imp .imp-stat{color:var(--dim); font-size:11px; margin-top:6px; min-height:15px}
+#imp .rep-head{color:var(--txt); font-size:13px; margin-bottom:8px} #imp .rep-head b{color:var(--g)}
+#imp .rep-warn{color:#e5b45b; margin:6px 0}
+#imp .rep-sub,#imp .rep-line{color:var(--dim); margin:4px 0}
+#imp .rep-note{color:var(--faint); font-size:11px; margin:14px 0 4px}
+#imp .rep-g{border:1px solid var(--line); border-radius:6px; margin:8px 0; background:#0c0e0f}
+#imp .rep-g summary{cursor:pointer; padding:7px 12px; color:var(--txt)}
+#imp .rep-g.bad summary{color:#e58a5b} #imp .rep-g.ok summary{color:var(--g)}
+#imp .rep-p{padding:4px 12px 6px; border-top:1px solid var(--line)}
+#imp .rep-p .nm{color:var(--hi)}
+#imp .rep-p .gap{color:var(--faint); font-size:11px; padding-left:12px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div id="top"><div class="brand">TINY<i>HOUSE</i></div><div id="pbar"></div><div class="hint" id="hint">connecting…</div></div>
   <div id="browser"></div>
+  <div id="imp"></div>
   <div id="osc" class="grid g3"></div>
   <div id="tabs"></div>
   <div id="pages"></div>
 </div>
 
+<script type="text/plain" id="impworker">
+/* The converter's Python runs here, off the page's thread, so the page stays alive while a bank converts. */
+var py = null;
+function say(id, text) { self.postMessage({ id: id, progress: text }); }
+function ensureDir(path) {
+  var parts = path.split("/"), cur = "";
+  for (var i = 0; i < parts.length - 1; i++) {
+    cur += (i ? "/" : "") + parts[i];
+    if (cur && !py.FS.analyzePath("/in/" + cur).exists) py.FS.mkdirTree("/in/" + cur);
+  }
+}
+self.onmessage = async function (e) {
+  var m = e.data, id = m.id;
+  try {
+    var out = null, transfer = [];
+    if (m.cmd === "init") {
+      say(id, "Loading Python (first time only, about 10 MB)…");
+      importScripts(m.base + "pyodide.js");
+      py = await loadPyodide({ indexURL: m.base });
+      say(id, "Loading numpy…");
+      await py.loadPackage(["numpy", "zstandard"]);
+      py.FS.writeFile("/b.zip", new Uint8Array(m.bundle));
+      py.runPython("import zipfile, sys\nzipfile.ZipFile('/b.zip').extractall('/imp')\nsys.path.insert(0, '/imp')\nimport import_web");
+      py.FS.mkdirTree("/in");
+    } else if (m.cmd === "add") {
+      for (var i = 0; i < m.files.length; i++) {
+        var f = m.files[i];
+        ensureDir(f.path);
+        py.FS.writeFile("/in/" + f.path, new Uint8Array(f.buf));
+      }
+      out = py.runPython("import_web.add_dir('/in')");
+    } else if (m.cmd === "addraw") {                       /* files for Serum's Samples / Multisamples layout under /smp (decoded audio is "<name>.dec") */
+      for (var j = 0; j < m.files.length; j++) {
+        var g = m.files[j], dir = "/smp/" + g.path.split("/").slice(0, -1).join("/");
+        py.FS.mkdirTree(dir);
+        py.FS.writeFile("/smp/" + g.path, new Uint8Array(g.buf));
+      }
+    } else if (m.cmd === "sfz") {
+      py.globals.set("_rels", JSON.stringify(m.rels));
+      out = py.runPython("import_web.sfz_audio_json(_rels)");
+    } else if (m.cmd === "getsamples") {                  /* the sample sets written since the last call, as files */
+      var list = JSON.parse(py.runPython("import_web.new_sample_files_json()")), got = {}, tr = [];
+      for (var q = 0; q < list.length; q++) {
+        var data = py.FS.readFile(list[q][1]), ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+        got[list[q][0]] = ab; tr.push(ab);
+        py.FS.unlink(list[q][1]);
+      }
+      out = got; transfer = tr;
+    } else if (m.cmd === "names") {
+      out = JSON.parse(py.runPython("import_web.names_json()"));
+    } else if (m.cmd === "convert") {
+      py.globals.set("_bank", m.bank);
+      py.globals.set("_only", m.only ? JSON.stringify(m.only) : "");
+      out = py.runPython("import_web.convert_json(_bank, _only)");
+    } else if (m.cmd === "reset") {
+      py.runPython("import_web.reset()");
+    }
+    self.postMessage({ id: id, ok: true, result: out }, transfer);
+  } catch (err) {
+    self.postMessage({ id: id, ok: false, error: String(err && err.message || err).slice(0, 400) });
+  }
+};
+</script>
 <script src="/static/schwung-remote-api.js"></script>
 <script>
 (function () {
@@ -1433,6 +1554,7 @@ function buildBrowser() {
   var head = el("div", "bhead", brEl);
   brSearch = el("input", null, head);
   brSearch.placeholder = "Search every bank…";
+  var imp = el("button", "imp", head, "＋ Import"); imp.title = "Import Serum 2 presets"; imp.addEventListener("click", function () { openImport(true); });
   var x = el("button", "x", head, "✕"); x.title = "Close (Esc)";
   x.addEventListener("click", function () { openBrowser(false); });
   brBanks = el("div", "banks", brEl); brList = el("div", "list", brEl);
@@ -1448,9 +1570,680 @@ function buildBrowser() {
   });
 }
 
+/* ---- import Serum 2 presets ------------------------------------------------
+ * The preset browser's Import button. Presets (.SerumPreset), packs (.SerumPack) or a folder of either are converted in the browser by the
+ * same Python the desktop converter is (Pyodide, in a worker; the bundle of its files is read from the module's folder on the Move), then
+ * uploaded through the Move's own file manager into a bank: loose presets go to "Imports", a folder or pack to a bank of its own name.
+ * Nothing is measured against Serum here, so reverb, width and loudness are the converter's laws, not fits; whatever the engine cannot
+ * carry is listed when the import is done. */
+var PYO = "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
+var MOVE_BUNDLE = "/data/UserData/schwung/modules/sound_generators/tinyhouse/import_bundle.zip";
+var PRESET_ROOT = "/data/UserData/schwung/presets/tinyhouse";
+var IMP = { box: null, presets: [], wavs: [], tables: [], smps: [], bankTouched: false, busy: false, worker: null, ready: null, rpc: {}, seq: 0, bankEl: null, sumEl: null, goEl: null, statEl: null, bodyEl: null };
+
+function impCall(cmd, data, transfer, onProgress) {
+  return new Promise(function (resolve, reject) {
+    var id = ++IMP.seq;
+    IMP.rpc[id] = { resolve: resolve, reject: reject, onProgress: onProgress };
+    var msg = { id: id, cmd: cmd };
+    for (var k in data) msg[k] = data[k];
+    IMP.worker.postMessage(msg, transfer || []);
+  });
+}
+function impStart(onProgress) {
+  if (IMP.ready) return IMP.ready;
+  IMP.ready = (async function () {
+    var r = await fetch("import_bundle.zip").catch(function () { return { ok: false }; });      /* beside this page: the module's folder */
+    if (!r.ok) r = await fetch("/files/download?path=" + encodeURIComponent(MOVE_BUNDLE));
+    if (!r.ok) throw new Error("The converter bundle is not on the Move (" + MOVE_BUNDLE.split("/").pop() + "). Install the latest TinyHouse module.");
+    var bundle = await r.arrayBuffer();
+    var src = document.getElementById("impworker").textContent;
+    IMP.worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    IMP.worker.onmessage = function (e) {
+      var m = e.data, c = IMP.rpc[m.id];
+      if (!c) return;
+      if (m.progress !== undefined) { if (c.onProgress) c.onProgress(m.progress); return; }
+      delete IMP.rpc[m.id];
+      if (m.ok) c.resolve(m.result); else c.reject(new Error(m.error));
+    };
+    IMP.worker.onerror = function () { Object.keys(IMP.rpc).forEach(function (id) { IMP.rpc[id].reject(new Error("The converter stopped.")); delete IMP.rpc[id]; }); };
+    await impCall("init", { base: PYO, bundle: bundle }, [bundle], onProgress);
+  })();
+  IMP.ready.catch(function () { IMP.ready = null; if (IMP.worker) { IMP.worker.terminate(); IMP.worker = null; } });
+  return IMP.ready;
+}
+
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+function readBuf(file) {
+  return new Promise(function (res, rej) {
+    var fr = new FileReader();
+    fr.onload = function () { res(fr.result); };
+    fr.onerror = function () { rej(new Error("Could not read " + file.name)); };
+    fr.readAsArrayBuffer(file);
+  });
+}
+function cleanRel(p) { return String(p).replace(/\\/g, "/").split("/").filter(function (x) { return x && x !== "." && x !== ".."; }).join("/"); }
+function cleanBank(s) {
+  s = String(s || "").replace(/[\/\\:*?"<>|;=\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40).trim();
+  if (!s) s = "Imports";
+  if (s.toLowerCase() === "user") s = "User imports";
+  return s;
+}
+
+/* ---- picking ---- */
+function addPicks(list, asTables) {
+  list.forEach(function (it) {
+    var rel = cleanRel(it.rel), low = rel.toLowerCase();
+    if (asTables === "smp") { if (/\.(flac|wav|aif|aiff|ogg|mp3|sfz)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel }); }
+    else if (/\.wav$/.test(low)) (asTables ? IMP.tables : IMP.wavs).push({ file: it.file, rel: rel });
+    else if (!asTables && /\.(serumpreset|serumpack|zip)$/.test(low)) IMP.presets.push({ file: it.file, rel: rel });
+  });
+  impSummary();
+}
+function pickList(input) {
+  var out = [];
+  for (var i = 0; i < input.files.length; i++) out.push({ file: input.files[i], rel: input.files[i].webkitRelativePath || input.files[i].name });
+  return out;
+}
+/* A dropped folder: its entries, read to the bottom. */
+function walkEntry(entry, base, out) {
+  return new Promise(function (resolve) {
+    if (entry.isFile) {
+      entry.file(function (f) { out.push({ file: f, rel: base + entry.name }); resolve(); }, function () { resolve(); });
+    } else if (entry.isDirectory) {
+      var rd = entry.createReader(), all = [];
+      (function more() {
+        rd.readEntries(function (ents) {
+          if (!ents.length) {
+            Promise.all(all.map(function (x) { return walkEntry(x, base + entry.name + "/", out); })).then(resolve);
+            return;
+          }
+          all = all.concat(Array.prototype.slice.call(ents));
+          more();
+        }, function () { resolve(); });
+      })();
+    } else resolve();
+  });
+}
+function onDrop(e) {
+  e.preventDefault();
+  var items = e.dataTransfer && e.dataTransfer.items, out = [], jobs = [];
+  if (items && items.length && items[0].webkitGetAsEntry) {
+    for (var i = 0; i < items.length; i++) {
+      var en = items[i].webkitGetAsEntry();
+      if (en) jobs.push(walkEntry(en, "", out));
+    }
+    Promise.all(jobs).then(function () { addPicks(out, false); });
+  } else if (e.dataTransfer) {
+    for (var j = 0; j < e.dataTransfer.files.length; j++) out.push({ file: e.dataTransfer.files[j], rel: e.dataTransfer.files[j].name });
+    addPicks(out, false);
+  }
+}
+
+function presetCount() { return IMP.presets.filter(function (p) { return /\.serumpreset$/i.test(p.rel); }).length; }
+function packCount() { return IMP.presets.length - presetCount(); }
+function impSummary() {
+  if (!IMP.sumEl) return;
+  var n = presetCount(), k = packCount(), w = IMP.wavs.length + IMP.tables.length;
+  var parts = [];
+  if (n) parts.push(n + (n === 1 ? " preset" : " presets"));
+  if (k) parts.push(k + (k === 1 ? " pack" : " packs"));
+  IMP.sumEl.textContent = (parts.length ? parts.join(" and ") + " chosen" : "Nothing chosen yet") + (w ? " · " + w + " wavetable files available" : "") + (IMP.smps.length ? " · " + IMP.smps.length + " sample files available" : "");
+  IMP.goEl.disabled = IMP.busy || !(n || k);
+  if (!IMP.bankTouched && IMP.bankEl) {
+    var first = IMP.presets[0], nm = "Imports";
+    if (first) {
+      var segs = first.rel.split("/");
+      if (segs.length > 1) nm = segs[0];
+      else if (!/\.serumpreset$/i.test(first.rel) && k === 1 && !n) nm = first.rel.replace(/\.[^.]+$/, "");
+    }
+    IMP.bankEl.value = cleanBank(nm);
+  }
+}
+
+/* ---- the Move's file manager ---- */
+function csrf() { return (document.cookie.match(/(^| )csrf_token=([^;]+)/) || [])[2] || ""; }
+var madeDirs = {};
+async function mkdirRemote(parent, name) {
+  var key = parent + "/" + name;
+  if (madeDirs[key]) return;
+  var fd = new FormData();
+  fd.append("csrf_token", csrf()); fd.append("path", parent); fd.append("name", name);
+  var r = await fetch("/files/mkdir", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": csrf() } });
+  if (!r.ok) throw new Error("mkdir " + key + " failed (" + r.status + ")");
+  madeDirs[key] = 1;
+}
+async function ensurePath(base, rel) {
+  var cur = base, parts = rel.split("/").filter(Boolean);
+  for (var i = 0; i < parts.length; i++) { await mkdirRemote(cur, parts[i]); cur += "/" + parts[i]; }
+  return cur;
+}
+async function uploadRemote(dir, name, blob) {
+  var fd = new FormData();
+  fd.append("csrf_token", csrf()); fd.append("path", dir);
+  fd.append("file", blob, name);
+  var r = await fetch("/files/upload", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": csrf() } });
+  if (!r.ok) throw new Error("upload " + name + " failed (" + r.status + ")");
+}
+function b64bytes(s) {
+  var bin = atob(s), a = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return a;
+}
+
+/* ---- samples: found in the picked folders, decoded here (the converter's Python has no audio decoder), handed over as 16-bit ---- */
+function sniffRate(b) {
+  var u = new Uint8Array(b), d = new DataView(b), t = String.fromCharCode(u[0], u[1], u[2], u[3]);
+  try {
+    if (t === "RIFF" && u.length > 28) return d.getUint32(24, true);
+    if (t === "fLaC" && u.length > 22) return (u[18] << 12) | (u[19] << 4) | (u[20] >> 4);
+    if (t === "FORM") {                                       /* AIFF: the COMM chunk's 80-bit sample rate */
+      for (var o = 12; o + 18 < u.length;) {
+        var id = String.fromCharCode(u[o], u[o + 1], u[o + 2], u[o + 3]), sz = d.getUint32(o + 4);
+        if (id === "COMM") { var ex = d.getUint16(o + 8 + 8) & 0x7fff, hi = d.getUint32(o + 8 + 10); return Math.round(hi / Math.pow(2, 31 - (ex - 16383))); }
+        o += 8 + sz + (sz & 1);
+      }
+    }
+  } catch (e) {}
+  return 0;
+}
+async function decodeAudio(file) {
+  var buf = await readBuf(file), rate = sniffRate(buf);
+  if (!(rate >= 8000 && rate <= 96000)) rate = 44100;
+  var Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  var ab = await new Ctx(1, 1, rate).decodeAudioData(buf);
+  var ch = Math.min(ab.numberOfChannels, 2), n = ab.length, out = new ArrayBuffer(8 + n * ch * 2), dv = new DataView(out), pcm = new Int16Array(out, 8, n * ch);
+  dv.setUint32(0, Math.round(ab.sampleRate), true); dv.setUint32(4, ch, true);
+  for (var c = 0; c < ch; c++) {
+    var x = ab.getChannelData(c);
+    for (var i = 0; i < n; i++) { var v = Math.round(x[i] * 32767); pcm[i * ch + c] = v > 32767 ? 32767 : v < -32767 ? -32767 : v; }
+  }
+  return out;
+}
+/* The picked file for a path Serum stored: its own path under a Samples / Multisamples folder, or (a noise slot names it from a library folder) its last two parts. */
+function findSmp(rel, loose) {
+  var r = cleanRel(rel).toLowerCase(), tail = r.split("/").slice(-2).join("/"), hit = null, i, p;
+  for (i = 0; i < IMP.smps.length && !hit; i++) { p = IMP.smps[i].rel.toLowerCase(); if (p === r || p.slice(-(r.length + 1)) === "/" + r) hit = IMP.smps[i]; }
+  if (!hit && loose) for (i = 0; i < IMP.smps.length && !hit; i++) { p = IMP.smps[i].rel.toLowerCase(); if (p.slice(-(tail.length + 1)) === "/" + tail) hit = IMP.smps[i]; }
+  return hit;
+}
+
+/* ---- the run ---- */
+function impStatus(text, pct) {
+  IMP.statEl.textContent = text;
+  IMP.barEl.style.width = (pct === undefined ? 0 : Math.max(0, Math.min(100, pct))) + "%";
+  IMP.barWrap.style.display = pct === undefined ? "none" : "block";
+}
+function findWavs(refs) {
+  var all = IMP.wavs.concat(IMP.tables), found = {};
+  var byName = {};
+  all.forEach(function (w) { var n = w.rel.split("/").pop().toLowerCase(); (byName[n] = byName[n] || []).push(w); });
+  refs.forEach(function (ref) {
+    var r = ref.toLowerCase(), hit = null;
+    for (var i = 0; i < all.length && !hit; i++) {
+      var p = all[i].rel.toLowerCase();
+      if (p === r || p.slice(-(r.length + 1)) === "/" + r || p.slice(-(r.length + 12)) === "/s2 tables/" + r) hit = all[i];
+    }
+    if (!hit) { var c = byName[r.split("/").pop()]; if (c && c.length === 1) hit = c[0]; }
+    if (hit) found[ref] = hit;
+  });
+  return found;
+}
+
+async function runImport() {
+  if (IMP.busy) return;
+  IMP.busy = true; IMP.goEl.disabled = true;
+  var bank = cleanBank(IMP.bankEl.value);
+  var results = {}, files = {}, failed = [];
+  try {
+    impStatus("Starting the converter…", 0);
+    await impStart(function (t) { impStatus(t, 0); });
+    await impCall("reset", {});
+    impStatus("Reading presets…", 2);
+    var batch = [], size = 0, queue = IMP.presets.slice();
+    for (var i = 0; i < queue.length; i++) {
+      batch.push({ path: cleanRel(queue[i].rel), buf: await readBuf(queue[i].file) });
+      size += batch[batch.length - 1].buf.byteLength;
+      if (size > 24e6 || i === queue.length - 1) {
+        await impCall("add", { files: batch }, batch.map(function (b) { return b.buf; }));
+        batch = []; size = 0;
+      }
+      impStatus("Reading presets… " + (i + 1) + " of " + queue.length, 2 + 8 * (i + 1) / queue.length);
+    }
+    var names = await impCall("names", {});
+    if (!names.length) throw new Error("No presets were found in what was chosen.");
+
+    async function convertSome(list, from, to, label) {
+      for (var j = 0; j < list.length; j += 6) {
+        var part = list.slice(j, j + 6);
+        impStatus(label + " " + Math.min(j + 6, list.length) + " of " + list.length, from + (to - from) * j / list.length);
+        var r = JSON.parse(await impCall("convert", { bank: bank, only: part }));
+        r.presets.forEach(function (p) { results[p.file] = p; });
+        for (var k in r.files) files[k] = r.files[k];
+      }
+    }
+    await convertSome(names, 10, 55, "Converting");
+
+    var refs = {};
+    Object.keys(results).forEach(function (n) { results[n].missing_tables.forEach(function (t) { refs[t] = 1; }); });
+    var found = findWavs(Object.keys(refs));
+    var foundKeys = Object.keys(found);
+    if (foundKeys.length) {
+      impStatus("Reading wavetables…", 56);
+      var wb = [];
+      for (var q = 0; q < foundKeys.length; q++) wb.push({ path: "Tables/" + cleanRel(foundKeys[q]), buf: await readBuf(found[foundKeys[q]].file) });
+      await impCall("add", { files: wb }, wb.map(function (b) { return b.buf; }));
+      var redo = Object.keys(results).filter(function (n) { return results[n].missing_tables.some(function (t) { return found[t]; }); });
+      await convertSome(redo, 58, 68, "Converting with wavetables");
+    }
+
+    /* samples: what the presets name and is still missing, found in the picked folders, decoded and handed over; the presets that named them are converted again */
+    var needSmp = {};
+    Object.keys(results).forEach(function (n) {
+      results[n].samples.forEach(function (s) { if (results[n].missing_samples.indexOf(s.rel) >= 0) needSmp[s.kind + "|" + s.rel] = s; });
+    });
+    var needKeys = Object.keys(needSmp), gotSmp = {};
+    if (needKeys.length && IMP.smps.length) {
+      var multis = needKeys.filter(function (k) { return needSmp[k].kind === "multi"; });
+      var addedPaths = {};
+      var putRaw = async function (path, buf) { if (addedPaths[path]) return; addedPaths[path] = 1; await impCall("addraw", { files: [{ path: path, buf: buf }] }, [buf]); };
+      var sfzs = [];
+      for (var mi = 0; mi < multis.length; mi++) {
+        var mf = findSmp(needSmp[multis[mi]].rel, false);
+        if (!mf) continue;
+        await putRaw("Multisamples/" + cleanRel(needSmp[multis[mi]].rel), await readBuf(mf.file));
+        sfzs.push(cleanRel(needSmp[multis[mi]].rel)); gotSmp[multis[mi]] = 1;
+      }
+      var audio = [];
+      if (sfzs.length) audio = JSON.parse(await impCall("sfz", { rels: sfzs }));
+      var jobs = audio.map(function (a) { return { root: "Multisamples/", rel: a, loose: false, key: null }; });
+      needKeys.forEach(function (k) { if (needSmp[k].kind !== "multi") jobs.push({ root: "Samples/", rel: cleanRel(needSmp[k].rel), loose: needSmp[k].kind === "noise", key: k }); });
+      for (var ji = 0; ji < jobs.length; ji++) {
+        var jb = jobs[ji], jf = findSmp(jb.rel, jb.loose);
+        impStatus("Decoding samples… " + (ji + 1) + " of " + jobs.length, 56 + 12 * ji / jobs.length);
+        if (!jf) continue;
+        try {
+          await putRaw(jb.root + jb.rel + ".dec", await decodeAudio(jf.file));
+          if (jb.key) gotSmp[jb.key] = 1;
+        } catch (e) { failed.push("sample " + jb.rel + " could not be decoded (" + e.message + ")"); }
+      }
+      var redoS = Object.keys(results).filter(function (n) { return results[n].samples.some(function (s) { return results[n].missing_samples.indexOf(s.rel) >= 0 && gotSmp[s.kind + "|" + s.rel]; }); });
+      await convertSome(redoS, 68, 72, "Converting with samples");
+    }
+    var smpFiles = await impCall("getsamples", {});
+
+    var list = Object.keys(results).map(function (n) { return results[n]; });
+    var sendable = list.filter(function (p) { return p.json; });
+    var wtPaths = Object.keys(files), smPaths = Object.keys(smpFiles);
+    var total = sendable.length + wtPaths.length + smPaths.length, done = 0;
+    impStatus("Sending to the Move…", 70);
+    var bankDir = await ensurePath(PRESET_ROOT, bank);
+    async function step(label, fn) {
+      try { await fn(); } catch (e) { failed.push(label + " (" + e.message + ")"); }
+      done++;
+      impStatus("Sending to the Move… " + done + " of " + total, 70 + 25 * done / Math.max(total, 1));
+    }
+    for (var sq = 0; sq < smPaths.length; sq++) {            /* sample sets, then wavetables, then the presets */
+      await step(smPaths[sq].split("/").pop(), (function (path) { return async function () {
+        var base = "/data/UserData/UserLibrary/Samples";
+        var rel = path.substring(base.length + 1).split("/"), name = rel.pop();
+        var dir = await ensurePath(base, rel.join("/"));
+        await uploadRemote(dir, name, new Blob([smpFiles[path]], { type: "application/octet-stream" }));
+        delete smpFiles[path];
+      }; })(smPaths[sq]));
+    }
+    for (var w = 0; w < wtPaths.length; w++) {              /* wavetables first, so a preset never lands before its table */
+      var path = wtPaths[w];
+      await step(path.split("/").pop(), (function (path) { return async function () {
+        var base = "/data/UserData/UserLibrary/Wavetables";
+        var rel = path.substring(base.length + 1).split("/"), name = rel.pop();
+        var dir = await ensurePath(base, rel.join("/"));
+        await uploadRemote(dir, name, new Blob([b64bytes(files[path])], { type: "audio/wav" }));
+      }; })(path));
+    }
+    var sent = {};
+    for (var s2 = 0; s2 < sendable.length; s2++) {
+      var p = sendable[s2];
+      await step(p.name, (function (p) { return async function () {
+        await uploadRemote(bankDir, p.name + ".json", new Blob([p.json], { type: "application/json" }));
+        sent[p.file] = 1;
+      }; })(p));
+    }
+    impStatus("Telling the module…", 96);
+    var had = PS.banks.map(function (b) { return b.n; });
+    send("rescan", 1);
+    var landed = false;
+    for (var t = 0; t < 12 && !landed; t++) {
+      await sleep(t ? 700 : 1500);
+      try {
+        var v = await schwungRemote.getParam(KP + "preset_list");
+        if (v) { EXTRA.preset_list(v); landed = PS.banks.some(function (b) { return b.n === bank && b.p.length >= Object.keys(sent).length; }); }
+      } catch (e) {}
+    }
+    var vb = PS.banks.findIndex(function (b) { return b.n === bank; });
+    if (vb >= 0) PS.viewBank = vb;
+    impReport(bank, list, sent, failed, landed, had.indexOf(bank) >= 0);
+  } catch (e) {
+    impStatus("Import stopped: " + e.message);
+  }
+  IMP.busy = false; impSummary();
+}
+
+/* ---- the report ---- */
+function impReport(bank, list, sent, failed, landed, existed) {
+  var body = IMP.bodyEl; body.textContent = "";
+  var ok = list.filter(function (p) { return p.json && sent[p.file]; });
+  var bad = list.filter(function (p) { return !p.json || !sent[p.file]; });
+  function lines(p) {
+    var out = p.gaps.map(function (g) { return g; });
+    p.not_carried.forEach(function (g) { out.push(g + " not carried"); });
+    p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
+    p.missing_samples.forEach(function (t) { out.push("Sample not found: " + t + " (that oscillator stays silent)"); });
+    return out;
+  }
+  var whole = ok.filter(function (p) { return !lines(p).length; });
+  var part = ok.filter(function (p) { return lines(p).length; });
+  var head = el("div", "rep-head", body);
+  el("b", null, head, "Imported " + ok.length + " of " + list.length + (list.length === 1 ? " preset" : " presets"));
+  head.appendChild(document.createTextNode(" into the bank “" + bank + "”" + (existed ? " (presets with the same name were replaced)" : "") + "."));
+  if (!landed && ok.length) el("div", "rep-warn", body, "The Move has not listed them yet. Reload the slot, or press the Move's preset browser once, and they will appear in the bank “" + bank + "”.");
+  var tally = {};
+  part.forEach(function (p) { lines(p).forEach(function (l) { var k = l.replace(/^Wavetable not found:.*/, "Wavetable not found").replace(/^Sample not found:.*/, "Sample not found").replace(/^Oscillator [ABC]: /, "Oscillator: ").replace(/ \(.*\)$/, ""); tally[k] = (tally[k] || 0) + 1; }); });
+  var tk = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; }).slice(0, 6);
+  if (tk.length) el("div", "rep-sub", body, "Most common gaps: " + tk.map(function (k) { return k + " ×" + tally[k]; }).join(" · "));
+  if (whole.length) el("div", "rep-line", body, whole.length + " imported with nothing left out.");
+  function group(title, arr, cls, fn) {
+    if (!arr.length) return;
+    var d = el("details", "rep-g " + cls, body);
+    d.open = arr.length <= 6 && cls !== "ok";
+    el("summary", null, d, title + " (" + arr.length + ")");
+    arr.forEach(function (p) {
+      var row = el("div", "rep-p", d); el("div", "nm", row, p.name);
+      fn(p).forEach(function (l) { el("div", "gap", row, l); });
+    });
+  }
+  group("Imported, with parts missing", part, "part", lines);
+  group("Imported complete", whole, "ok", function () { return []; });
+  group("Not imported", bad, "bad", function (p) { return [p.error || "Could not be sent to the Move"]; });
+  if (failed.length) group("Upload problems", [{ name: "Files that did not reach the Move", f: failed }], "bad", function (p) { return p.f; });
+  el("div", "rep-note", body, "Loudness, reverb and width are set by general rules, not matched to Serum (that needs Serum to measure): set Volume and the effects to taste. Granular oscillators are left silent, and Sample oscillators too unless you chose the Samples folders.");
+  var again = el("button", "imp-go", body, "Import more");
+  again.addEventListener("click", function () { IMP.presets = []; IMP.bankTouched = false; impBuildForm(); impSummary(); });
+  impStatus("Done.");
+  IMP.statEl.textContent = "";
+}
+
+/* ---- the dialog ---- */
+function impBuildForm() {
+  var body = IMP.bodyEl; body.textContent = "";
+  IMP.presets = []; IMP.wavs = []; IMP.tables = []; IMP.smps = []; IMP.bankTouched = false;
+  function picker(label, attrs, onpick, asTables) {
+    var inp = el("input", null, body); inp.type = "file"; inp.style.display = "none";
+    for (var a in attrs) inp.setAttribute(a, attrs[a]);
+    inp.addEventListener("change", function () { onpick(pickList(inp)); inp.value = ""; });
+    var b = el("button", "imp-b", null, label);
+    b.addEventListener("click", function () { inp.click(); });
+    return b;
+  }
+  el("div", "imp-intro", body, "Bring Serum 2 presets into TinyHouse. Choose single presets, a .SerumPack or a whole folder; everything is converted here in the browser and stored on the Move.");
+  var row = el("div", "imp-row", body);
+  row.appendChild(picker("Presets or packs…", { multiple: "", accept: ".SerumPreset,.SerumPack,.zip,.wav" }, function (l) { addPicks(l, false); }));
+  row.appendChild(picker("Folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, false); }));
+  var drop = el("div", "imp-drop", body, "…or drop presets, packs or folders here");
+  drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
+  IMP.sumEl = el("div", "imp-sum", body, "");
+
+  el("div", "imp-h", body, "Wavetables (optional)");
+  el("div", "imp-note", body, "A preset that uses one of Serum's own wavetables needs that file. Choose your Serum 2 Tables folder (in Documents ▸ Xfer ▸ Serum 2 Presets ▸ Tables) and only the tables your presets use are copied. Presets in a pack bring their own.");
+  var r2 = el("div", "imp-row", body);
+  r2.appendChild(picker("Tables folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, true); }, true));
+
+  el("div", "imp-h", body, "Samples (optional)");
+  el("div", "imp-note", body, "A preset with a Sample or Multisample oscillator (or a noise that is a recording) needs that audio. Choose your Serum 2 Samples folder, and the Multisamples folder if your presets use one (same place as Tables). Only the files your presets use are read, decoded here and copied to the Move; some are large. Without them the oscillator stays silent.");
+  var r3 = el("div", "imp-row", body);
+  r3.appendChild(picker("Samples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));
+  r3.appendChild(picker("Multisamples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));
+
+  el("div", "imp-h", body, "Bank");
+  IMP.bankEl = el("input", "imp-name", body); IMP.bankEl.type = "text"; IMP.bankEl.maxLength = 40; IMP.bankEl.value = "Imports";
+  IMP.bankEl.addEventListener("input", function () { IMP.bankTouched = true; });
+  el("div", "imp-note", body, "Loose presets go to “Imports”; a folder or pack gets a bank of its own name. A preset with the same name already in the bank is replaced.");
+  IMP.goEl = el("button", "imp-go", body, "Import");
+  IMP.goEl.addEventListener("click", runImport);
+  IMP.barWrap = el("div", "imp-bar", body); IMP.barEl = el("i", null, IMP.barWrap); IMP.barWrap.style.display = "none";
+  IMP.statEl = el("div", "imp-stat", body, "");
+  impSummary();
+}
+function openImport(on) {
+  if (on === undefined) on = !IMP.box.classList.contains("on");
+  if (on && IMP.busy) { IMP.box.classList.add("on"); return; }
+  IMP.box.classList.toggle("on", on);
+  if (on) { openBrowser(false); impBuildForm(); }
+}
+function buildImport() {
+  IMP.box = document.getElementById("imp");
+  var head = el("div", "imp-head", IMP.box);
+  el("span", null, head, "Import presets");
+  var x = el("button", "x", head, "✕"); x.title = "Close (Esc)";
+  x.addEventListener("click", function () { openImport(false); });
+  IMP.bodyEl = el("div", "imp-body", IMP.box);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && IMP.box.classList.contains("on")) openImport(false); });
+}
+
+/* ---------------------------------------------------------------- demo mode */
+/* Play a MIDI part of a song on this slot: bass on one slot, lead on another, switched on in step. The MIDI files are read here (a Standard MIDI File is simple), cut
+ * into parts (one per track, or per channel when a track has several), and stored on the Move as .tdm text: "len|tick,dur,note,vel|..." in 1/96 beats. Every part of one
+ * song gets the same length (whole bars), so the parts stay together whenever each is switched on. */
+var MIDI_ROOT = "/data/UserData/schwung/midi";
+var DM = { packs: [], b: 0, p: 0, on: false, playing: false, files: [], busy: false, ui: {} };
+
+function parseMidi(buf) {
+  var u = new Uint8Array(buf), d = new DataView(buf);
+  function tag(o) { return String.fromCharCode(u[o], u[o + 1], u[o + 2], u[o + 3]); }
+  if (u.length < 14 || tag(0) !== "MThd") throw new Error("not a MIDI file");
+  var hl = d.getUint32(4), ntr = d.getUint16(10), div = d.getUint16(12);
+  if (div & 0x8000) throw new Error("SMPTE time code is not supported");
+  var pos = 8 + hl, tracks = [], tempo = null, sig = null;
+  function vlq(p) { var v = 0, b; do { b = u[p.i++]; v = (v << 7) | (b & 0x7f); } while ((b & 0x80) && p.i < u.length); return v; }
+  for (var t = 0; t < ntr && pos + 8 <= u.length; t++) {
+    var len = d.getUint32(pos + 4);
+    if (tag(pos) !== "MTrk") { pos += 8 + len; t--; continue; }
+    var p = { i: pos + 8 }, end = Math.min(pos + 8 + len, u.length), abs = 0, run = 0, name = "", open = {}, notes = [];
+    function close(key, at) { var o = open[key]; if (o) { notes.push({ t: o.t, d: Math.max(at - o.t, 1), n: o.n, v: o.v, c: o.c }); delete open[key]; } }
+    while (p.i < end) {
+      abs += vlq(p);
+      var st = u[p.i];
+      if (st === 0xFF) {
+        var type = u[p.i + 1]; p.i += 2;
+        var l = vlq(p);
+        if (type === 0x03 && !name) name = String.fromCharCode.apply(null, Array.prototype.slice.call(u, p.i, p.i + l)).replace(/[^\x20-\x7e]/g, "").trim();
+        else if (type === 0x51 && l === 3 && tempo === null) tempo = 60000000 / ((u[p.i] << 16) | (u[p.i + 1] << 8) | u[p.i + 2]);
+        else if (type === 0x58 && l >= 2 && !sig) sig = [u[p.i], 1 << u[p.i + 1]];
+        p.i += l;
+        if (type === 0x2f) break;
+        continue;
+      }
+      if (st === 0xF0 || st === 0xF7) { p.i++; p.i += vlq(p); continue; }
+      if (st & 0x80) { run = st; p.i++; }
+      var hi = run & 0xF0, ch = run & 0x0F, a = u[p.i], b2 = u[p.i + 1];
+      if (hi === 0xC0 || hi === 0xD0) { p.i += 1; continue; }
+      p.i += 2;
+      if (hi === 0x90 && b2 > 0) { close(ch * 128 + a, abs); open[ch * 128 + a] = { t: abs, n: a, v: b2, c: ch }; }
+      else if (hi === 0x80 || hi === 0x90) close(ch * 128 + a, abs);
+    }
+    Object.keys(open).forEach(function (k) { close(+k, abs); });
+    tracks.push({ name: name, notes: notes });
+    pos += 8 + len;
+  }
+  return { ppq: div, tracks: tracks, tempo: tempo || 120, sig: sig || [4, 4] };
+}
+
+function cleanPartName(s) {
+  s = String(s || "").replace(/[^A-Za-z0-9 _.&()+#'-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60).trim();
+  return s || "Part";
+}
+
+/* The parts of one parsed file: [{name, text, notes, bars}] with one shared length. */
+function midiParts(base, m) {
+  base = String(base).replace(/\.[^.]*$/, "");
+  var q = 96 / m.ppq, raw = [], maxEnd = 0;
+  m.tracks.forEach(function (tr, ti) {
+    var by = {};
+    tr.notes.forEach(function (n) { (by[n.c] = by[n.c] || []).push(n); });
+    var chs = Object.keys(by);
+    chs.forEach(function (c) {
+      var ns = by[c].map(function (n) { return { t: Math.round(n.t * q), d: Math.max(1, Math.round(n.d * q)), n: n.n, v: n.v }; });
+      ns.forEach(function (n) { maxEnd = Math.max(maxEnd, n.t + n.d); });
+      var label = tr.name || ("Track " + (ti + 1));
+      if (chs.length > 1) label += (+c === 9 ? " drums" : " ch" + (+c + 1));
+      else if (+c === 9 && !tr.name) label = "Drums";
+      raw.push({ label: label, ns: ns });
+    });
+  });
+  var bar = m.sig[0] * (384 / m.sig[1]), len = Math.max(1, Math.ceil(maxEnd / bar)) * bar;
+  return raw.map(function (r) {
+    r.ns.sort(function (a, b) { return a.t - b.t; });
+    var ns = r.ns.slice(0, 20000);
+    return { name: raw.length === 1 ? cleanPartName(base) : cleanPartName(base + " - " + r.label), notes: ns.length,
+             bars: len / bar, text: len + "|" + ns.map(function (n) { return n.t + "," + n.d + "," + n.n + "," + n.v; }).join("|") + "\n" };
+  });
+}
+
+function demoSend(key, v) { send(key, v); }
+function demoRender() {
+  var u = DM.ui;
+  if (!u.pack) return;
+  u.pack.textContent = ""; u.part.textContent = "";
+  DM.packs.forEach(function (pk, i) { var o = el("option", null, u.pack, pk.n); o.value = i; });
+  var cur = DM.packs[DM.b];
+  ((cur && cur.p) || []).forEach(function (nm, i) { var o = el("option", null, u.part, nm); o.value = i; });
+  if (!DM.packs.length) { var o = el("option", null, u.pack, "No MIDI imported yet"); o.value = 0; }
+  u.pack.value = DM.b; u.part.value = DM.p;
+  u.pack.disabled = u.part.disabled = !DM.packs.length;
+  u.on.classList.toggle("on", DM.on);
+  u.on.textContent = DM.on ? "Demo on" : "Demo off";
+  u.on.disabled = !DM.packs.length;
+  u.stat.textContent = !DM.packs.length ? "Import a MIDI file or a folder of them below." :
+    DM.on ? (DM.playing ? "Playing. Parts of the same song stay together on every slot." : "Waiting for the transport and the next bar…") : "Choose a part, then switch the demo on.";
+}
+function demoSummary() {
+  var u = DM.ui;
+  if (!u.sum) return;
+  u.sum.textContent = DM.files.length ? DM.files.length + (DM.files.length === 1 ? " MIDI file" : " MIDI files") + " chosen" : "Nothing chosen yet";
+  u.go.disabled = DM.busy || !DM.files.length;
+  if (!u.nameTouched && DM.files.length) {
+    var first = DM.files[0].rel.split("/");
+    u.name.value = cleanBank(first.length > 1 ? first[0] : DM.files.length > 1 ? "Demos" : first[0].replace(/\.[^.]+$/, ""));
+  }
+}
+function demoAdd(list) {
+  list.forEach(function (it) { if (/\.midi?$/i.test(it.rel)) DM.files.push({ file: it.file, rel: cleanRel(it.rel) }); });
+  demoSummary();
+}
+async function demoRun() {
+  var u = DM.ui;
+  if (DM.busy || !DM.files.length) return;
+  DM.busy = true; demoSummary();
+  var pack = cleanBank(u.name.value) || "Demos", made = [], notes = [];
+  try {
+    u.res.textContent = "Reading…";
+    var used = {};
+    for (var i = 0; i < DM.files.length; i++) {
+      var f = DM.files[i], base = f.rel.split("/").pop();
+      try {
+        var m = parseMidi(await readBuf(f.file));
+        var ps = midiParts(base, m);
+        if (!ps.length) { notes.push(f.rel + ": no notes"); continue; }
+        ps.forEach(function (p) {
+          var nm = p.name, n = 2;
+          while (used[nm.toLowerCase()]) nm = p.name.slice(0, 56) + " " + n++;
+          used[nm.toLowerCase()] = 1; p.name = nm; made.push(p);
+        });
+        notes.push(base + ": " + ps.length + (ps.length === 1 ? " part" : " parts") + ", " + ps[0].bars + " bars, written at " + Math.round(m.tempo) + " BPM (plays at the Move's tempo)");
+      } catch (e) { notes.push(f.rel + ": " + e.message); }
+    }
+    if (!made.length) throw new Error("No notes found in the chosen files.");
+    u.res.textContent = "Uploading " + made.length + " parts…";
+    var dir = await ensurePath("/data/UserData/schwung", "midi/tinyhouse/" + pack);
+    for (var k = 0; k < made.length; k++) await uploadRemote(dir, made[k].name + ".tdm", new Blob([made[k].text], { type: "text/plain" }));
+    send("rescan", 1);
+    var found = -1;
+    for (var t = 0; t < 12 && found < 0; t++) {
+      await sleep(700);
+      try {
+        var d = JSON.parse(await schwungRemote.getParam(KP + "demo_list"));
+        if (d && d.b) { DM.packs = d.b; found = d.b.findIndex(function (x) { return x.n === pack; }); }
+      } catch (e) {}
+    }
+    if (found >= 0) { DM.b = found; DM.p = 0; send("demo_pack", found); }
+    demoRender();
+    u.res.textContent = "Imported " + made.length + " parts into “" + pack + "”." + (found < 0 ? " The module has not listed them yet: reload the slot if they do not appear." : "");
+    u.notes.textContent = notes.join("\n");
+    DM.files = [];
+  } catch (e) { u.res.textContent = "Stopped: " + e.message; u.notes.textContent = notes.join("\n"); }
+  DM.busy = false; demoSummary();
+}
+function buildDemo(page) {
+  var u = DM.ui = {};
+  var g = el("div", "grid g2", page);
+  var card = panel("Demo", g).body;
+  el("div", "demo-note", card, "Play a part of an uploaded song on this slot. Put bass on one slot and a lead on another and switch them on to hear the whole track. Switching on also starts the Move's transport (Play), so the clips in the set play with it; the part follows the transport, stopping and starting with it.");
+  var row = el("div", "demo-row", card);
+  u.on = el("button", "demo-on", row, "Demo off");
+  u.on.addEventListener("click", function () { DM.on = !DM.on; demoSend("demo_on", DM.on ? "On" : "Off"); demoRender(); });
+  u.pack = el("select", "demo-sel", row);
+  u.pack.addEventListener("change", function () { DM.b = +u.pack.value; DM.p = 0; demoSend("demo_pack", DM.b); demoRender(); });
+  u.part = el("select", "demo-sel", row);
+  u.part.addEventListener("change", function () { DM.p = +u.part.value; demoSend("demo_part", DM.p); });
+  u.stat = el("div", "demo-stat", card, "");
+
+  var imp = panel("Import MIDI", g).body;
+  el("div", "demo-note", imp, "Choose .mid files, or a folder of them (a Serum pack's demo MIDI). Each track becomes a part you can pick above. They play at the Move's tempo.");
+  var r2 = el("div", "demo-row", imp);
+  function picker(label, attrs) {
+    var inp = el("input", null, imp); inp.type = "file"; inp.style.display = "none";
+    for (var a in attrs) inp.setAttribute(a, attrs[a]);
+    inp.addEventListener("change", function () { demoAdd(pickList(inp)); inp.value = ""; });
+    var b = el("button", "demo-b", r2, label);
+    b.addEventListener("click", function () { inp.click(); });
+  }
+  picker("MIDI files…", { multiple: "", accept: ".mid,.midi" });
+  picker("Folder…", { webkitdirectory: "", directory: "" });
+  var drop = el("div", "demo-drop", imp, "…or drop MIDI files or folders here");
+  drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (e) {
+    e.preventDefault(); drop.classList.remove("over");
+    var items = e.dataTransfer && e.dataTransfer.items, out = [], jobs = [];
+    if (items && items.length && items[0].webkitGetAsEntry) {
+      for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry(); if (en) jobs.push(walkEntry(en, "", out)); }
+      Promise.all(jobs).then(function () { demoAdd(out); });
+    } else if (e.dataTransfer) {
+      for (var j = 0; j < e.dataTransfer.files.length; j++) out.push({ file: e.dataTransfer.files[j], rel: e.dataTransfer.files[j].name });
+      demoAdd(out);
+    }
+  });
+  u.sum = el("div", "demo-sum", imp, "");
+  el("div", "demo-h", imp, "Pack name");
+  u.name = el("input", "demo-name", imp); u.name.type = "text"; u.name.maxLength = 40; u.name.value = "Demos";
+  u.name.addEventListener("input", function () { u.nameTouched = true; });
+  u.go = el("button", "demo-go", imp, "Import");
+  u.go.addEventListener("click", demoRun);
+  u.res = el("div", "demo-stat", imp, "");
+  u.notes = el("div", "demo-notes", imp, "");
+  demoSummary(); demoRender();
+  /* while the demo is on, ask the module whether it has started (it waits for a bar) */
+  setInterval(function () {
+    if (!DM.on) return;
+    schwungRemote.getParam(KP + "demo_now").then(function (v) { if (v) EXTRA.demo_now(v); }).catch(function () {});
+  }, 1000);
+}
+
 /* chain_params entries the module adds for the host's own pages (pack and table lists, the preset
  * browser): they are not sound parameters and have their own pickers or none here */
-var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|is_loading|wt_paths)$/;
+var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_pack|demo_part|demo_list|demo_now)$/;
 
 /* keys the host streams that are not controls */
 var EXTRA = {
@@ -1461,6 +2254,14 @@ var EXTRA = {
   preset_list: function (v) {
     try { var d = JSON.parse(v); if (d && d.b) { PS.banks = d.b; renderPbar(); renderBrowser(); } } catch (e) {}
   },
+  demo_list: function (v) {
+    try { var d = JSON.parse(v); if (d && d.b) { DM.packs = d.b; demoRender(); } } catch (e) {}
+  },
+  demo_now: function (v) {
+    var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
+    if (!isNaN(b) && !isNaN(i)) { DM.b = b; DM.p = i; DM.playing = p[2] === "1"; demoRender(); }
+  },
+  demo_on: function (v) { DM.on = String(v).toLowerCase() === "on" || String(v) === "1"; demoRender(); },
   preset_now: function (v) {
     var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
     if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); }
@@ -1473,7 +2274,7 @@ var EXTRA = {
 /* ------------------------------------------------------------------ start */
 function buildTabs() {
   var tabs = document.getElementById("tabs"), pages = document.getElementById("pages");
-  var defs = [["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal]];
+  var defs = [["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
   var ps = [], bs = [];
   defs.forEach(function (d, i) {
     var b = el("button", i ? null : "on", tabs, d[0]);
@@ -1495,6 +2296,7 @@ function buildTabs() {
 function start(cp) {
   cp.forEach(function (c) { if (c && c.key) META[c.key] = c; });
   buildBrowser();
+  buildImport();
   buildOsc();
   buildTabs();
   buildPickers(cp);

@@ -26,6 +26,12 @@ scp -q "$SRC/src/module.json"       "$HOST:$DEST/module.json.new"
 scp -q "$SRC/src/ui_pages.json"     "$HOST:$DEST/ui_pages.json.new"
 scp -q "$SRC/src/help.json"         "$HOST:$DEST/help.json"
 scp -q "$SRC/src/web_ui.html"       "$HOST:$DEST/web_ui.html"
+# The remote UI's Import runs the converter from this bundle (python tools/build_import_bundle.py makes it)
+if [ -f "$SRC/build/import_bundle.zip" ]; then
+    scp -q "$SRC/build/import_bundle.zip" "$HOST:$DEST/import_bundle.zip"
+else
+    echo "note: no build/import_bundle.zip (python tools/build_import_bundle.py): the Import button will say the converter is missing" >&2
+fi
 # No factory.tbl: the engine seeds a module's preset folder from it on first load, and TinyHouse
 # carries only the converted Deep House presets (installed by ../deploy_presets.sh), not stock Tablor's.
 ssh "$HOST" "rm -f $DEST/presets/factory.tbl"

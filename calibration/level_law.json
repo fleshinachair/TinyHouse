@@ -1,0 +1,6 @@
+{
+ "offset_db": -2.66,
+ "n": 70,
+ "spread_db": 5.2,
+ "note": "volume pot is squared: new = old * 10^(offset_db / 40); median of the PC pipeline's per-preset level corrections (Loopsy pack)"
+}

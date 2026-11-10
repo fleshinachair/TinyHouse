@@ -19,6 +19,7 @@ native)
     $CXX $SRC "$ROOT/tests/test_engine.cpp" $ENGINE -o "$OUT/native_engine_test.exe"
     $CXX $SRC "$ROOT/tests/test_dsp.cpp" "$ROOT/src/ported/wavetable.cpp" "$ROOT/src/ported/audiofilter/ParametricCreator.cpp" -o "$OUT/native_dsp_test.exe"
     $CXX $SRC "$ROOT/tests/test_fx.cpp" $ENGINE -o "$OUT/native_fx_test.exe"
+    $CXX $SRC "$ROOT/tests/test_demo.cpp" $ENGINE -o "$OUT/native_demo_test.exe"
     $CXX $SRC "$ROOT/../calibration/tablor_cli.cpp" $ENGINE -o "$ROOT/../calibration/tablor_cli.exe"
     ;;
 arm)

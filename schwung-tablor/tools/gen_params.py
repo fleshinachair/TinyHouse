@@ -804,6 +804,17 @@ def build_hierarchy():
         }
         level_ids.append((lid, levels[lid]["name"]))
 
+    # The demo mode: play a MIDI part of an uploaded song on this slot (the remote UI's MIDI import). The switch is a plain enum; the pack and the part
+    # are enums whose options the DSP publishes from what it scanned (like Bank), so a knob steps through them.
+    levels["demo"] = {
+        "name": "Demo",
+        "params": [{"key": "demo_on", "name": "Demo", "type": "enum", "options": ["Off", "On"]},
+                   {"key": "demo_pack", "name": "Demo Pack", "type": "enum"},
+                   {"key": "demo_part", "name": "Demo Part", "type": "enum"}],
+        "knobs": ["demo_on", "demo_pack", "demo_part"],
+    }
+    level_ids.append(("demo", "Demo"))
+
     # ROOT declares the preset browser AND the PERFORM knobs -- the obxd pattern
     # the planner is built for ("a level is routinely both the Main knob page
     # and the preset browser"). That yields, in jog order:

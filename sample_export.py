@@ -16,9 +16,40 @@ import struct
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
+try:
+    import soundfile as sf
+except ImportError:             # the browser importer (Pyodide) has no audio decoder: sample files are not exported there
+    sf = None
 
 from serum_paths import SERUM_ROOT      # noqa: E402  (set the SERUM_ROOT environment variable if Serum is not in the default place)
+
+# The browser importer has no audio decoder in Python: the page decodes the files a preset names, and writes each as "<name>.dec" (u32 rate, u32 channels, then 16-bit samples, the precision of the exported sets)
+# under BROWSER_DIR/Samples and BROWSER_DIR/Multisamples (the layout of Serum's own folder). With BROWSER_DIR set the reader looks there instead.
+BROWSER_DIR: Path | None = None
+
+
+def _root(kind: str) -> Path:
+    return (BROWSER_DIR if BROWSER_DIR is not None else SERUM_ROOT) / kind
+
+
+def _real(p) -> Path | None:
+    """The file that holds p's audio: p itself, or its decoded copy beside it."""
+    p = Path(p)
+    if p.is_file():
+        return p
+    d = p.with_name(p.name + ".dec")
+    return d if d.is_file() else None
+
+
+def _read(p, dtype="float32", always_2d=True):
+    """(audio, rate) of a sample file, from soundfile or from the page's decoded copy."""
+    real = _real(p)
+    if real is not None and real.suffix == ".dec":
+        b = real.read_bytes()
+        rate, ch = struct.unpack("<II", b[:8])
+        a = (np.frombuffer(b, dtype="<i2", offset=8).reshape(-1, max(ch, 1)) / 32767.0).astype(dtype)
+        return (a if always_2d or a.shape[1] > 1 else a[:, 0]), float(rate)
+    return sf.read(str(real or p), dtype=dtype, always_2d=always_2d)
 MAX_FRAMES = 1 << 21                 # 47 s at 44.1 kHz: no region longer than this is kept whole
 
 
@@ -95,14 +126,14 @@ def write_set(regions: list[bytes], dest: Path) -> Path:
 def export_multisample(sfz_rel: str, dest: Path, loop_pct: tuple[float, float] | None = None) -> Path | None:
     """A Multisample oscillator's SFZ as one set. loop_pct: the oscillator's own Loop Start/End (percent of each sample), if it stores them;
     otherwise the SFZ's loop points are used."""
-    sfz = SERUM_ROOT / "Multisamples" / sfz_rel.replace("\\", "/")
+    sfz = _root("Multisamples") / sfz_rel.replace("\\", "/")
     if not sfz.is_file():
         return None
     out = []
     for r in parse_sfz(sfz):
-        if not r["file"].is_file():
+        if _real(r["file"]) is None:
             continue
-        audio, rate = sf.read(str(r["file"]), dtype="float32", always_2d=True)
+        audio, rate = _read(r["file"])
         n = len(audio)
         loop = None
         if loop_pct is not None:
@@ -120,12 +151,15 @@ def find_sample(rel: str) -> Path | None:
     """A sample named relative to Serum's Samples folder, or (the noise slot names it from a library folder below that) found by its last two
     path parts anywhere under it."""
     rel = rel.replace("\\", "/").lstrip("/")
-    direct = SERUM_ROOT / "Samples" / rel
-    if direct.is_file():
+    direct = _real(_root("Samples") / rel)
+    if direct is not None:
         return direct
     if rel not in _found:
         tail = "/".join(rel.split("/")[-2:])
-        _found[rel] = next((p for p in (SERUM_ROOT / "Samples").rglob(Path(rel).name) if p.as_posix().endswith(tail)), None)
+        hit = next((p for p in (_root("Samples")).rglob("*" + Path(rel).name + "*") if p.as_posix().endswith(tail) or p.as_posix().endswith(tail + ".dec")), None)
+        if hit is None:
+            return None                                  # not cached: the browser importer may add the file later
+        _found[rel] = hit
     return _found[rel]
 
 
@@ -134,7 +168,7 @@ def export_sample(sample_rel: str, dest: Path, base_note: int = 60, loop_pct: tu
     path = find_sample(sample_rel)
     if path is None:
         return None
-    audio, rate = sf.read(str(path), dtype="float32", always_2d=True)
+    audio, rate = _read(path)
     loop = (loop_pct[0] / 100.0, loop_pct[1] / 100.0) if loop_pct is not None else None
     return write_set([_region(audio, rate, 0, 127, base_note, loop, 0.0)], dest)
 
@@ -216,7 +250,7 @@ def noise_standin(rel: str):
     fp = find_sample(rel)
     res = None
     if fp:
-        x, sr = sf.read(str(fp))
+        x, sr = _read(fp, dtype="float64", always_2d=False)
         x = x if x.ndim == 1 else x.mean(1)
         n = min(len(x), 1 << 18)
         seg = x[:n]
@@ -248,5 +282,6 @@ def noise_standin(rel: str):
                         best = (loss, ty, hp, lp, g)
         _, ty, hp, lp, g = best
         res = (ty, hp, lp, g)
-    _standin[rel] = res
+    if res is not None:
+        _standin[rel] = res
     return res

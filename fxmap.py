@@ -1234,6 +1234,79 @@ def map_wide(fp: dict | None, cache: dict, cli: Path = CLI) -> tuple[dict, list[
     return P, notes, info
 
 
+# ------------------------------------------------------------------------------ static laws (no Serum, no render)
+FX_LAWS = ROOT / "calibration/fx_laws.json"
+REVERB_DEFAULTS = {"size": 35.0, "dly": 31.0, "fb": 0.0, "fq": 0.0, "fqb": 35.0, "w": 20.0}
+REVERB_KEYS = {"size": "kParamSize", "dly": "kParamDelay", "fb": "kParamFeedback", "fq": "kParamFreq", "fqb": "kParamFreqB", "w": "kParamWidth"}
+REVERB_FEATURES = {          # the feature vectors calibration/fit_fx_laws.py regresses log RT60 on
+    "quad": lambda f: [f["size"], f["dly"], f["fqb"], f["fq"], f["fb"], f["size"] * f["dly"] / 100, f["dly"] * f["fqb"] / 100, f["size"] * f["fqb"] / 100,
+                       f["dly"] ** 2 / 100, f["size"] ** 2 / 100, f["fqb"] ** 2 / 100, 1.0],
+    "size": lambda f: [f["size"], 1.0],
+    "sds": lambda f: [f["size"], f["dly"], f["size"] * f["dly"] / 100, 1.0],
+}
+_laws: dict | None = None
+
+
+def fx_laws() -> dict:
+    global _laws
+    if _laws is None:
+        _laws = json.loads(FX_LAWS.read_text(encoding="utf-8")) if FX_LAWS.exists() else {}
+    return _laws
+
+
+def map_reverb_static(nodes: list[dict]) -> tuple[dict, list[str]]:
+    """The engine's reverb from Serum's Reverb node alone (calibration/fit_fx_laws.py): the same mapping the closed loop reaches, read off the node's own settings, for a preset that
+    has no Serum fingerprint (a user's own: the remote UI's Import). Size / Delay / FreqB / Freq / Feedback give the RT60, the engine's decay table turns that into the decay pot, damping and
+    width follow the reverb Type, mix follows Wet. The rack's loudest Reverb is carried."""
+    P = {"rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127}
+    law = fx_laws().get("reverb")
+    cands = [n for n in nodes if kind_of(n) == "Reverb" and enabled(n)]
+    if not law or not cands:
+        return P, []
+    n = max(cands, key=lambda x: plain(x).get("kParamWet", WET_DEFAULT["Reverb"]))
+    pp = plain(n)
+    wet = float(pp.get("kParamWet", WET_DEFAULT["Reverb"]))
+    if wet < 1.0:
+        return P, []
+    ty = pp.get("kParamType", "none")
+    if ty not in law["rt60"]:
+        return P, [f"Reverb type {str(ty)[1:] if str(ty).startswith('k') else ty} is not carried (no measurements for it)"]
+    f = {k: float(pp.get(v, REVERB_DEFAULTS[k])) for k, v in REVERB_KEYS.items()}
+    m = law["rt60"][ty]
+    rt = min(max(math.exp(float(np.dot(m["coef"], REVERB_FEATURES[m["features"]](f)))), 0.2), 19.0)
+    dt = law["decay_table"]
+    decay = int(round(float(np.interp(math.log(rt), [math.log(r) for _, r in dt], [d for d, _ in dt]))))
+    width = 127 if ty != "none" else int(round(min(max(law["none_width_per_w"] * f["w"], 0.0), 127.0)))
+    P.update(rev_mix=int(round(min(127.0, 127.0 * law["mix_per_wet"] * wet / 100.0))), rev_decay=decay, rev_damp=law["damp"].get(ty, 120), rev_width=width)
+    notes = [f"Reverb carried by rule from Serum's settings ({ty[1:] if ty.startswith('k') else 'default type'}, wet {wet:.0f} %, tail about {rt:.1f} s)"]
+    if len(cands) > 1:
+        notes.append(f"Reverb: {len(cands)} in the rack, the one with the most wet is carried")
+    return P, notes
+
+
+def map_wide_static(nodes: list[dict]) -> tuple[dict, list[str]]:
+    """The engine's width from a HyperD node's Wet and Dimension Wet (calibration/fit_fx_laws.py), for a preset with no Serum fingerprint."""
+    P = {"fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64}
+    law = fx_laws().get("wide")
+    cands = [n for n in nodes if kind_of(n) == "HyperD" and enabled(n)]
+    if not law or not cands:
+        return P, []
+    best = None
+    for n in cands:
+        pp = plain(n)
+        s = law["a"] * (float(pp.get("kParamWet", 25.0)) / 100.0) ** law["p"] + law["b"] * (float(pp.get("kParamDimEWet", 0.0)) / 100.0) ** law["q"]
+        if float(pp.get("kParamUnison", 4.0)) < 0.5 and float(pp.get("kParamDimEWet", 0.0)) < 1.0:
+            s = 0.0
+        best = s if best is None else max(best, s)
+    t = 20.0 * math.log10(best) if best and best > 0 else -200.0
+    if t < law["floor_db"]:
+        return P, []
+    tab = law["table"]
+    v = int(round(float(np.interp(t, [d for _, d in tab], [k for k, _ in tab]))))
+    P["fx_wide"] = min(max(v, 1), 127)
+    return P, [f"Width carried by rule from the Hyper/Dimension settings (about {t:.0f} dB of side added)"]
+
+
 # ------------------------------------------------------------------------------ top level
 _fingerprints: dict | None = None
 _cache: dict | None = None
@@ -1309,8 +1382,15 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     P.update(p); notes += n; info.update(i)
     p, n, i = map_delay(nodes, fp)
     P.update(p); notes += n; info.update(i)
-    if fp is None and any(kind_of(x) in ("Reverb", "Conv", "Delay", "HyperD") for x in nodes):
-        notes.append("Reverb, delay and width not carried: no Serum fingerprint for this preset (calibration/fx_fingerprint.py)")
+    if fp is None and any(kind_of(x) in ("Reverb", "Conv", "HyperD") for i, x in enumerate(nodes) if i not in inside):
+        # No fingerprint (a preset Serum was never run on: a user's own): the static laws read the same pots off the node's own settings (calibration/fit_fx_laws.py)
+        outer = [x for i, x in enumerate(nodes) if i not in inside]
+        p, n = map_reverb_static(outer)
+        P.update(p); notes += n
+        p, n = map_wide_static(outer)
+        P.update(p); notes += n
+        if any(kind_of(x) == "Conv" for x in outer):
+            notes.append("Convolution reverb not carried")
     elif not cli.exists():
         if fp and ("reverb" in fp or "wide" in fp):
             notes.append("Reverb and width not carried: calibration/tablor_cli.exe is not built")

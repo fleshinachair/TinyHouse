@@ -91,6 +91,40 @@ inline std::shared_ptr<Arp> parseArp(const char *s)
     return a;
 }
 
+/* A demo part: the notes of one MIDI part (a bass line, a lead, the chords) of a whole song, played on this slot by the demo mode at the host tempo. Unlike the clip
+ * (a short loop transposed by the key) it is a performance at absolute pitch: up to kDemoMax notes, ticks of 1/96 beat, looped every `len` ticks (a whole number of bars,
+ * the same for every part of one song so the parts stay together). The file holds the clip's text form: "len|tick,dur,note,vel|...". */
+inline constexpr int kDemoMax = 20000;
+struct DemoNote { int tick, dur; uint8_t note, vel; };
+struct Demo {
+    int len = 0;
+    std::vector<DemoNote> notes;             /* by tick */
+};
+
+inline std::shared_ptr<Demo> parseDemo(const char *s)
+{
+    if (!s || !*s) return nullptr;
+    auto d = std::make_shared<Demo>();
+    char *e = nullptr;
+    d->len = (int) strtol(s, &e, 10);
+    while (e && *e == '|' && (int) d->notes.size() < kDemoMax) {
+        ++e;
+        long v[4];
+        for (int i = 0; i < 4; i++) {
+            v[i] = strtol(e, &e, 10);
+            if (i < 3) { if (*e != ',') goto done; ++e; }
+        }
+        d->notes.push_back({ (int) std::max(v[0], 0L), (int) std::max(v[1], 1L), (uint8_t) std::clamp(v[2], 0L, 127L), (uint8_t) std::clamp(v[3], 1L, 127L) });
+    }
+done:
+    if (d->notes.empty() || d->len <= 0) return nullptr;
+    std::stable_sort(d->notes.begin(), d->notes.end(), [](const DemoNote &a, const DemoNote &b) { return a.tick < b.tick; });
+    return d;
+}
+
+/* The clock the song clock follows (seconds): the steady clock unless a test supplies its own. */
+void demoSetWallClock(double (*fn)());
+
 class Engine {
 public:
     Engine();
@@ -106,6 +140,8 @@ public:
     /* Refresh mod slots from the pot array (call after any m*_ change). */
 
     void setHostBpm(float bpm) { hostBpm = bpm; }
+    /* The Move's transport: beats since it started (< 0: stopped). `known` says the host reports it at all; without that the demo runs on a clock of its own. */
+    void setHostBeat(double beats, bool known) { hostBeat = beats; hostBeatKnown = known; }
 
     void onMidi(const uint8_t *msg, int len);
     void renderBlock(int16_t *outInterleavedLr, int frames);
@@ -129,10 +165,35 @@ public:
     /* The arpeggiator (null: off). Swapped in like the note pattern. */
     void setArp(std::shared_ptr<const Arp> a) { std::atomic_store(&arpSp, std::move(a)); arpEpoch.fetch_add(1); }
 
+    /* The demo part (null: none) and the demo switch. Playing starts at the next bar of the song clock every slot shares (see demoSongTicks), so the parts of one song
+     * line up whenever each is switched on. */
+    void setDemo(std::shared_ptr<const Demo> d) { std::atomic_store(&demoSp, std::move(d)); demoEpoch.fetch_add(1); }
+    void setDemoOn(bool on) { demoWant.store(on ? 1 : 0); }
+    bool demoPlaying() const { return demoRun; }
+
     /* Wavetable streams running right now: the number kStreamBudget bounds. */
     int activeStreams() const;
 
 private:
+    /* The demo player. */
+    std::shared_ptr<const Demo> demoSp;
+    std::atomic<int> demoEpoch { 0 }, demoWant { 0 };
+    int demoEpochSeen = 0;
+    bool demoRun = false, demoArmed = false, demoOnTr = false, demoTrSeen = false, demoArmTr = false;
+    long demoArmBar = 0;
+    double demoOff = 0.0, demoWaitT = -1.0;        /* transport ticks minus demoPos at the start; the wall time the wait for a transport began */
+    double hostBeat = -1.0;
+    bool hostBeatKnown = false;
+    double demoPos = 0.0, demoFiredTo = 0.0;       /* ticks of the song since the loop's first lap began; the note-ons below demoFiredTo have been sent */
+    int dAct[64];
+    double dActEnd[64];
+    int nDAct = 0;
+    void demoSync();
+    void demoStop(bool noteOffs);
+    void demoFire();
+    int  demoLimit(int frames);
+    void demoAdvance(int frames);
+    void demoSend(int note, int vel);
     /* The clip player: one player per held key, each walking the pattern from the key's own start. */
     struct ClipPlayer {
         bool used = false;

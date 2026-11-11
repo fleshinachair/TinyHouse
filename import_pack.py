@@ -75,7 +75,8 @@ def voice_level_error_db(m, it, serum, bank):
 
 
 def finalize_level(m, it, serum=None, bank=""):
-    """The state at the volume that puts the preset's full chain at Serum's loudness, capped by the limiter share.
+    """The state at the volume that puts the preset's full chain at Serum's loudness, capped by the limiter share, and how far the caps pulled it
+    under the volume that matched Serum (dB, <= 0: the master gain is 40 log10 of the pot).
     The compressor's thresholds and the calibrated distortion work on a level before the master gain. The converter sets them for its closed-form volume, which
     is right when the engine's voice is as loud as Serum's; where it is not (voice_level_error_db) they are moved to the volume at which the voices agree
     (comp_rescale.rescale) and stay there while the loudness fit moves the master gain after them. Without a Serum plugin the voice is taken as agreeing.
@@ -84,6 +85,9 @@ def finalize_level(m, it, serum=None, bank=""):
     P = m["params"]
     v0 = int(P["volume"])
     state0 = d2m.blob(m)
+    if os.environ.get("TH_LEVEL_DEBUG"):
+        print(f"    level fit {it['name']}: converter volume {v0} ({rec['start_rms_db']:+.1f} dB), Serum {rec['serum_rms_db']:+.1f} dB, fit volume {rec['volume']} ({rec['rms_db']:+.1f} dB, "
+              f"shortfall {rec['shortfall_db']:.1f} dB, limiter loss {rec['limiter_loss_db']:.1f} dB), level stages {bool(CR.level_stages(P))}", flush=True)
     if CR.level_stages(P):
         eps = voice_level_error_db(m, it, serum, bank) if serum is not None else None
         if eps:
@@ -92,9 +96,18 @@ def finalize_level(m, it, serum=None, bank=""):
         target = L.rms_db(it["refs"], it["end"])
         rms_of = lambda stx: L.rms_db([H.run_cli(stx, it["notes"], C.DUR, C.HOLD) for _ in range(2)], it["end"])
         _, st1 = CR.fit_volume(state0, v0, rms_of, target, start=int(rec["volume"]), follow=False)
-        return cap_limiter(st1, it)
-    P["volume"] = rec["volume"]
-    return cap_limiter(d2m.blob(m), it)
+        st2 = cap_limiter(st1, it)
+        v_fit = int(PF.getk(st1, "volume", 0))
+    else:
+        P["volume"] = rec["volume"]
+        st1 = d2m.blob(m)
+        st2 = cap_limiter(st1, it)
+        v_fit = int(rec["volume_uncapped"])
+    v_end = int(PF.getk(st2, "volume", 0))
+    capped_db = min(40.0 * math.log10(max(v_end, 1) / max(v_fit, 1)), 0.0)
+    if os.environ.get("TH_LEVEL_DEBUG"):
+        print(f"    level fit {it['name']}: volume that matched Serum {v_fit}, before the limiter share cap {int(PF.getk(st1, 'volume', 0))}, after {v_end} ({capped_db:+.1f} dB)", flush=True)
+    return st2, capped_db
 
 
 def as_played(renders):
@@ -335,15 +348,23 @@ def main():
                 ab_note = f"; left out, inaudible in Serum: {'; '.join(w for w in why if 'no Serum fingerprint' not in w)[:70]}"
             C.mapped = lambda *args, _m=m, **kw: copy.deepcopy(_m)         # fit_item maps the preset itself; hand it ours
             try:
-                state = finalize_level(m, it, serum, a.bank)
+                state, capped_db = finalize_level(m, it, serum, a.bank)
             except RuntimeError as e:                # the voice-only reference (effects stripped) can be silent for a preset whose sound is its effects
                 skipped.append((name, [f"Serum made no sound for the voice reference: {str(e)[:50]}"]))
                 continue
             gap, berr = quality(state, it, a.band_floor)
-            if abs(gap) > a.max_level_gap or berr > a.max_band_rms:
+            # A preset whose Serum render goes over full scale (a float peak above 1.0: it would clip on any output) cannot be matched in loudness without
+            # the engine's output clipper working on it, so the limiter caps hold it under Serum's level on purpose. That shortfall is not a conversion
+            # error: the level gate judges what the fit reached before the caps, and the kept line says how far under it sits. A quieter-than-Serum result
+            # on a render that stays under full scale is still judged as it is.
+            serum_peak = float(max(np.abs(r).max() for r in it["refs"]))
+            held_db = capped_db if serum_peak > 1.0 else 0.0
+            cap_note = f"; held {-held_db:.1f} dB under Serum's loudness by the output clipper (Serum's render peaks at {serum_peak:.2f})" if held_db < -0.5 else ""
+            if abs(gap - held_db) > a.max_level_gap or berr > a.max_band_rms:
                 skipped.append((name, [f"too far from Serum after the fit: level {gap:+.1f} dB, octave bands {berr:.1f} dB rms"]))
-                print(f"  dropped {name}: level {gap:+.1f} dB, bands {berr:.1f} dB rms", flush=True)
+                print(f"  dropped {name}: level {gap:+.1f} dB, bands {berr:.1f} dB rms (volume {int(PF.getk(state, 'volume', 0))}{cap_note})", flush=True)
                 continue
+            ab_note += cap_note
         (bank_dir / f"{name}.json").write_text(json.dumps({"name": name, "module": "tinyhouse", "version": 1, "state": state}) + "\n", encoding="utf-8")
         kept.append(name)
         print(f"  kept {name}" + ("" if a.no_level else f"  (volume {int(PF.getk(state, 'volume', 0))}, {m['tier']}, level {gap:+.1f} dB, bands {berr:.1f} dB rms{ab_note})"), flush=True)

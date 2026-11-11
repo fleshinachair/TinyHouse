@@ -79,6 +79,7 @@ def fit_item(it):
         else:
             hi = mid
     v = min(lo, 127)                                   # the bisect runs one past the top if Serum is never reached
+    v_fit = v                                          # the volume that matches Serum's loudness, before the limiter cap below
     r = at(v)
     loss = limiter_loss(v, r) if v >= 8 else 0.0
     if loss > LIMITER_CAP_DB:
@@ -92,7 +93,7 @@ def fit_item(it):
         v = lo
         r = at(v)
         loss = limiter_loss(v, r) if v >= 8 else 0.0
-    return {"sig": d2m.params_sig(P), "volume": int(v), "start_volume": int(start_v), "start_rms_db": start_db, "rms_db": r,
+    return {"sig": d2m.params_sig(P), "volume": int(v), "volume_uncapped": int(v_fit), "start_volume": int(start_v), "start_rms_db": start_db, "rms_db": r,
             "serum_rms_db": target, "shortfall_db": max(0.0, target - r), "limiter_loss_db": float(loss), "kept": True}
 
 

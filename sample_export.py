@@ -27,6 +27,13 @@ from serum_paths import SERUM_ROOT      # noqa: E402  (set the SERUM_ROOT enviro
 # under BROWSER_DIR/Samples and BROWSER_DIR/Multisamples (the layout of Serum's own folder). With BROWSER_DIR set the reader looks there instead.
 BROWSER_DIR: Path | None = None
 
+# Serum plays a Multisample oscillator 7.3 dB louder than the engine plays the same files at the same oscillator volume (calibration/probe_multisample_level.py:
+# Trumpets LE, Full Strings LE, Violins Mute LE and Bass Clarinet LE at volumes 0.25 / 0.5 / 1.0, every one within 0.1 dB of +7.3). A Sample oscillator agrees
+# within 0.3 dB with no offset (probe_sample_level.py: six files spanning 22 dB of recorded level), so the offset is the multisample's alone and goes into each
+# of its regions' volume, where the engine applies it at playback (sample.h); the int16 samples stay as recorded.
+MULTISAMPLE_PLAYBACK_DB = 7.3
+EXPORT_VERSION = 2            # bumped when the export's law changes: a set made by an older version is exported again (export_info)
+
 
 def _root(kind: str) -> Path:
     return (BROWSER_DIR if BROWSER_DIR is not None else SERUM_ROOT) / kind
@@ -140,7 +147,7 @@ def export_multisample(sfz_rel: str, dest: Path, loop_pct: tuple[float, float] |
             loop = (loop_pct[0] / 100.0, loop_pct[1] / 100.0)
         elif r["loops"] and r["loop_end"] > r["loop_start"]:
             loop = (r["loop_start"] / n, min(r["loop_end"] / n, 1.0))
-        out.append(_region(audio, rate, r["lo"], r["hi"], r["root"], loop, r["tune"], r["lovel"], r["hivel"], r["volume"]))
+        out.append(_region(audio, rate, r["lo"], r["hi"], r["root"], loop, r["tune"], r["lovel"], r["hivel"], r["volume"] + MULTISAMPLE_PLAYBACK_DB))
     return write_set(out, dest) if out else None
 
 
@@ -223,10 +230,17 @@ def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
     if info["loop"]:
         stem += "_L%d_%d" % (round(info["loop"][0]), round(info["loop"][1]))
     dest = out_dir / f"{stem}.tbs"
-    if not dest.exists() or _magic(dest) != b"TBS2":                # a set exported before the velocity layers were read is exported again
+    stamp = dest.with_name(dest.name + ".v")                          # the export version the set was made with (not copied to the Move: deploy_samples.sh takes *.tbs)
+    stale = not dest.exists() or _magic(dest) != b"TBS2"              # a set exported before the velocity layers were read is exported again
+    try:
+        stale = stale or int(stamp.read_text().strip() or 0) < EXPORT_VERSION
+    except (OSError, ValueError):
+        stale = True
+    if stale:
         made = (export_multisample(info["file"], dest, info["loop"]) if info["multi"] else export_sample(info["file"], dest, info["base_note"], info["loop"]))
         if made is None:
             return None
+        stamp.write_text(str(EXPORT_VERSION))
     return dest, info
 
 

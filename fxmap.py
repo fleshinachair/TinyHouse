@@ -130,7 +130,16 @@ UTILS_WIDTH_KNOB = [(0.0, 0.0), (0.1, 0.8), (0.2, 6.2), (0.3, 21.8), (0.4, 49.5)
 # -10 % = -0.85..-0.94); the LPF knob's stored ends are 50 Hz and 19.9 kHz, 8.64 octaves, which is the span taken for both (the HPF's top end is not known, 640 Hz assumed).
 UTILS_CUT_OCTAVES = 8.64
 UTILS_CUT_RANGE = {"kParamHPF": (1.34, 640.0), "kParamLPF": (50.0, 19924.0)}
-FOLDED_KNOBS = {"FXEQ": ("kParamGain1", "kParamGain2", "kParamFreq1", "kParamFreq2"), "FXDistortion": ("kParamDrive",), "FXUtils": ("kParamWidth", "kParamHPF", "kParamLPF")}
+# A Comp's own knobs (calibration/probe_comp_macro.py: a sine through one Comp, the level against the stored value, then with a route from Macro 1 at 100 %): the three band Gains are in
+# dB and a route adds 0.48 dB per percent (the EQ gain law: +10 % = +4.8 dB, +25 % = +12.0, +50 % = +24.0 and clamped there, -50 % from 0 = -24.0; stored -12 + 25 % = 0.0, stored 6 + 25 % = +18.0);
+# Thresh is a knob 0..1 and a route adds its amount to the knob position (0.3 + 10 / 25 / 50 % read as the static 0.40 / 0.55 / 0.80, 0.5 - 10 % as 0.40, 0.7 - 25 % as 0.45). Makeup is
+# a knob with its own curve over 0..+30.1 dB (stored factor 1 = 0 dB is the left end, anything over a factor of 32 reads +30.1): a route adds its amount to the knob position, and the position
+# to dB law is read off the routes from a stored 1 (the table below; stored 2 / 4 / 8 plus 10-20 % then read the dB the same table gives, within 0.3 dB). Before this a macro-driven Comp was carried at its
+# stored knobs: INIT - Brass Multisample stores band gains of -10 / -16 / -13 dB that its HIGH / MID / LOW macros lift to -0.3 / -2.9 / +12 dB, so the engine's Comp took 19 dB off a sound Serum's took 2 dB off.
+COMP_GAIN_RANGE_DB = 48.0
+COMP_MAKEUP_KNOB = [(0.0, 0.0), (0.02, 0.1), (0.04, 0.4), (0.06, 0.9), (0.08, 1.6), (0.1, 2.3), (0.15, 4.6), (0.2, 7.0), (0.3, 11.6), (0.4, 15.5), (0.5, 18.8), (0.6, 21.7), (0.8, 26.4), (1.0, 30.1)]
+FOLDED_KNOBS = {"FXEQ": ("kParamGain1", "kParamGain2", "kParamFreq1", "kParamFreq2"), "FXDistortion": ("kParamDrive",), "FXUtils": ("kParamWidth", "kParamHPF", "kParamLPF"),
+                "FXComp": ("kParamGain0", "kParamGain1", "kParamGain2", "kParamThresh", "kParamMakeup")}
 
 
 def fold_macro_knobs(nodes: list[dict], mods: list[dict], macros: list[float]) -> list[dict]:
@@ -160,6 +169,15 @@ def fold_macro_knobs(nodes: list[dict], mods: list[dict], macros: list[float]) -
             pp[param] = float(np.interp(min(max(x + a * d, 0.0), 1.0), xs, ws))
         elif kind == "Distortion":
             pp[param] = min(max(float(pp.get(param, DIST_DEFAULT_DRIVE)) + m["amount_pct"] * d, 0.0), 100.0)
+        elif kind == "Comp":
+            if param == "kParamThresh":
+                pp[param] = min(max(float(pp.get(param, 0.5)) + a * d, 0.0), 1.0)
+            elif param == "kParamMakeup":
+                xs, dbs = [q[0] for q in COMP_MAKEUP_KNOB], [q[1] for q in COMP_MAKEUP_KNOB]
+                x0 = float(np.interp(20.0 * math.log10(max(float(pp.get(param, 1.0)), 1.0)), dbs, xs))
+                pp[param] = 10.0 ** (float(np.interp(min(max(x0 + a * d, 0.0), 1.0), xs, dbs)) / 20.0)
+            else:
+                pp[param] = min(max(float(pp.get(param, 0.0)) + a * d * COMP_GAIN_RANGE_DB, -COMP_GAIN_RANGE_DB / 2), COMP_GAIN_RANGE_DB / 2)
         elif param.startswith("kParamGain"):
             pp[param] = min(max(float(pp.get(param, 0.0)) + a * d * EQ_GAIN_RANGE_DB, -EQ_GAIN_RANGE_DB / 2), EQ_GAIN_RANGE_DB / 2)
         else:

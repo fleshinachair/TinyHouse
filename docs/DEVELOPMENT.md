@@ -40,7 +40,7 @@ built on wavetables.
 **Oscillators and voice.**
 - Three wavetable oscillators with unison up to 16 voices, plus a sub and a noise oscillator (white, pink, brown and Serum's colour filters).
 - Wavetable position is stepped or interpolated per table, as Serum does it (the WAV `clm ` chunk).
-- Warps: bend, PWM, sync, even/odd, the filter warps and the Sub-driven FM, RM and PD warps. Not carried: FM, RM and PD warps driven by another oscillator or the noise, DLM, spectral tables, Sync Var.
+- Warps: bend, PWM, sync, even/odd, the filter warps and the FM, RM, PD and AM warps driven by the Sub or by another oscillator, with two warp slots per oscillator. Not carried: warps driven by the noise or by Filter 1, DLM, spectral tables, Sync Var.
 - Sample and multisample oscillators, from SFZ or audio, as `.tbs` sample sets (`sample_export.py`). Warps, unison and their own release are not modelled.
 - Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched; formant, comb and Diffuser models are not, nor filters with a Var knob.
 - Envelopes, 4 LFOs, and the modulation routes of macros, velocity, note number, mod wheel and random sources. Macros, velocity and note are folded
@@ -118,7 +118,7 @@ Ordered by how much they matter for the Deep House pack; [docs/ROADMAP.md](ROADM
 - **Effects racks with a Comp / Distortion inside a SplitMS branch, band-split (Split) branches and bus-rack Mono-below**: not carried. EQs inside SplitMS branches are carried (mid/side EQ stage).
 - **Formant voice filters** (FormantONE / TWO / TWB) are measured (`calibration/probe_formant.py`, `docs/TRANSLATION_RULES.md`) but not built; the importer drops presets that use them.
 - **Tempo-synced LFOs** are read as Hz (Lead - Loop, Pluck - Deep In The Water); needs a Serum probe of the Rate scale and an engine sync option.
-- Unsupported warps (FM, RM, PD, filter, DLM), non-wavetable oscillator kinds, Bode, a filter before the distortion, and filter-model gaps are the largest groups among the factory presets the importer drops.
+- Unsupported warps (the noise-driven and Filter-1-driven FM, RM and PD, DLM), non-wavetable oscillator kinds, Bode, a filter before the distortion, and filter-model gaps are the largest groups among the factory presets the importer drops.
 - Second distortion / compressor / delay stage; chorus / flanger / phaser default rates and depths; delay and reverb corner cases are listed in the notes next to each rule.
 - **Reverb tails (mostly done).** The wet gain is now 2.25 (was 1.50), which brings the median tail of a played note to within 1 to 3 dB of Serum's (it was 2 to 5 dB under). A hotter
   gain would centre it but puts steady noise too loud. Still open and minor: Serum's wet holds its peak 50 to 100 ms longer, and the spread between presets is 4 to 6 dB, so a

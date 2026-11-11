@@ -241,17 +241,6 @@
   "limiter_loss_db": 0.28573090005272306,
   "kept": true
  },
- "Pad - Reiny": {
-  "sig": "9f9fe6cacab08e8e1a1b091b88f0165f",
-  "volume": 65,
-  "start_volume": 86,
-  "start_rms_db": -13.027828800656152,
-  "rms_db": -17.89400774363594,
-  "serum_rms_db": -17.62716770794328,
-  "shortfall_db": 0.2668400356926597,
-  "limiter_loss_db": -0.017725289682104517,
-  "kept": true
- },
  "Pluck - HotLap": {
   "sig": "c9e057485925c523d3f8f2b62c06b5dc",
   "volume": 50,
@@ -483,17 +472,6 @@
   "limiter_loss_db": 0.5379490504519708,
   "kept": true
  },
- "Pluck - all things break": {
-  "sig": "b42bca64842b1ecfc35f64eec03e58be",
-  "volume": 51,
-  "start_volume": 69,
-  "start_rms_db": -11.956425954300355,
-  "rms_db": -17.180518260998426,
-  "serum_rms_db": -17.260747306274766,
-  "shortfall_db": 0.0,
-  "limiter_loss_db": 0.572903386231495,
-  "kept": true
- },
  "Pluck - London Topaz": {
   "sig": "cd55eb6b5392ca9a52b3e84ff8b14b34",
   "volume": 71,
@@ -558,17 +536,6 @@
   "serum_rms_db": -16.822951480841127,
   "shortfall_db": 0.08968713357657876,
   "limiter_loss_db": 0.4244869985699431,
-  "kept": true
- },
- "Bass - Rivo": {
-  "sig": "d49c667aecf1292823d588171cfa6af8",
-  "volume": 61,
-  "start_volume": 55,
-  "start_rms_db": -13.39894460348895,
-  "rms_db": -13.04880530436331,
-  "serum_rms_db": -12.63962836881634,
-  "shortfall_db": 0.4091769355469701,
-  "limiter_loss_db": 1.1506242481793016,
   "kept": true
  },
  "Pad - MIND": {
@@ -670,17 +637,6 @@
   "limiter_loss_db": -0.6468646253715953,
   "kept": true
  },
- "Bass - SWEDISHMF": {
-  "sig": "c4e1b1ecf261a3a31a6739643e4ddfeb",
-  "volume": 49,
-  "start_volume": 62,
-  "start_rms_db": -7.910438941608692,
-  "rms_db": -11.587180240923423,
-  "serum_rms_db": -11.531401092038134,
-  "shortfall_db": 0.05577914888528923,
-  "limiter_loss_db": 0.1008004887902274,
-  "kept": true
- },
  "Keys - Abelon": {
   "sig": "826a53b8b5f6bae78ec16ced93294df1",
   "volume": 47,
@@ -767,6 +723,50 @@
   "serum_rms_db": -24.38574891320515,
   "shortfall_db": 0.04818235900728851,
   "limiter_loss_db": -0.25093898086941735,
+  "kept": true
+ },
+ "Pluck - all things break": {
+  "sig": "5e64abbe2ad01d2538d5a6b52f7b00e8",
+  "volume": 50,
+  "start_volume": 69,
+  "start_rms_db": -11.796639482855575,
+  "rms_db": -17.042532941574763,
+  "serum_rms_db": -17.260747306274766,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": -0.04493868994255479,
+  "kept": true
+ },
+ "Bass - Rivo": {
+  "sig": "b093e7b8737e40519dcd2dfdee2e430a",
+  "volume": 63,
+  "start_volume": 55,
+  "start_rms_db": -14.848436998051227,
+  "rms_db": -12.752468174584813,
+  "serum_rms_db": -12.63962836881634,
+  "shortfall_db": 0.11283980576847341,
+  "limiter_loss_db": 1.0495122723064725,
+  "kept": true
+ },
+ "Pad - Reiny": {
+  "sig": "f8edb3672e5f272cad7c33320f01fb4d",
+  "volume": 60,
+  "start_volume": 86,
+  "start_rms_db": -11.390731560000855,
+  "rms_db": -17.052978251199185,
+  "serum_rms_db": -17.62716770794328,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.0,
+  "kept": true
+ },
+ "Bass - SWEDISHMF": {
+  "sig": "016192a903a847bb49fff4167c8ccc04",
+  "volume": 50,
+  "start_volume": 62,
+  "start_rms_db": -7.881703564520949,
+  "rms_db": -11.214335247510457,
+  "serum_rms_db": -11.531401092038134,
+  "shortfall_db": 0.0,
+  "limiter_loss_db": 0.09973008616951695,
   "kept": true
  }
 }

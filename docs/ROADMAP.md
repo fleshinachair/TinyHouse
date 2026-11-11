@@ -1,6 +1,6 @@
 # Roadmap: what is left to make the Loopsy Deep House pack play faithfully
 
-State on 2026-11-04. Everything described here is committed; the measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md). Work the way DEVELOPMENT.md says:
+State on 2026-11-04 (the warp work since then, FM / PD / RM / AM from the Sub or another oscillator and a second warp slot, is described in DEVELOPMENT.md and TRANSLATION_RULES.md; the noise-driven warps are next for the factory presets). Everything described here is committed; the measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md). Work the way DEVELOPMENT.md says:
 find the rule with a Serum probe, put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 ## Heard close to Serum (by ear, on the Move or in renders)
@@ -37,4 +37,4 @@ Bass - BUNT, Lead - Sleepless, Keys - Catching Flies, Lead - I'll Be Yours, Keys
 ## Beyond the Deep House pack
 
 Other packs and the factory presets are limited by the same list: the importer's own skip notes say why each preset was dropped. The largest groups among the 626 factory presets
-are unsupported warps (DistTube, FM, PD, RM), MultiSample oscillators, and filter models other than the common ladder / H / L.
+are unsupported warps (the noise- and Filter-1-driven FM / PD / RM, DistTube), MultiSample oscillators, and filter models other than the common ladder / H / L.

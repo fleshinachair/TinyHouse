@@ -42,7 +42,7 @@ built on wavetables.
 - Wavetable position is stepped or interpolated per table, as Serum does it (the WAV `clm ` chunk).
 - Warps: bend, PWM, sync, even/odd, the filter warps and the FM, RM, PD and AM warps driven by the Sub or by another oscillator, with two warp slots per oscillator. Not carried: warps driven by the noise or by Filter 1, DLM, spectral tables, Sync Var.
 - Sample and multisample oscillators, from SFZ or audio, as `.tbs` sample sets (`sample_export.py`). Warps, unison and their own release are not modelled.
-- Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched; formant, comb and Diffuser models are not, nor filters with a Var knob.
+- Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched, and so are the notch, band-reject, Exp, Scream, RM and DJMixer models (`calibration/fit_filter_model.py` finds the closest engine filter and cutoff; the importer's A/B gate judges the rest). Formant, comb, flange, phase and reverb models are not: they are not a plain low / high / band / notch response, so they need new engine filters (comb and flange / phase are the largest group, about 17 of the 52 presets that name an unsupported model; only 15 of those 52 are blocked by it alone).
 - Envelopes, 4 LFOs, and the modulation routes of macros, velocity, note number, mod wheel and random sources. Macros, velocity and note are folded
   at their saved values (there is no live macro); a route gated by something that is closed at rest is switched off, as it would be in Serum.
 - Source routing: filter, master, direct (past the effects) and none, and Serum's outputs of Filter 1 / Filter 2 as sources.

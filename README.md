@@ -90,13 +90,13 @@ On top of that there are **two FX buses**, each a full copy of the rack. Oscilla
 - Three wavetable oscillators with unison to 16 voices, a sub and a noise oscillator; Serum's wavetable position, stepped or interpolated.
 - Warps: bend, PWM, sync, even/odd, the filter (low-pass and high-pass) warps, and FM, phase-distortion, ring-mod and AM warps driven by the Sub or another oscillator (two warps per oscillator).
 - Sample and multisample oscillators (from your Samples folders).
-- Two filters, in parallel or in series: the common ladder, high-pass and low-pass models.
+- Two filters, in parallel or in series: the common ladder, high-pass and low-pass models, and the notch, band-reject, Exp, Scream, RM and DJMixer models (each matched to the closest engine filter, measured against Serum).
 - Envelopes, four LFOs, and the routes from macros, velocity, note number, mod wheel and random sources.
 - The whole effects chain above, and the two FX buses.
 
 **Not carried yet**
 - FM, ring-mod and phase-distortion warps driven by the noise or by Filter 1 (the Sub- and oscillator-driven ones are carried), DLM, spectral tables, Sync Var.
-- Formant, comb and Diffuser filter models, and filters with a Var knob.
+- Formant, comb, flange, phase and reverb filter models (no engine equivalent yet).
 - The granular oscillator (left silent).
 - A second distortion, compressor or delay; band-split (Split) branches; the Bode frequency shifter; a filter placed before the distortion; sends moved by an
   LFO or envelope.
@@ -129,7 +129,7 @@ SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh
 ```
 
 To bring in Serum's own Factory presets, point it at `Presets\Factory` inside your Serum 2 folder with `--bank Factory`. It is the same three steps, and it keeps
-only the presets that match Serum's render within the check above (about 280 of the 626). It takes hours, because every preset is rendered, so leave it running;
+only the presets that match Serum's render within the check above (about 290 of the 626). It takes hours, because every preset is rendered, so leave it running;
 if it stops, run the same command again with `--resume` and it carries on where it left off.
 
 Reload the slot afterwards and the bank is in the preset browser next to your imported ones. `deephouse2move.py` converts a `.SerumPack` directly and

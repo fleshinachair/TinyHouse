@@ -1700,7 +1700,7 @@ function renderUnits() {
   var box = IMP.srcEl; if (!box) return;
   box.textContent = "";
   if (!IMP.units || !IMP.units.length) return;
-  el("div", "imp-note", box, "Tick what to import from the Presets folder. Tables, samples and multisamples are found by name; only the files the presets use are copied.");
+  el("div", "imp-note", box, "Whole folders from your Serum 2 folder: tick any to import all of its presets (leave them unticked to import only the files you chose above). Tables, samples and multisamples are found by name; only the files the presets use are copied.");
   IMP.units.forEach(function (u) {
     var lab = el("label", null, box), cb = el("input", null, lab);
     cb.type = "checkbox"; cb.checked = u.on;
@@ -1776,7 +1776,8 @@ function rootRow(body, seq, fallbackInput) {
   function btn(label, fn) { var b = el("button", "imp-b", null, label); b.addEventListener("click", fn); return b; }
   function show(text, buttons) { if (!live()) return; msg.textContent = text; row.textContent = ""; buttons.forEach(function (b) { row.appendChild(b); }); }
   function viaInput() { fallbackInput.click(); }
-  async function load(dir, remembered) {
+  function load(dir, remembered) { return (IMP.pending = loadDir(dir, remembered)); }      /* Import waits for it: samples and tables are found in what it reads */
+  async function loadDir(dir, remembered) {
     show("Reading “" + dir.name + "”…", []);
     try {
       var c = await classifyDir(dir, 0), list = await readClassified(c);
@@ -2020,6 +2021,7 @@ async function runImport() {
   var bank = cleanBank(IMP.bankEl.value);
   var results = {}, files = {}, failed = [];
   try {
+    if (IMP.pending) { impStatus("Reading your Serum 2 folder…", 0); await IMP.pending; }      /* a folder still being read holds the samples and tables the presets name */
     impStatus("Starting the converter…", 0);
     await impStart(function (t) { impStatus(t, 0); });
     await impCall("reset", {});
@@ -2162,7 +2164,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
     var out = p.gaps.map(function (g) { return g; });
     p.not_carried.forEach(function (g) { out.push(/not carried|not imported/.test(g) ? g : g + " not carried"); });
     p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
-    p.missing_samples.forEach(function (t) { out.push("Sample not found: " + t + " (that oscillator stays silent)"); });
+    p.missing_samples.forEach(function (t) { out.push("Sample not found: " + t + (IMP.smps.length ? " (that oscillator stays silent)" : " (no Samples folder has been chosen: pick your Serum 2 folder, not only its Presets folder, then import again; that oscillator stays silent)")); });
     return out;
   }
   var whole = ok.filter(function (p) { return !lines(p).length; });
@@ -2209,20 +2211,24 @@ function impBuildForm() {
     b.addEventListener("click", function () { inp.click(); });
     return b;
   }
-  el("div", "imp-intro", body, "Bring Serum 2 presets into TinyHouse. Choose your Serum 2 folder once and it is remembered: you then tick which presets to import, and the wavetables and samples they use are found for you. Everything is converted here in the browser and stored on the Move.");
+  el("div", "imp-intro", body, "Bring Serum 2 presets into TinyHouse. Everything is converted here in the browser and stored on the Move.");
+  el("div", "imp-h", body, "Import a preset file");
+  var prow = el("div", "imp-row", body);
+  prow.appendChild(picker("Choose preset file(s)…", { multiple: "", accept: ".SerumPreset,.SerumPack,.zip" }, function (l) { addPicks(l, false); }));
+  var drop = el("div", "imp-drop", body, "…or drop .SerumPreset files, packs or folders here");
+  drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
+  el("div", "imp-note", body, "A single preset is all you need. Its wavetables and samples are found through your Serum 2 folder below, if you have chosen it; without them an oscillator that uses one stays silent.");
+  el("div", "imp-h", body, "Your Serum 2 folder (optional)");
   var seq = IMP.formSeq = (IMP.formSeq || 0) + 1;
   var fb = el("input", null, body); fb.type = "file"; fb.style.display = "none";
   fb.setAttribute("webkitdirectory", ""); fb.setAttribute("directory", "");
   fb.addEventListener("change", function () { addAny(pickList(fb)); fb.value = ""; });
   rootRow(body, seq, fb);
-  var drop = el("div", "imp-drop", body, "…or drop presets, packs or folders here");
-  drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
-  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
-  drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
   var more = el("details", "imp-more", body);
-  el("summary", null, more, "Other ways to choose: single presets, a pack, or the wavetable and sample folders separately");
+  el("summary", null, more, "Other ways to choose: a pack folder, or the wavetable and sample folders separately");
   var rowb = el("div", "imp-row", more);
-  rowb.appendChild(picker("Presets or packs…", { multiple: "", accept: ".SerumPreset,.SerumPack,.zip,.wav" }, function (l) { addPicks(l, false); }));
   rowb.appendChild(picker("Folder…", { webkitdirectory: "", directory: "" }, function (l) { addAny(l); }));
   el("div", "imp-note", more, "Only needed when the Serum 2 folder above was not chosen: Serum's own wavetables (Tables folder) and the audio of Sample or Multisample oscillators and recorded noises (Samples, Multisamples; same place as Tables). Only the files your presets use are read and copied to the Move; without them that oscillator stays silent. Presets in a pack bring their own wavetables.");
   var r2 = el("div", "imp-row", more);

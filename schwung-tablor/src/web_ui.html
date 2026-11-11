@@ -1745,6 +1745,14 @@ async function classifyDir(dir, depth) {
       if (c.kind === "root") return c;
     }
   }
+  if (depth === 0) {                                          /* a folder above Xfer, or Xfer holding it under another name: look two levels down for a folder that holds Presets */
+    var queue = Object.keys(k).filter(function (n) { return isDir(n); }).map(function (n) { return { d: k[n], lvl: 1 }; });
+    for (var qi = 0; qi < queue.length && qi < 200; qi++) {
+      var q = queue[qi], kk = await kidsOf(q.d);
+      if (kk.presets && kk.presets.kind === "directory") { var pk = await kidsOf(kk.presets); if (pk.factory || pk.packs || pk.user) return { kind: "root", dir: q.d }; }
+      if (q.lvl < 3) Object.keys(kk).forEach(function (n) { if (kk[n].kind === "directory" && !/^(presets|tables|samples|multisamples|factory|packs|user)$/i.test(n)) queue.push({ d: kk[n], lvl: q.lvl + 1 }); });
+    }
+  }
   return { kind: "other", dir: dir };
 }
 async function walkDir(dir, base, out) {
@@ -1786,7 +1794,8 @@ function rootRow(body, seq, fallbackInput) {
       var kept = c.kind === "root" || c.kind === "presets";
       if (kept) await saveRoot(c.dir);
       var what = c.kind === "root" ? "Serum 2 folder" : c.kind === "presets" ? "Presets folder (choose the Serum 2 Presets folder above it to bring wavetables and samples too)" : c.kind === "tables" ? "Tables folder" : c.kind === "samples" ? "Samples folder" : "Folder";
-      show(what + ": “" + c.dir.name + "”" + (kept ? (remembered ? " (remembered)" : " (remembered for next time)") : "") + ".", [btn("Choose another…", choose)]);
+      var np = (IMP.units || []).reduce(function (a, u) { return a + u.items.length; }, 0), found = " Found: " + np + " presets, " + IMP.tables.length + " wavetables, " + IMP.smps.length + " sample files.";
+      show(what + ": “" + c.dir.name + "”" + (kept ? (remembered ? " (remembered)" : " (remembered for next time)") : "") + "." + found + (c.kind === "root" && !IMP.smps.length ? " No Samples folder was found inside it, so presets that use samples will be missing them." : ""), [btn("Choose another…", choose)]);
     } catch (e) {
       show("Could not read that folder (" + (e && e.message || e) + ").", [btn("Choose it again…", choose)]);
     }

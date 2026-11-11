@@ -7,6 +7,8 @@
  * routed to it, so it changes no sound). The macro's NAME is not drawn here (a 32 px cell cannot hold it): the DSP serves it as the knob's
  * `unit`, so touching the knob shows "64 More Delay" in the top bar while the cell label stays "MCR 1".
  *
+ * custom:tinyhouse_pos1 .. 3: the Tone page's wavetable positions, the same dial, drawn as an empty slot when the oscillator is off (its wtN_level is 0).
+ *
  * The preset's macro names come from the `macro_names` key (extra_keys): "Cutoff||Wet|||||", eight names between bars, an empty one is a macro
  * that moves nothing. The host reads extra keys one at a time on its own rotation (~5 Hz), so the dimming follows a preset change within a
  * moment. Until `macro_names` has been read (undefined) every dial is drawn live; once read, an empty name (or a name list that is empty
@@ -122,10 +124,22 @@
         drawDial(ctx, Number.isFinite(n) ? Math.max(0, Math.min(127, n)) / 127 : 0, dim);
     }
 
+    /* The Tone page's wavetable positions (custom:tinyhouse_pos1 .. 3): the same dial, an empty slot when the oscillator is off. An oscillator
+     * is off when its level (wtN_level, read as an extra key) is 0; until that has been read (undefined) the dial is drawn live. */
+    function drawPos(ctx, payload, i) {
+        const values = (payload && payload.values) || {};
+        const lv = values["wt" + (i + 1) + "_level"];
+        const dim = lv !== undefined && lv !== null && lv !== "" && !(Number(lv) > 0);
+        const n = Number(values["wt" + (i + 1) + "_pos"]);
+        drawDial(ctx, Number.isFinite(n) ? Math.max(0, Math.min(127, n)) / 127 : 0, dim);
+    }
+
     const widgetKinds = {};
     for (let i = 0; i < 8; i++)
         widgetKinds["custom:tinyhouse_mac" + (i + 1)] = { draw: (ctx, payload) => drawMacro(ctx, payload, i), nominal: { w: 32, h: 15 } };
+    for (let i = 0; i < 3; i++)
+        widgetKinds["custom:tinyhouse_pos" + (i + 1)] = { draw: (ctx, payload) => drawPos(ctx, payload, i), nominal: { w: 32, h: 15 } };
     globalThis.canvas_overlay = { widgetKinds };
     /* test seam (tests/canvas_test.mjs) */
-    globalThis.TINYHOUSE_CANVAS_FOR_TEST = { drawMacro, drawDial, names };
+    globalThis.TINYHOUSE_CANVAS_FOR_TEST = { drawMacro, drawPos, drawDial, names };
 })();

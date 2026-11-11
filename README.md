@@ -55,7 +55,7 @@ importer has no Serum to compare against), so set **Volume** and the effects to 
 | Page | What is on it |
 |---|---|
 | **Main** | filter freq, res and envelope amount, decay, sub, width, space, bank |
-| **Tone** | the two wavetable positions, attack, release, drive, shelves |
+| **Tone** | the three wavetable positions (an oscillator that is off shows an empty slot), attack, release, drive, high shelf, volume |
 | **Macros** | the preset's eight Serum macros, as dials. A macro the preset does not use is shown as an empty slot. Touch a knob and the top bar shows its name and value |
 | **Effects**, **Mod FX** | each effect on or off, with its main controls |
 | **Demo** | plays a MIDI part from a folder on the Move so you can audition a bank: it waits for Play and joins on the next bar |

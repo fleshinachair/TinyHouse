@@ -30,7 +30,7 @@ function mockCtx() {
 }
 const lit = (c) => c.px.reduce((a, v) => a + v, 0);
 const kinds = globalThis.canvas_overlay.widgetKinds;
-check(Object.keys(kinds).length === 8, "eight widget kinds");
+check(Object.keys(kinds).length === 11, "eleven widget kinds (8 macros, 3 positions)");
 for (let i = 1; i <= 8; i++) check(!!kinds["custom:tinyhouse_mac" + i] && kinds["custom:tinyhouse_mac" + i].nominal.w === 32, "kind mac" + i);
 const run = (i, values) => { const c = mockCtx(); kinds["custom:tinyhouse_mac" + i].draw(c, { values }); return c; };
 
@@ -59,6 +59,20 @@ check(same(run(1, { macro_names: "a", mac1: 400 }), live127), "value clipped to 
 check(same(run(1, { macro_names: "a", mac1: "x" }), run(1, { macro_names: "a", mac1: 0 })), "junk reads as 0");
 check(run(1, undefined) !== null, "no payload does not throw");
 for (let i = 1; i <= 8; i++) { const cc = mockCtx(); kinds["custom:tinyhouse_mac" + i].draw(cc, undefined); }
+
+// the Tone page's positions: the same dial, an empty slot while the oscillator's level is 0 (live until the level has been read)
+const pos = (i, values) => { const c = mockCtx(); kinds["custom:tinyhouse_pos" + i].draw(c, { values }); return c; };
+for (let i = 1; i <= 3; i++) {
+    check(kinds["custom:tinyhouse_pos" + i].nominal.w === 32, "kind pos" + i);
+    const on = pos(i, { ["wt" + i + "_pos"]: 127, ["wt" + i + "_level"]: "100" });
+    const off = pos(i, { ["wt" + i + "_pos"]: 127, ["wt" + i + "_level"]: "0" });
+    check(same(on, live127), "pos" + i + ": level > 0 is a live dial");
+    check(same(off, grey) && off.calls === 1, "pos" + i + ": level 0 is the empty slot");
+    check(same(pos(i, { ["wt" + i + "_pos"]: 127 }), live127), "pos" + i + ": level not read yet is a live dial");
+    check(same(pos(i, { ["wt" + i + "_pos"]: 0, ["wt" + i + "_level"]: 0 }), off), "pos" + i + ": the value does not matter when off");
+}
+check(same(pos(3, { wt3_pos: 127, wt1_level: "0", wt3_level: "50" }), live127), "pos3 follows its own level, not another's");
+kinds["custom:tinyhouse_pos1"].draw(mockCtx(), undefined);
 
 console.log(failures ? `canvas_test: ${failures} of ${checks} checks FAILED` : `canvas_test: ${checks} checks passed`);
 process.exit(failures ? 1 : 0);

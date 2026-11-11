@@ -564,7 +564,10 @@ BANKS = [
         row(FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"]),
     ]),
     ("Tone", False, [
-        row(O1["pos"], O2["pos"], VCA["a"], VCA["r"], TONE["drive"], TONE["lo"], TONE["hi"], GLOBAL["vol"]),
+        # Row 0 has no page: Low Shelf lost its knob to the third position (it stays on the web UI), and it is kept here, in its old place in the
+        # table, so no parameter's number moves. The page is row 1 (PAGE_MAP).
+        row(TONE["drive"], TONE["lo"]),
+        row(O1["pos"], O2["pos"], O3["pos"], VCA["a"], VCA["r"], TONE["drive"], TONE["hi"], GLOBAL["vol"]),
     ]),
     ("Effects", False, [
         row(FX["eqon"], FX["wideon"], FX["dlyon"], FX["revon"], FX["dtime"], FX["compon"], FX["rdec"], FX["fxon"]),
@@ -686,6 +689,9 @@ MACRO_WIDGETS = True
 if MACRO_WIDGETS:
     for _i in range(1, 9):
         VIZ[f"mac{_i}"] = {"kind": f"custom:tinyhouse_mac{_i}", "group": f"mac{_i}", "role": "a", "extra_keys": ["macro_names"]}
+    # The Tone page's three wavetable positions: the same dial, drawn as an empty slot when the oscillator is off (its level is 0).
+    for _i in range(1, 4):
+        VIZ[f"wt{_i}_pos"] = {"kind": f"custom:tinyhouse_pos{_i}", "group": f"pos{_i}", "role": "a", "extra_keys": [f"wt{_i}_level"]}
 def chain_param(p):
     if p["type"] == "file":
         d = {"key": p["key"], "name": p["full"], "type": "filepath",
@@ -724,7 +730,7 @@ assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim
 # editor takes precedence over ui_chain.js whenever a module offers one.
 PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The root is the preset browser (TinyK's pattern).
     ("Main",    0, "Main"),
-    ("Tone",    0, "Tone"),
+    ("Tone",    1, "Tone"),
     ("Macros",  0, "Macros"),
     ("Effects", 0, "Effects"),
     ("Mod FX",  0, "Mod FX"),

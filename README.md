@@ -29,13 +29,18 @@ in a slot. This page is where you import and fine-tune sounds. (Use a normal bro
 
 ![The import dialog](docs/img/remote-import.png)
 
-- The easiest way: press **Find my Serum 2 folder…** and choose `Documents\Xfer\Serum 2 Presets` (or the `Xfer` or `Documents` folder above it; the Serum 2
-  folder is found from there). Chrome and Edge remember it, so next time the dialog opens with it already read (at most one click to allow it again). Tick
-  which presets to bring in (Factory, User, each pack). The wavetables, samples and multisamples they use are found in that folder for you, and only the
-  ones the presets use are copied to the Move. Browsers only allow this on a secure page and the Move's page is plain http, so unless you add its address to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, or use another browser, you choose the folder each time (the dialog says which applies).
-- Or choose single `.SerumPreset` files, a `.SerumPack` or any folder (or drop them on the dialog). Then, if the presets use Serum's own wavetables, point
-  **Tables folder** at the `Tables` folder, and for sample or multisample oscillators point **Samples** (and **Multisamples**) at the matching folders.
-  Presets in a pack bring their own wavetables.
+- The simplest way: choose or drop one or more `.SerumPreset` files (or a `.SerumPack`). If a preset uses a wavetable or sample that is not stored inside
+  it (Serum's own tables, the audio of Sample and Multisample oscillators, recorded noises), the import pauses and asks for your Serum 2 folder: drop
+  `Documents\Xfer` or `Documents\Xfer\Serum 2 Presets` on the dialog (the Serum 2 folder is found from there), or press **Choose folder…**, or press
+  **Import without them** to carry on with those oscillators silent. Only the files the presets use are copied to the Move.
+- **Chrome's "Upload N files to this site?" prompt.** Choosing a folder makes Chrome ask this, with a number like 7,448. Nothing is uploaded: the page only
+  reads the folder in your browser, and sends just the wavetables and samples your presets use to the Move. Chrome words the prompt this way for any page
+  that reads a whole folder, and the page cannot change it. **Dropping the folder on the dialog** should not show it. To get a proper folder picker that
+  also remembers your Serum folder (Chrome and Edge), add the Move's address (as shown in the address bar, e.g. `http://move.local:7700`) to
+  `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, enable it and relaunch the browser. Browsers only allow the remembered picker on a secure page,
+  and the Move's page is plain http. With it, the dialog shows a **Your Serum 2 folder** row that opens already read next time.
+- To import a whole bank at once (Factory, a pack), use the folder row or **Other ways to choose ▸ Folder…**, then open **Import whole banks from this
+  folder** and tick the banks. You can also hand the importer the `Tables`, `Samples` and `Multisamples` folders in advance there.
 - Press **Import**. The presets are converted in your browser and stored on the Move, loose presets in a bank called *Imports* and a pack or folder in a
   bank of its own name. A report lists every preset as *imported*, *imported with parts missing* (and which parts) or *not imported* (and why).
 

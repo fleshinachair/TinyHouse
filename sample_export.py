@@ -4,15 +4,17 @@
 A Serum preset's Sample oscillator names one audio file (relative to Serum's Samples folder); its Multisample oscillator names an SFZ file
 (relative to the Multisamples folder) that maps key ranges to files. Either becomes one .tbs file the engine's sample oscillator loads:
 
-  "TBS2" | u32 regions | per region: u8 lokey, u8 hikey, u8 root key, u8 flags (1 = loops), u8 lovel, u8 hivel, f32 loop start, f32 loop end
-  (both as a fraction of the region's length), f32 sample rate, f32 tune in cents, f32 volume in dB, u32 frames, u8 channels (1 or 2), then the
-  samples as int16. (TBS1, still read by the engine, has neither the velocity layer nor the volume: it played the first layer of a key at any velocity.)
+  "TBS3" | u32 regions | per region: u8 lokey, u8 hikey, u8 root key, u8 flags (bit 0 = loops, bit 1 = ping-pong: forward, then backward, between the loop points), u8 lovel, u8 hivel, f32 loop start, f32 loop end
+  (both as a fraction of the region's length), f32 sample rate, f32 tune in cents, f32 volume in dB, f32 loop crossfade (a fraction of the loop's length), u32 frames, u8 channels (1 or 2), then the
+  samples as int16. (TBS1 and TBS2, still read by the engine, lack the velocity layer and volume, and the crossfade: TBS1 played the first layer of a key at any velocity.)
 
 These are Serum's own factory sounds (or a pack's): the .tbs files go beside the wavetables in the working folders under out/ and are not
 to be committed or redistributed. The converter passes the sample set's path to the module as the `smp_set` parameter.
 """
+import hashlib
 import re
 import struct
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -32,11 +34,38 @@ BROWSER_DIR: Path | None = None
 # within 0.3 dB with no offset (probe_sample_level.py: six files spanning 22 dB of recorded level), so the offset is the multisample's alone and goes into each
 # of its regions' volume, where the engine applies it at playback (sample.h); the int16 samples stay as recorded.
 MULTISAMPLE_PLAYBACK_DB = 7.3
-EXPORT_VERSION = 2            # bumped when the export's law changes: a set made by an older version is exported again (export_info)
+EXPORT_VERSION = 4            # bumped when the export's law changes: a set made by an older version is exported again (export_info)
 
 
 def _root(kind: str) -> Path:
     return (BROWSER_DIR if BROWSER_DIR is not None else SERUM_ROOT) / kind
+
+
+# A Sample oscillator whose audio is stored inside the preset (`embedded_audio`: planar float channels; the file it was loaded from is on the author's machine) has no
+# path under Serum's Samples folder. Its audio is written here in the decoded-copy layout (see _read) and named "_embedded/<name>", which find_sample resolves.
+EMBED_DIR = Path(tempfile.gettempdir()) / "tinyhouse_embedded_samples"
+EMBED_PREFIX = "_embedded/"
+
+
+def _embed(node: dict) -> str | None:
+    """The name ("_embedded/<table>_<digest>") of a Sample oscillator node's embedded audio, after writing it to EMBED_DIR; None if the node holds none."""
+    ea = node.get("embedded_audio")
+    data = ea.get("data") if isinstance(ea, dict) else None
+    if not data:
+        return None
+    a = np.asarray(data, dtype=np.float32)
+    ch = int(node.get("numChannels") or (a.shape[0] if a.ndim == 2 else 1))
+    a = a[:, None] if a.ndim == 1 else (a.T if a.shape[0] == ch else a)        # planar (channels, frames) -> (frames, channels)
+    a = a[:, :2]
+    pcm = (np.clip(a, -1.0, 1.0) * 32767.0).astype("<i2")
+    rate = int(round(float(ea.get("sampleRate") or node.get("sampleRate") or 44100)))
+    blob = struct.pack("<II", rate, pcm.shape[1]) + pcm.tobytes()
+    name = re.sub(r"[^A-Za-z0-9]+", "_", str(ea.get("table_name") or "sample")).strip("_")[:40] + "_" + hashlib.sha1(blob).hexdigest()[:8]
+    dest = EMBED_DIR / (name + ".wav.dec")
+    if not dest.is_file():
+        EMBED_DIR.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(blob)
+    return EMBED_PREFIX + name + ".wav"
 
 
 def _real(p) -> Path | None:
@@ -95,7 +124,7 @@ def parse_sfz(path: Path) -> list[dict]:
         loops = r.get("loop_mode", "no_loop") in ("loop_continuous", "loop_sustain")
         out.append({"lovel": int(float(r.get("lovel", 0))), "hivel": int(float(r.get("hivel", 127))), "volume": float(r.get("volume", 0)),
                     "lo": lo, "hi": hi, "root": root, "loops": loops, "tune": float(r.get("tune", 0)) + 100.0 * float(r.get("transpose", 0)),
-                    "loop_start": _sfz_num(r.get("loop_start", 0)), "loop_end": _sfz_num(r.get("loop_end", 0)),
+                    "loop_start": _sfz_num(r.get("loop_start", 0)), "loop_end": _sfz_num(r.get("loop_end", 0)), "loop_crossfade": _sfz_num(r.get("loop_crossfade", 0)),
                     "file": (path.parent / default_path / r["sample"].replace("\\", "/")).resolve()})
     return out
 
@@ -104,35 +133,37 @@ MAX_ONESHOT_S = 4.0                  # a sample that does not loop is cut at 4 s
 
 
 def _region(audio: np.ndarray, rate: float, lo: int, hi: int, root: int, loop: tuple[float, float] | None, tune: float,
-            lovel: int = 0, hivel: int = 127, volume_db: float = 0.0) -> bytes:
+            lovel: int = 0, hivel: int = 127, volume_db: float = 0.0, ping_pong: bool = False, xfade: float = 0.0) -> bytes:
     if audio.ndim == 1:
         audio = audio[:, None]
     audio = audio[:, :2]
     ch = audio.shape[1]
     n = len(audio)
-    keep = min(n, int(np.ceil(loop[1] * n)) + 1) if loop else min(n, int(MAX_ONESHOT_S * rate))
+    # a looped sample is kept to its loop end, and a ping-pong crossfade also reads the audio just beyond it
+    tail = xfade * (loop[1] - loop[0]) if loop and ping_pong else 0.0
+    keep = min(n, int(np.ceil((loop[1] + tail) * n)) + 1) if loop else min(n, int(MAX_ONESHOT_S * rate))
     keep = min(keep, MAX_FRAMES)
     if loop:                                                  # the loop points are fractions of the kept part now
         loop = (min(loop[0] * n / keep, 1.0), min(loop[1] * n / keep, 1.0))
     pcm = np.clip(audio[:keep], -1.0, 1.0)
     data = (pcm * 32767.0).astype("<i2").tobytes()
     ls, le = loop if loop else (0.0, 0.0)
-    head = struct.pack("<BBBBBBfffffIB", lo, hi, root, 1 if loop else 0, lovel, hivel, ls, le, rate, tune, volume_db, keep, ch)
+    head = struct.pack("<BBBBBBffffffIB", lo, hi, root, (1 | (2 if ping_pong else 0)) if loop else 0, lovel, hivel, ls, le, rate, tune, volume_db, xfade if loop else 0.0, keep, ch)
     return head + data
 
 
 def write_set(regions: list[bytes], dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, "wb") as f:
-        f.write(b"TBS2" + struct.pack("<I", len(regions)))
+        f.write(b"TBS3" + struct.pack("<I", len(regions)))
         for r in regions:
             f.write(r)
     return dest
 
 
-def export_multisample(sfz_rel: str, dest: Path, loop_pct: tuple[float, float] | None = None) -> Path | None:
-    """A Multisample oscillator's SFZ as one set. loop_pct: the oscillator's own Loop Start/End (percent of each sample), if it stores them;
-    otherwise the SFZ's loop points are used."""
+def export_multisample(sfz_rel: str, dest: Path) -> Path | None:
+    """A Multisample oscillator's SFZ as one set. Its loops are the SFZ's own: Serum renders the same whatever Loop Mode and Loop Start/End the
+    oscillator stores (calibration/probe_loop_mode.py), and a region without a loop in the SFZ does not loop."""
     sfz = _root("Multisamples") / sfz_rel.replace("\\", "/")
     if not sfz.is_file():
         return None
@@ -143,11 +174,11 @@ def export_multisample(sfz_rel: str, dest: Path, loop_pct: tuple[float, float] |
         audio, rate = _read(r["file"])
         n = len(audio)
         loop = None
-        if loop_pct is not None:
-            loop = (loop_pct[0] / 100.0, loop_pct[1] / 100.0)
-        elif r["loops"] and r["loop_end"] > r["loop_start"]:
+        xfade = 0.0
+        if r["loops"] and r["loop_end"] > r["loop_start"]:
             loop = (r["loop_start"] / n, min(r["loop_end"] / n, 1.0))
-        out.append(_region(audio, rate, r["lo"], r["hi"], r["root"], loop, r["tune"], r["lovel"], r["hivel"], r["volume"] + MULTISAMPLE_PLAYBACK_DB))
+            xfade = min(r["loop_crossfade"] * rate / (r["loop_end"] - r["loop_start"]), 1.0)          # the SFZ gives its crossfade in seconds
+        out.append(_region(audio, rate, r["lo"], r["hi"], r["root"], loop, r["tune"], r["lovel"], r["hivel"], r["volume"] + MULTISAMPLE_PLAYBACK_DB, xfade=xfade))
     return write_set(out, dest) if out else None
 
 
@@ -158,6 +189,8 @@ def find_sample(rel: str) -> Path | None:
     """A sample named relative to Serum's Samples folder, or (the noise slot names it from a library folder below that) found by its last two
     path parts anywhere under it."""
     rel = rel.replace("\\", "/").lstrip("/")
+    if rel.startswith(EMBED_PREFIX):
+        return _real(EMBED_DIR / rel[len(EMBED_PREFIX):])
     direct = _real(_root("Samples") / rel)
     if direct is not None:
         return direct
@@ -170,14 +203,14 @@ def find_sample(rel: str) -> Path | None:
     return _found[rel]
 
 
-def export_sample(sample_rel: str, dest: Path, base_note: int = 60, loop_pct: tuple[float, float] | None = None) -> Path | None:
+def export_sample(sample_rel: str, dest: Path, base_note: int = 60, loop_pct: tuple[float, float] | None = None, ping_pong: bool = False, xfade: float = 0.0) -> Path | None:
     """A Sample oscillator's one file as a one-region set spanning the keyboard."""
     path = find_sample(sample_rel)
     if path is None:
         return None
     audio, rate = _read(path)
     loop = (loop_pct[0] / 100.0, loop_pct[1] / 100.0) if loop_pct is not None else None
-    return write_set([_region(audio, rate, 0, 127, base_note, loop, 0.0)], dest)
+    return write_set([_region(audio, rate, 0, 127, base_note, loop, 0.0, ping_pong=ping_pong, xfade=xfade)], dest)
 
 
 def sample_osc(tree: dict, i: int) -> dict | None:
@@ -188,11 +221,18 @@ def sample_osc(tree: dict, i: int) -> dict | None:
         return None
     multi = pp["kParamType"] == "kOsc_MultiSample"
     node = o.get(f"MultiSampleOsc{i}" if multi else f"SampleOsc{i}", {})
+    # A Sample oscillator loops only in kForward and kPingPong (Loop Start/End default to the whole file); no stored mode, kOff and kTailed play the file once
+    # through, whatever points are stored (probe_loop_mode.py). A Multisample's loops come from its SFZ (export_multisample).
+    mode = pp.get("kParamLoopMode")
     loop = None
-    if "kParamLoopStart" in pp and "kParamLoopEnd" in pp:
-        loop = (float(pp["kParamLoopStart"]), float(pp["kParamLoopEnd"]))
-    return {"multi": multi, "file": node.get("sfzPathRelative" if multi else "samplePathRelative"), "base_note": int(node.get("baseNote", 60)),
-            "loop": loop, "octave": float(pp.get("kParamOctave", 0.0)), "pitch": float(pp.get("kParamPitch", 0.0)),
+    if not multi and mode in ("kForward", "kPingPong"):
+        loop = (float(pp.get("kParamLoopStart", 0.0)), float(pp.get("kParamLoopEnd", 100.0)))
+    file = node.get("sfzPathRelative" if multi else "samplePathRelative")
+    embedded = not multi and not file and _embed(node)
+    if embedded:
+        file = embedded
+    return {"multi": multi, "file": file, "embedded": bool(embedded), "base_note": int(node.get("baseNote", 60)),
+            "loop": loop, "ping_pong": loop is not None and mode == "kPingPong", "xfade": min(max(float(pp.get("kParamLoopCrossfade", 0.0)), 0.0), 100.0) / 100.0 if loop else 0.0, "octave": float(pp.get("kParamOctave", 0.0)), "pitch": float(pp.get("kParamPitch", 0.0)),
             "fine": float(pp.get("kParamFine", 0.0)), "level": float(pp.get("kParamVolume", 0.75))}
 
 
@@ -228,16 +268,16 @@ def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
         return None
     stem = re.sub(r"[^A-Za-z0-9]+", "_", Path(info["file"]).with_suffix("").as_posix()).strip("_")
     if info["loop"]:
-        stem += "_L%d_%d" % (round(info["loop"][0]), round(info["loop"][1]))
+        stem += "_L%d_%d" % (round(info["loop"][0]), round(info["loop"][1])) + ("_P" if info.get("ping_pong") else "") + ("_X%d" % round(100 * info["xfade"]) if info.get("xfade") else "")
     dest = out_dir / f"{stem}.tbs"
     stamp = dest.with_name(dest.name + ".v")                          # the export version the set was made with (not copied to the Move: deploy_samples.sh takes *.tbs)
-    stale = not dest.exists() or _magic(dest) != b"TBS2"              # a set exported before the velocity layers were read is exported again
+    stale = not dest.exists() or _magic(dest) != b"TBS3"              # a set exported in an older format (before the velocity layers, or the loop crossfade) is exported again
     try:
         stale = stale or int(stamp.read_text().strip() or 0) < EXPORT_VERSION
     except (OSError, ValueError):
         stale = True
     if stale:
-        made = (export_multisample(info["file"], dest, info["loop"]) if info["multi"] else export_sample(info["file"], dest, info["base_note"], info["loop"]))
+        made = (export_multisample(info["file"], dest) if info["multi"] else export_sample(info["file"], dest, info["base_note"], info["loop"], info.get("ping_pong", False), info.get("xfade", 0.0)))
         if made is None:
             return None
         stamp.write_text(str(EXPORT_VERSION))

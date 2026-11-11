@@ -120,15 +120,17 @@ def sample_needs(tree: dict) -> list[dict]:
     out = []
     for i in range(3):
         info = SE.sample_osc(tree, i)
-        if info and info.get("file"):
+        if info and info.get("file") and not info.get("embedded"):       # audio stored in the preset is never asked of the folder
             out.append({"kind": "multi" if info["multi"] else "sample", "rel": str(info["file"]).replace("\\", "/")})
     nz = SE.noise_sample(tree)
     if nz is not None:                                         # a one-shot click or hit
         out.append({"kind": "noise", "rel": str(nz["file"]).replace("\\", "/")})
     else:                                                      # a sample that is not plain white / pink noise is imitated from its own spectrum
-        node = (tree.get("Oscillator3") or {}).get("NoiseOsc3") if isinstance(tree.get("Oscillator3"), dict) else None
+        osc3 = tree.get("Oscillator3") if isinstance(tree.get("Oscillator3"), dict) else {}
+        node = osc3.get("NoiseOsc3")
         rel = node.get("relativePathToNoiseSample") if isinstance(node, dict) else None
-        if rel and d2m.noise_type_for(str(rel))[1]:
+        on = isinstance(osc3.get("plainParams"), dict) and bool(osc3["plainParams"].get("kParamEnable", 0))       # a noise slot that is off (stored as defaults) never sounds: its sample is not asked for
+        if rel and on and d2m.noise_type_for(str(rel))[1]:
             out.append({"kind": "noise", "rel": str(rel).replace("\\", "/")})
     return out
 

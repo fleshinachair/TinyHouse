@@ -1656,6 +1656,17 @@ function looksLikeRoot(list) {
   });
 }
 function addAny(list) {
+  /* a folder dropped or picked from above the Serum 2 folder (Xfer, Documents): cut it down to the Serum 2 folder, whatever its name, found by the Presets ▸ Factory / Packs / User inside it */
+  var cut = -1, pre = "";
+  list.some(function (it) {                                   /* the first hit, but one named for Serum 2 wins over Serum 1's Presets folder beside it */
+    var s = cleanRel(it.rel).split("/");
+    for (var i = 1; i + 1 < s.length; i++) if (/^presets$/i.test(s[i]) && /^(factory|packs|user)$/i.test(s[i + 1])) {
+      if (cut < 0 || (!/serum 2/i.test(pre) && /serum 2/i.test(s[i - 1]))) { cut = i - 1; pre = s.slice(0, i).join("/") + "/"; }
+      return /serum 2/i.test(pre);
+    }
+    return false;
+  });
+  if (cut > 0) list = list.filter(function (it) { return cleanRel(it.rel).indexOf(pre) === 0; }).map(function (it) { return { file: it.file, rel: cleanRel(it.rel).split("/").slice(cut).join("/") }; });
   /* the Presets folder itself (Factory, Packs, User inside): give it the Serum 2 folder above it, so it is read as one */
   if (!looksLikeRoot(list) && list.some(function (it) { var s = cleanRel(it.rel).split("/"); return s.length >= 3 && /^presets$/i.test(s[0]) && /^(factory|packs|user)$/i.test(s[1]); }))
     list = list.map(function (it) { return { file: it.file, rel: "Serum 2 Presets/" + cleanRel(it.rel) }; });
@@ -1700,13 +1711,17 @@ function renderUnits() {
   var box = IMP.srcEl; if (!box) return;
   box.textContent = "";
   if (!IMP.units || !IMP.units.length) return;
-  el("div", "imp-note", box, "Whole folders from your Serum 2 folder: tick any to import all of its presets (leave them unticked to import only the files you chose above). Tables, samples and multisamples are found by name; only the files the presets use are copied.");
+  var det = el("details", "imp-more", box), sm = el("summary", null, det);
+  function tally() { var n = IMP.units.filter(function (u) { return u.on; }).length; sm.textContent = "Import whole banks from this folder (" + IMP.units.map(function (u) { return u.name; }).join(", ") + ")" + (n ? " · " + n + " ticked" : ""); }
+  tally();
+  el("div", "imp-note", det, "Only for importing every preset of a bank at once. Leave these unticked to import just the files you chose above. Tables, samples and multisamples are found by name; only the files the presets use are copied.");
   IMP.units.forEach(function (u) {
-    var lab = el("label", null, box), cb = el("input", null, lab);
+    var lab = el("label", null, det), cb = el("input", null, lab);
     cb.type = "checkbox"; cb.checked = u.on;
-    cb.addEventListener("change", function () { u.on = cb.checked; syncUnits(); });
+    cb.addEventListener("change", function () { u.on = cb.checked; syncUnits(); tally(); });
     el("span", null, lab, u.name + " (" + u.items.length + ")");
   });
+  if (IMP.units.some(function (u) { return u.on; })) det.open = true;
 }
 /* ---- the remembered Serum 2 folder ----
  * A page cannot learn a folder's path, but Chrome and Edge let it keep a handle to a folder the person chose (in IndexedDB) and read it again later, after one click
@@ -1807,9 +1822,9 @@ function rootRow(body, seq, fallbackInput) {
     load(dir, false);
   }
   if (typeof window.showDirectoryPicker !== "function") {
-    show("Choose your Serum 2 Presets folder (Documents ▸ Xfer ▸ Serum 2 Presets). " + (window.isSecureContext === false
+    show("Choose your Xfer or Serum 2 Presets folder (Documents ▸ Xfer ▸ Serum 2 Presets): the Serum 2 folder is found inside it. Your browser will say it is about to upload a few thousand files; nothing is uploaded. The folder is only read in this page, and just the wavetables and samples your presets use are sent to the Move. Dropping the folder on the box above skips that prompt. " + (window.isSecureContext === false
       ? "Browsers only remember a folder for a secure page, and this one is plain http: in Chrome or Edge, add this address to chrome://flags/#unsafely-treat-insecure-origin-as-secure and it will be remembered."
-      : "This browser cannot remember it for next time; Chrome and Edge can."), [btn("Serum 2 Presets folder…", viaInput)]);
+      : "This browser cannot remember it for next time; Chrome and Edge can."), [btn("Choose Xfer / Serum 2 folder…", viaInput)]);
     return;
   }
   show("Choose your Serum 2 folder once: Documents ▸ Xfer ▸ Serum 2 Presets (or the Xfer or Documents folder above it). It is found from there and remembered.", [btn("Find my Serum 2 folder…", choose)]);

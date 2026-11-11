@@ -561,16 +561,17 @@ static void testXwarp()
     Wavetable wt;
     buildSineTable(wt);
     const double sr = 44100.0, f0 = 130.8128, fm = f0 * std::pow(2.0, 7.0 / 12.0);
-    auto render = [&](float note, int xw, float a, std::vector<float> &out) {
+    auto render = [&](float note, int xw, float a, std::vector<float> &out, int xsrc = 0, int xw2 = 0, float a2 = 0.0f) {
         VoicedWTOscillator o(kMaxUnison);
         o.setSampleRate(sr); o.setWavetable(&wt); o.noteOn(0.0f);
-        VoicedWTParams vp; vp.voices = 1; vp.xwarp = xw; vp.xamount = a;
+        VoicedWTParams vp; vp.voices = 1; vp.xwarp = xw; vp.xamount = a; vp.xsrc = xsrc; vp.xwarp2 = xw2; vp.xamount2 = a2; vp.xsrc2 = xsrc;
         out.clear();
         double ph = 0.0;
         for (int blk = 0; blk < 44100 / 128; blk++) {
             float l[128] = {}, r[128] = {}, sub[128];
             for (int i = 0; i < 128; i++) { sub[i] = (float) std::sin(6.283185307179586 * ph); ph += fm / sr; }
-            o.processAdding(note, vp, l, r, 128, sub);
+            const float *srcs[4] = { sub, sub, sub, sub };
+            o.processAdding(note, vp, l, r, 128, srcs);
             if (blk * 128 > 8192) out.insert(out.end(), l, l + 128);
         }
     };
@@ -583,18 +584,28 @@ static void testXwarp()
     render(48.0f, 0, 0.0f, ref);
     const double a0 = amp(ref, f0);
     auto line = [&](double hz) { return amp(x, hz) / a0; };
-    struct Case { const char *name; int xw; float a; double c, p1, p2; };
+    struct Case { const char *name; int xw; float a; double c, p1, p2; int src; };
     /* Serum's numbers (carrier, fc + fm, fc + 2 fm), each re the unwarped carrier */
     const Case cases[] = {
-        { "FM 0.20", 3, 0.20f, 0.944, 0.230, 0.028 }, { "FM 0.30", 3, 0.30f, 0.001, 0.517, 0.432 },
-        { "PD 0.40", 4, 0.40f, 0.828, 0.386, 0.085 }, { "PD 0.50", 4, 0.50f, 0.183, 0.569, 0.369 },
-        { "RM 0.50", 5, 0.50f, 0.500, 0.329, 0.000 }, { "RM 1.00", 5, 1.00f, 0.000, 0.657, 0.000 },
+        { "FM 0.20", 3, 0.20f, 0.944, 0.230, 0.028, 0 }, { "FM 0.30", 3, 0.30f, 0.001, 0.517, 0.432, 0 },
+        { "PD 0.40", 4, 0.40f, 0.828, 0.386, 0.085, 0 }, { "PD 0.50", 4, 0.50f, 0.183, 0.569, 0.369, 0 },
+        { "RM 0.50", 5, 0.50f, 0.500, 0.329, 0.000, 0 }, { "RM 1.00", 5, 1.00f, 0.000, 0.657, 0.000, 0 },
+        /* the same warps with an oscillator as the modulator (calibration/probe_warp_osc.py): 1.52 times as strong */
+        { "FM osc 0.20", 3, 0.20f, 0.874, 0.337, 0.062, 1 }, { "FM osc 0.25", 3, 0.25f, 0.361, 0.579, 0.298, 1 },
+        { "PD osc 0.40", 4, 0.40f, 0.625, 0.518, 0.181, 1 },
+        { "RM osc 0.60", 5, 0.60f, 0.400, 0.600, 0.000, 1 }, { "AM osc 0.60", 6, 0.60f, 1.000, 0.600, 0.000, 1 },
     };
     for (const Case &c : cases) {
-        render(48.0f, c.xw, c.a, x);
+        render(48.0f, c.xw, c.a, x, c.src);
         const double lc = line(f0), l1 = line(f0 + fm), l2 = line(f0 + 2 * fm);
         CHECK(std::fabs(lc - c.c) < 0.06 && std::fabs(l1 - c.p1) < 0.05 && std::fabs(l2 - c.p2) < 0.05,
               "%s: carrier %.3f (Serum %.3f), +fm %.3f (%.3f), +2fm %.3f (%.3f)", c.name, lc, c.c, l1, c.p1, l2, c.p2);
+    }
+    /* two warps on one oscillator apply in turn: AM twice is x (1 + 1.2 S)^2 = x (1.72 + 2.4 S - 0.72 cos 2S...), so the carrier is 1.72 and the +fm line 1.2 */
+    {
+        render(48.0f, 6, 0.6f, x, 1, 6, 0.6f);
+        const double lc = line(f0), l1 = line(f0 + fm);
+        CHECK(std::fabs(lc - 1.72) < 0.08 && std::fabs(l1 - 1.2) < 0.08, "two AM warps: carrier %.3f (1.72), +fm %.3f (1.2)", lc, l1);
     }
     /* filter warps: a first-order filter at an absolute corner (amount 0.4 = 663 Hz): a sine at 1046 Hz passes at 1/sqrt(1 + (f/c)^2) low, the complement high */
     {

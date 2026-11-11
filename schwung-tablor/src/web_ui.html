@@ -248,6 +248,7 @@ canvas.gr.drag{cursor:crosshair}
 #imp .imp-sum{color:var(--hi); margin:6px 0 4px}
 #imp .imp-h{color:var(--dim); letter-spacing:.16em; text-transform:uppercase; font-size:10px; margin:16px 0 4px}
 #imp .imp-note{color:var(--faint); font-size:11px; margin-bottom:4px}
+#imp .imp-more>summary{cursor:pointer; color:var(--faint); margin:10px 0 4px}
 #imp .imp-src label{display:flex; gap:8px; align-items:center; color:var(--txt); padding:3px 0; cursor:pointer}
 #imp .imp-name{width:100%; background:#0a0c0d; border:1px solid var(--line2); border-radius:4px; color:var(--hi); font:inherit; font-size:13px; padding:6px 10px}
 #imp .imp-name:focus{outline:none; border-color:var(--g)}
@@ -1214,8 +1215,9 @@ function buildOsc() {
     row([[pre + "uni", "Unison"], [pre + "detune", "Detune"], [pre + "spread", "Spread"], [pre + "sync", "Sync"], [pre + "bend", "Bend"], [pre + "formant", "Formant"]], p.body);
     sub(p.body, "Warp shaper");
     row([[pre + "wshape", "Shaper"], [pre + "sgain", "Gain"], [pre + "sout", "Out"]], p.body);
-    sub(p.body, "Warp (filter, FM / PD / RM from the Sub)");
-    row([[pre + "xw", "Warp"], [pre + "xa", "Amount"]], p.body);
+    sub(p.body, "Warps (filter, FM / PD / RM / AM from the Sub or another oscillator)");
+    row([[pre + "xw", "Warp"], [pre + "xs", "From"], [pre + "xa", "Amount"]], p.body);
+    row([[pre + "xw2", "Warp 2"], [pre + "xs2", "From"], [pre + "xa2", "Amount"]], p.body);
     sub(p.body, "Routing");
     row([[pre + "post", "Route"], [pre + "bus1", "Bus 1"], [pre + "bus2", "Bus 2"]], p.body);
     placed[pre + "table"] = 1;
@@ -1558,7 +1560,7 @@ function buildBrowser() {
   brSearch = el("input", null, head);
   brSearch.placeholder = "Search every bank…";
   var imp = el("button", "imp", head, "＋ Import"); imp.title = "Import Serum 2 presets"; imp.addEventListener("click", function () { openImport(true); });
-  var del = el("button", "imp", head, "Delete bank"); del.title = "Delete the bank shown on the left, with its wavetables and samples"; del.addEventListener("click", function () { deleteBank(); });
+  var del = delBtn = el("button", "imp", head, "Delete bank"); del.title = "Delete the bank shown on the left, with its wavetables and samples"; del.addEventListener("click", function () { deleteBank(); });
   var x = el("button", "x", head, "✕"); x.title = "Close (Esc)";
   x.addEventListener("click", function () { openBrowser(false); });
   brBanks =el("div", "banks", brEl); brList = el("div", "list", brEl);
@@ -1618,7 +1620,8 @@ function impStart(onProgress) {
 }
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-function readBuf(file) {
+async function readBuf(file) {
+  if (file && typeof file.getFile === "function") file = await file.getFile();       /* a remembered folder's entries are handles, opened only when read */
   return new Promise(function (res, rej) {
     var fr = new FileReader();
     fr.onload = function () { res(fr.result); };
@@ -1652,7 +1655,12 @@ function looksLikeRoot(list) {
     return s.length >= 3 && /^presets$/i.test(s[1]) && /^(factory|packs|user)$/i.test(s[2]);
   });
 }
-function addAny(list) { if (looksLikeRoot(list)) addRoot(list); else addPicks(list, false); }
+function addAny(list) {
+  /* the Presets folder itself (Factory, Packs, User inside): give it the Serum 2 folder above it, so it is read as one */
+  if (!looksLikeRoot(list) && list.some(function (it) { var s = cleanRel(it.rel).split("/"); return s.length >= 3 && /^presets$/i.test(s[0]) && /^(factory|packs|user)$/i.test(s[1]); }))
+    list = list.map(function (it) { return { file: it.file, rel: "Serum 2 Presets/" + cleanRel(it.rel) }; });
+  if (looksLikeRoot(list)) addRoot(list); else addPicks(list, false);
+}
 function addRoot(list) {
   ["presets", "wavs", "tables", "smps"].forEach(function (k) { IMP[k] = IMP[k].filter(function (x) { return !x.fromRoot; }); });
   var units = {}, order = [];
@@ -1698,6 +1706,117 @@ function renderUnits() {
     cb.type = "checkbox"; cb.checked = u.on;
     cb.addEventListener("change", function () { u.on = cb.checked; syncUnits(); });
     el("span", null, lab, u.name + " (" + u.items.length + ")");
+  });
+}
+/* ---- the remembered Serum 2 folder ----
+ * A page cannot learn a folder's path, but Chrome and Edge let it keep a handle to a folder the person chose (in IndexedDB) and read it again later, after one click
+ * (or none, where the browser has been told to allow it). The person chooses once: the Serum 2 Presets folder, or the Xfer or Documents folder above it (the Serum 2 Presets
+ * folder is found from there), or its Presets, Tables or Samples folder. Other browsers, and frames that may not show a picker, fall back to the folder input. */
+function idb(mode, fn) {
+  return new Promise(function (res, rej) {
+    try {
+      var q = indexedDB.open("th_import", 1);
+      q.onupgradeneeded = function () { q.result.createObjectStore("h"); };
+      q.onerror = function () { rej(q.error); };
+      q.onsuccess = function () {
+        var db = q.result, t = db.transaction("h", mode), r = fn(t.objectStore("h"));
+        t.oncomplete = function () { db.close(); res(r && r.result); };
+        t.onerror = t.onabort = function () { db.close(); rej(t.error); };
+      };
+    } catch (e) { rej(e); }
+  });
+}
+function saveRoot(h) { return idb("readwrite", function (s) { return s.put(h, "serumRoot"); }).catch(function () {}); }
+function loadRoot() { return idb("readonly", function (s) { return s.get("serumRoot"); }).catch(function () { return null; }); }
+function forgetRoot() { return idb("readwrite", function (s) { return s.delete("serumRoot"); }).catch(function () {}); }
+async function kidsOf(dir) { var o = {}; try { for await (var e of dir.values()) o[e.name.toLowerCase()] = e; } catch (x) {} return o; }
+/* What a picked folder is: the Serum 2 Presets folder itself (it holds Presets), or one above it that holds it (Xfer, Documents, OneDrive), or the Presets, Tables or Samples folder, or anything else. */
+async function classifyDir(dir, depth) {
+  var k = await kidsOf(dir), isDir = function (n) { return k[n] && k[n].kind === "directory"; };
+  if (isDir("presets")) return { kind: "root", dir: dir };
+  if (/^presets$/i.test(dir.name) || isDir("factory") || isDir("packs")) return { kind: "presets", dir: dir };
+  if (/^tables$/i.test(dir.name)) return { kind: "tables", dir: dir };
+  if (/^(multi)?samples$/i.test(dir.name)) return { kind: "samples", dir: dir };
+  if (depth < 4) {
+    var names = ["serum 2 presets", "xfer", "documents", "onedrive"];
+    for (var i = 0; i < names.length; i++) {
+      if (!isDir(names[i])) continue;
+      var c = await classifyDir(k[names[i]], depth + 1);
+      if (c.kind === "root") return c;
+    }
+  }
+  return { kind: "other", dir: dir };
+}
+async function walkDir(dir, base, out) {
+  for await (var e of dir.values()) {
+    if (e.kind === "directory") await walkDir(e, base + e.name + "/", out);
+    else if (/\.(serumpreset|serumpack|zip|wav|flac|aif|aiff|ogg|mp3|sfz)$/i.test(e.name)) out.push({ file: e, rel: base + e.name });
+  }
+}
+/* Read a classified folder into the same {file, rel} lists the folder input gives, so the matching below does not care which way they arrived. Only the folders Serum's
+ * presets can use are read (Presets, Tables, Samples, Multisamples), and entries stay handles until a preset needs them. */
+async function readClassified(c) {
+  var out = [], base = c.dir.name + "/";
+  if (c.kind === "root") {
+    var k = await kidsOf(c.dir), want = ["presets", "tables", "samples", "multisamples"];
+    for (var i = 0; i < want.length; i++) if (k[want[i]] && k[want[i]].kind === "directory") await walkDir(k[want[i]], base + k[want[i]].name + "/", out);
+  } else if (c.kind === "presets") await walkDir(c.dir, "Serum 2 Presets/Presets/", out);
+  else await walkDir(c.dir, base, out);
+  return out;
+}
+function addClassified(c, list) {
+  if (c.kind === "tables") addPicks(list, true);
+  else if (c.kind === "samples") addPicks(list, "smp");
+  else addAny(list);
+}
+/* The dialog's first row: the remembered folder, read on opening when the browser allows it without asking, else with one click. */
+function rootRow(body, seq, fallbackInput) {
+  var box = el("div", null, body), msg = el("div", "imp-note", box, ""), row = el("div", "imp-row", box);
+  function live() { return IMP.formSeq === seq; }
+  function btn(label, fn) { var b = el("button", "imp-b", null, label); b.addEventListener("click", fn); return b; }
+  function show(text, buttons) { if (!live()) return; msg.textContent = text; row.textContent = ""; buttons.forEach(function (b) { row.appendChild(b); }); }
+  function viaInput() { fallbackInput.click(); }
+  async function load(dir, remembered) {
+    show("Reading “" + dir.name + "”…", []);
+    try {
+      var c = await classifyDir(dir, 0), list = await readClassified(c);
+      if (!live()) return;
+      addClassified(c, list);
+      var kept = c.kind === "root" || c.kind === "presets";
+      if (kept) await saveRoot(c.dir);
+      var what = c.kind === "root" ? "Serum 2 folder" : c.kind === "presets" ? "Presets folder (choose the Serum 2 Presets folder above it to bring wavetables and samples too)" : c.kind === "tables" ? "Tables folder" : c.kind === "samples" ? "Samples folder" : "Folder";
+      show(what + ": “" + c.dir.name + "”" + (kept ? (remembered ? " (remembered)" : " (remembered for next time)") : "") + ".", [btn("Choose another…", choose)]);
+    } catch (e) {
+      show("Could not read that folder (" + (e && e.message || e) + ").", [btn("Choose it again…", choose)]);
+    }
+  }
+  async function choose() {
+    var dir;
+    try { dir = await window.showDirectoryPicker({ id: "serum2", mode: "read", startIn: "documents" }); }
+    catch (e) { if (e && e.name === "AbortError") return; viaInput(); return; }      /* a frame that may not show this picker */
+    load(dir, false);
+  }
+  if (typeof window.showDirectoryPicker !== "function") {
+    show("Choose your Serum 2 Presets folder (Documents ▸ Xfer ▸ Serum 2 Presets). " + (window.isSecureContext === false
+      ? "Browsers only remember a folder for a secure page, and this one is plain http: in Chrome or Edge, add this address to chrome://flags/#unsafely-treat-insecure-origin-as-secure and it will be remembered."
+      : "This browser cannot remember it for next time; Chrome and Edge can."), [btn("Serum 2 Presets folder…", viaInput)]);
+    return;
+  }
+  show("Choose your Serum 2 folder once: Documents ▸ Xfer ▸ Serum 2 Presets (or the Xfer or Documents folder above it). It is found from there and remembered.", [btn("Find my Serum 2 folder…", choose)]);
+  loadRoot().then(async function (dir) {
+    if (!dir || !live()) return;
+    var perm = "prompt";
+    try { perm = await dir.queryPermission({ mode: "read" }); } catch (e) {}
+    if (perm === "granted") { load(dir, true); return; }
+    show("Remembered: “" + dir.name + "”.", [
+      btn("Use “" + dir.name + "”", async function () {
+        var p = "denied";
+        try { p = await dir.requestPermission({ mode: "read" }); } catch (e) {}
+        if (p === "granted") load(dir, true); else choose();
+      }),
+      btn("Choose another…", choose),
+      btn("Forget it", async function () { await forgetRoot(); if (live()) show("Forgotten. Choose your Serum 2 folder to start again.", [btn("Find my Serum 2 folder…", choose)]); })
+    ]);
   });
 }
 function pickList(input) {
@@ -1793,13 +1912,24 @@ async function deleteRemote(path) {
   fd.append("csrf_token", csrf()); fd.append("path", path);
   return fetch("/files/delete", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": csrf() } });
 }
+/* The page runs in a frame that may not allow alert() / confirm() (they then do nothing, silently), so the button itself asks: the first click arms it, the second deletes. */
+var delBtn = null, delArmed = "", delTimer = 0;
+function delSay(text, ms) {
+  delBtn.textContent = text; clearTimeout(delTimer);
+  delTimer = setTimeout(function () { delArmed = ""; delBtn.textContent = "Delete bank"; }, ms || 6000);
+}
 async function deleteBank() {
   var bk = PS.banks[PS.viewBank];
-  if (!bk) return;
+  if (!bk) { delSay("No bank to delete"); return; }
   var name = bk.n;
-  if (name === "User" || /[\/\\]|^\.+$/.test(name)) { alert("“" + name + "” is not a bank folder, so it cannot be deleted here."); return; }
+  if (name === "User" || /[\/\\]|^\.+$/.test(name)) { delSay("“" + name + "” is not a bank folder"); return; }
   var wasCurrent = PS.banks[PS.b] && PS.banks[PS.b].n === name;
-  if (!confirm("Delete the bank “" + name + "” with its " + bk.p.length + " presets?\n\nThe wavetables and samples in folders of the same name (UserLibrary/Wavetables/" + name + ", UserLibrary/Samples/" + name + ") go too. This cannot be undone.")) return;
+  if (delArmed !== name) {
+    delArmed = name;
+    delSay("Click again to delete “" + name + "” (" + bk.p.length + " presets, and its wavetable and sample folders)");
+    return;
+  }
+  delArmed = ""; clearTimeout(delTimer); delBtn.textContent = "Deleting…";
   try {
     var r = await deleteRemote(PRESET_ROOT + "/" + name);
     if (!r.ok) throw new Error("the Move refused (" + r.status + ")");
@@ -1816,7 +1946,8 @@ async function deleteBank() {
     PS.viewBank = Math.min(PS.viewBank, Math.max(0, PS.banks.length - 1));
     if (wasCurrent) { PS.b = 0; PS.i = 0; }
     renderPbar(); renderBrowser();
-  } catch (e) { alert("Could not delete “" + name + "”: " + e.message); }
+    delSay("Deleted “" + name + "”", 3000);
+  } catch (e) { delSay("Could not delete “" + name + "”: " + e.message, 8000); }
 }
 function b64bytes(s) {
   var bin = atob(s), a = new Uint8Array(bin.length);
@@ -2078,30 +2209,28 @@ function impBuildForm() {
     b.addEventListener("click", function () { inp.click(); });
     return b;
   }
-  el("div", "imp-intro", body, "Bring Serum 2 presets into TinyHouse. The easiest way is to choose your whole Serum 2 Presets folder (Documents ▸ Xfer ▸ Serum 2 Presets): you then tick which presets to import, and the wavetables and samples they use are found for you. Everything is converted here in the browser and stored on the Move.");
-  var row = el("div", "imp-row", body);
-  row.appendChild(picker("Serum 2 Presets folder…", { webkitdirectory: "", directory: "" }, function (l) { addAny(l); }));
-  var row1 = el("div", "imp-note", body, "Or choose single presets, a .SerumPack or any other folder:");
-  var rowb = el("div", "imp-row", body);
-  rowb.appendChild(picker("Presets or packs…", { multiple: "", accept: ".SerumPreset,.SerumPack,.zip,.wav" }, function (l) { addPicks(l, false); }));
-  rowb.appendChild(picker("Folder…", { webkitdirectory: "", directory: "" }, function (l) { addAny(l); }));
+  el("div", "imp-intro", body, "Bring Serum 2 presets into TinyHouse. Choose your Serum 2 folder once and it is remembered: you then tick which presets to import, and the wavetables and samples they use are found for you. Everything is converted here in the browser and stored on the Move.");
+  var seq = IMP.formSeq = (IMP.formSeq || 0) + 1;
+  var fb = el("input", null, body); fb.type = "file"; fb.style.display = "none";
+  fb.setAttribute("webkitdirectory", ""); fb.setAttribute("directory", "");
+  fb.addEventListener("change", function () { addAny(pickList(fb)); fb.value = ""; });
+  rootRow(body, seq, fb);
   var drop = el("div", "imp-drop", body, "…or drop presets, packs or folders here");
   drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
   drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
+  var more = el("details", "imp-more", body);
+  el("summary", null, more, "Other ways to choose: single presets, a pack, or the wavetable and sample folders separately");
+  var rowb = el("div", "imp-row", more);
+  rowb.appendChild(picker("Presets or packs…", { multiple: "", accept: ".SerumPreset,.SerumPack,.zip,.wav" }, function (l) { addPicks(l, false); }));
+  rowb.appendChild(picker("Folder…", { webkitdirectory: "", directory: "" }, function (l) { addAny(l); }));
+  el("div", "imp-note", more, "Only needed when the Serum 2 folder above was not chosen: Serum's own wavetables (Tables folder) and the audio of Sample or Multisample oscillators and recorded noises (Samples, Multisamples; same place as Tables). Only the files your presets use are read and copied to the Move; without them that oscillator stays silent. Presets in a pack bring their own wavetables.");
+  var r2 = el("div", "imp-row", more);
+  r2.appendChild(picker("Tables folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, true); }, true));
+  r2.appendChild(picker("Samples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));
+  r2.appendChild(picker("Multisamples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));
   IMP.srcEl = el("div", "imp-src", body);
   IMP.sumEl = el("div", "imp-sum", body, "");
-
-  el("div", "imp-h", body, "Wavetables (optional)");
-  el("div", "imp-note", body, "A preset that uses one of Serum's own wavetables needs that file. Not needed if you chose the whole Serum 2 Presets folder above. Otherwise choose your Serum 2 Tables folder (in Documents ▸ Xfer ▸ Serum 2 Presets ▸ Tables) and only the tables your presets use are copied. Presets in a pack bring their own.");
-  var r2 = el("div", "imp-row", body);
-  r2.appendChild(picker("Tables folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, true); }, true));
-
-  el("div", "imp-h", body, "Samples (optional)");
-  el("div", "imp-note", body, "A preset with a Sample or Multisample oscillator (or a noise that is a recording) needs that audio. Not needed if you chose the whole Serum 2 Presets folder above. Otherwise choose your Serum 2 Samples folder, and the Multisamples folder if your presets use one (same place as Tables). Only the files your presets use are read, decoded here and copied to the Move; some are large. Without them the oscillator stays silent.");
-  var r3 = el("div", "imp-row", body);
-  r3.appendChild(picker("Samples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));
-  r3.appendChild(picker("Multisamples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));
 
   el("div", "imp-h", body, "Bank");
   IMP.bankEl = el("input", "imp-name", body); IMP.bankEl.type = "text"; IMP.bankEl.maxLength = 40; IMP.bankEl.value = "Imports";

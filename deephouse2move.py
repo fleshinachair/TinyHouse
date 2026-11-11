@@ -273,7 +273,7 @@ def physical(tree: dict, header: dict) -> dict:
             "detune_wid": p.get("kParamDetuneWid"),      # how far the stack spreads, not stereo
             "stereo_pct": p.get("kParamUnisonStereo"),
             "table": wt.get("relativePathToWT"),
-            "embedded": wt.get("embeddedWTData") if not wt.get("relativePathToWT") else None,        # a table edited in Serum and stored in the preset (no file)
+            "embedded": wt.get("embeddedWTData") or None,        # a table stored in the preset itself: the only copy when it was edited in Serum, the fallback when the file named in table is not on this machine
             "table_pos": wtp.get("kParamTablePos", 1.0),            # 1..256
             "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0)}
                      for m, a in (("kParamWarpMenu", "kParamWarp"),
@@ -669,7 +669,7 @@ FILTER_DRIVE_MAKEUP_DB = [(0.0, 0.0), (10.0, 2.8), (25.0, 5.7), (50.0, 10.6), (7
 # Serum's drive makes no harmonics on a saw at 50-100 % (every harmonic moves by the same dB), so the engine's saturating pot stops at its 25 % value.
 FILTER_DRIVE_POT_USED = [(0.0, 0.0), (10.0, 4.0), (25.0, 8.0), (100.0, 8.0)]
 BEND_POT = [(0.0, 64.0), (0.03, 65.0), (0.12, 65.0), (0.2, 66.0), (0.3, 67.0), (0.4, 70.0), (0.5, 74.0), (0.7, 86.0), (0.85, 100.0), (1.0, 116.0)]
-BEND_WARPS = {"kBendPos": +1, "kBendPosNeg": +1, "kBendNeg": -1, "kPD_OSC": +1, "kASYMPos": +1, "kPWM": +1}
+BEND_WARPS = {"kBendPos": +1, "kBendPosNeg": +1, "kBendNeg": -1, "kASYMPos": +1, "kPWM": +1}
 # Serum's PWM warp on a saw (calibration/probe_pwm.py): the harmonics 2..9 match the engine's Bend at these pots to within 1-2.5 dB (amount 0.2: pot 90 or 38,
 # 0.4: 104 or 24, 0.6: 122 or 6; 0.8 is beyond the engine's range). A pulse-width warp and a bend are both an asymmetric phase map; the phases differ, the magnitudes do not.
 # Serum's Sync warp on a saw (calibration/probe_sync.py): the engine's sync pot whose harmonics are closest, 0.2 to 0.7 within 0.3-2.2 dB. Amounts under 0.15 are no sync.
@@ -679,6 +679,9 @@ WARP_NOISE_FLOOR = 0.02    # a warp mode with ~0 amount is not audible
 # Serum's Filter LP / HP warps and its FM / PD / RM warps from the Sub, which the engine carries as one more warp per oscillator (wtN_xw, wtN_xa = Serum's amount in
 # thousandths; the laws are in wt_oscillator.h: calibration/probe_filterwarp.py, probe_warp_fm.py). One per oscillator: a second one stays unsupported.
 XWARP_MODES = {"kFilterLPF": 1, "kFilterHPF": 2, "kFM_SUB": 3, "kPD_SUB": 4, "kRM_SUB": 5}
+# The same warps with another oscillator as the modulator (calibration/probe_warp_osc.py): the menu's "Osc" is the first of the other two oscillators (A for B and C, B for A),
+# "Osc 2" the second (C for A and B, B for C); a modulator that is switched off gives no modulation at all. PD_OSC was a Bend stand-in before this. {mode: (warp kind, which of the other two)}; the engine's xs value is that oscillator's index + 1. AM (kind 6) is the Osc-only one.
+XWARP_OSC_MODES = {"kPD_OSC": (4, 0), "kFM_OSC": (3, 0), "kFM_OSC2": (3, 1), "kPD_OSC2": (4, 1), "kRM_OSC": (5, 0), "kRM_OSC2": (5, 1), "kAM_OSC": (6, 0), "kAM_OSC2": (6, 1)}
 WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves.json"
 
 
@@ -1437,9 +1440,20 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             elif w["mode"] in WARP_SHAPERS() and not P.get(f"{k}_shape"):
                 P.update(warp_shaper_pots(k, w["mode"], _clamp(w["amount"], 0, 1)))
                 appr.append(f"{k} warp {w['mode'][1:]} carried as a static waveshaper (fitted to Serum's harmonics, a few dB)")
-            elif w["mode"] in XWARP_MODES and not P.get(f"{k}_xw"):
-                P[f"{k}_xw"] = XWARP_MODES[w["mode"]]
-                P[f"{k}_xa"] = int(round(_clamp(w["amount"], 0, 1) * 1000))
+            elif (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES) and not (P.get(f"{k}_xw") and P.get(f"{k}_xw2")):
+                slot = "xw2" if P.get(f"{k}_xw") else "xw"
+                sfx = "2" if slot == "xw2" else ""
+                if w["mode"] in XWARP_OSC_MODES:
+                    kind, which = XWARP_OSC_MODES[w["mode"]]
+                    target = [i for i in range(3) if i != o["id"]][which]        # the Serum oscillator (A, B, C = 0, 1, 2) that modulates this one
+                    if target not in slot_of:
+                        appr.append(f"{k} warp {w['mode'][1:]} left out: its modulator, oscillator {'ABC'[target]}, is off in Serum (so the warp does nothing there) or not a wavetable oscillator")
+                        continue
+                    P[f"{k}_xs{sfx}"] = slot_of[target]
+                else:
+                    kind = XWARP_MODES[w["mode"]]
+                P[f"{k}_{slot}"] = kind
+                P[f"{k}_xa{sfx}"] = int(round(_clamp(w["amount"], 0, 1) * 1000))
             elif w["mode"] == "kSync":
                 P[f"{k}_sync"] = round(interp(SYNC_POT, _clamp(w["amount"], 0, 1)))
             elif w["mode"] in BEND_WARPS and n == 3:
@@ -1447,15 +1461,16 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             elif w["mode"] in BEND_WARPS:
                 table = PWM_BEND_POT if w["mode"] == "kPWM" else BEND_POT
                 P[f"{k}_bend"] = round(_clamp(64 + BEND_WARPS[w["mode"]] * (interp(table, _clamp(w["amount"], 0, 1)) - 64), 0, 127))
-                if w["mode"] not in ("kPD_OSC", "kPWM") and not w["mode"].startswith("kBend"):
+                if w["mode"] != "kPWM" and not w["mode"].startswith("kBend"):
                     appr.append(f"{k} warp {w['mode'][1:]} approximated with Tablor Bend")
             else:
                 crit.append(f"{k} warp {w['mode'][1:]} unsupported (no FM/RM/fold in Tablor)")
                 unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
         path, ref = resolve_table(o["table"], pack, serum_tables, wt_out, subdir)
-        if path is None and not ref and o.get("embedded"):
+        if path is None and o.get("embedded"):
             path = write_embedded_table(o["embedded"], wt_out, subdir)
             note.append(f"{k}: the preset's own embedded wavetable ({len(o['embedded']) // EMBEDDED_FRAME} frames)")
+            ref = None
         paths[f"{k}_table"] = path or "Init"
         if path is None and ref:
             missing.append(ref)

@@ -101,8 +101,12 @@ def osc(n):
         shape  = enum(f"wt{n}_wshape", f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic"], 0),
         sgain  = pot(f"wt{n}_sgain",   f"SGN{n}",  f"WT{n} Shaper Gain", 64),
         sout   = pot(f"wt{n}_sout",    f"SOT{n}",  f"WT{n} Shaper Out", 64),
-        xw     = enum(f"wt{n}_xw",     f"XW{n}",   f"WT{n} Warp", ["Off", "Filter LP", "Filter HP", "FM Sub", "PD Sub", "RM Sub"], 0),
+        xw     = enum(f"wt{n}_xw",     f"XW{n}",   f"WT{n} Warp", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM"], 0),
         xa     = num(f"wt{n}_xa",      f"XA{n}",   f"WT{n} Warp Amount", 0, 1000, 0),
+        xs     = enum(f"wt{n}_xs",     f"XS{n}",   f"WT{n} Warp From", ["Sub", "Osc A", "Osc B", "Osc C"], 0),
+        xw2    = enum(f"wt{n}_xw2",    f"XV{n}",   f"WT{n} Warp 2", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM"], 0),
+        xa2    = num(f"wt{n}_xa2",     f"XB{n}",   f"WT{n} Warp 2 Amount", 0, 1000, 0),
+        xs2    = enum(f"wt{n}_xs2",    f"XU{n}",   f"WT{n} Warp 2 From", ["Sub", "Osc A", "Osc B", "Osc C"], 0),
     )
 
 # WT3 is deliberately the plain one: a layer, not a third lead. It has no bend
@@ -603,7 +607,9 @@ BANKS = [
     # Last, so no earlier parameter's number moves. The page is on the device (PAGE_MAP).
     ("Macros", False, [row(*MACROS)]),
     # After the Macros, so no earlier parameter's number moves. Serum's filter / FM / PD / RM warps (the amount is Serum's, in thousandths); no page on the device.
-    ("Warps", False, [row(O1["xw"], O1["xa"], O2["xw"], O2["xa"], O3["xw"], O3["xa"])]),
+    ("Warps", False, [row(O1["xw"], O1["xa"], O1["xs"], O1["xw2"], O1["xa2"], O1["xs2"]),
+                      row(O2["xw"], O2["xa"], O2["xs"], O2["xw2"], O2["xa2"], O2["xs2"]),
+                      row(O3["xw"], O3["xa"], O3["xs"], O3["xw2"], O3["xa2"], O3["xs2"])]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

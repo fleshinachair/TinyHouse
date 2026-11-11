@@ -29,9 +29,10 @@ in a slot. This page is where you import and fine-tune sounds. (Use a normal bro
 
 ![The import dialog](docs/img/remote-import.png)
 
-- The easiest way: press **Serum 2 Presets folder…** and choose your whole Serum 2 folder (`Documents\Xfer\Serum 2 Presets`, or
-  `~/Documents/Xfer/Serum 2 Presets` on a Mac). Tick which presets to bring in (Factory, User, each pack). The wavetables, samples and multisamples they
-  use are found in that folder for you, and only the ones the presets use are copied to the Move.
+- The easiest way: press **Find my Serum 2 folder…** and choose `Documents\Xfer\Serum 2 Presets` (or the `Xfer` or `Documents` folder above it; the Serum 2
+  folder is found from there). Chrome and Edge remember it, so next time the dialog opens with it already read (at most one click to allow it again). Tick
+  which presets to bring in (Factory, User, each pack). The wavetables, samples and multisamples they use are found in that folder for you, and only the
+  ones the presets use are copied to the Move. Browsers only allow this on a secure page and the Move's page is plain http, so unless you add its address to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, or use another browser, you choose the folder each time (the dialog says which applies).
 - Or choose single `.SerumPreset` files, a `.SerumPack` or any folder (or drop them on the dialog). Then, if the presets use Serum's own wavetables, point
   **Tables folder** at the `Tables` folder, and for sample or multisample oscillators point **Samples** (and **Multisamples**) at the matching folders.
   Presets in a pack bring their own wavetables.
@@ -126,6 +127,10 @@ BANK="My Pack" sh ./deploy_wavetables.sh                                        
 sh ./deploy_samples.sh
 SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh
 ```
+
+To bring in Serum's own Factory presets, point it at `Presets\Factory` inside your Serum 2 folder with `--bank Factory`. It is the same three steps, and it keeps
+only the presets that match Serum's render within the check above (about 280 of the 626). It takes hours, because every preset is rendered, so leave it running;
+if it stops, run the same command again with `--resume` and it carries on where it left off.
 
 Reload the slot afterwards and the bank is in the preset browser next to your imported ones. `deephouse2move.py` converts a `.SerumPack` directly and
 `serum_paths.py` explains how Serum's folders are found (set `SERUM_ROOT` and `SERUM_VST` if yours are elsewhere). The first run on a pack is slow because

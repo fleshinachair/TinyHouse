@@ -71,11 +71,9 @@ public:
         /* Serum's Dist* oscillator warps: a static shaper out = shapeOut f(shapeGain x) of every stream's sample (calibration/fit_warp_dist.py) */
         int   shape     = 0;      /* 0 off, 2 hard clip, 3 softsign, 4 cubic soft clip (1 is unused: std::tanh costs 7x the others per sample) */
         float shapeGain = 1.0f, shapeOut = 1.0f;
-        /* Serum's PD / FM warps from the Sub: `mod` is the Sub's waveform at unit level, one value per sample of the block. modKind 1 adds
-         * modDepth x mod to the phase (cycles); 2 adds it to the phase step (cycles per sample, a frequency deviation). */
-        int   modKind = 0;
-        float modDepth = 0.0f;
-        const float *mod = nullptr;
+        /* Serum's PD / FM warps (the modulator is the Sub or another oscillator): pmod is added to the phase, in cycles; fmod to the phase step, in cycles per
+         * sample (a frequency deviation). Both are already scaled by the warp's depth, one value per sample of the block. */
+        const float *pmod = nullptr, *fmod = nullptr;
     };
 
     void setSampleRate(double sr)
@@ -104,7 +102,7 @@ public:
     {
         if (!wt || wt->size() == 0) return;
 
-        if (params.modKind != 0 && params.mod)
+        if (params.pmod || params.fmod)
             processModulated(note, params, l, r, n);
         else if (params.sync > 0.0f || syncEngaged)
             processSync(note, params, l, r, n);
@@ -245,11 +243,9 @@ private:
         float frac = 0.0f;
         posToFrames(p.position, fa, fb, frac);
         const MipLevel &la = fa->levelRef(note), &lb = fb->levelRef(note);
-        const bool pm = p.modKind == 1;
         for (int i = 0; i < n; i++) {
-            const float m = p.modDepth * p.mod[i];
-            float at = phase;
-            if (pm) { at += m; at -= std::floor(at); }
+            float at = phase + (p.pmod ? p.pmod[i] : 0.0f);
+            at -= std::floor(at);
             const float ph = distort(std::min(kAlmostOne, at), p.bend, formantMul);
             float s = FrameTable::readLinear(la, ph);
             if (frac > 0.0f)
@@ -257,7 +253,7 @@ private:
             postProcess(p, s);
             l[i] += s * p.leftGain;
             r[i] += s * p.rightGain;
-            phase += pm ? delta : delta + m;
+            phase += delta + (p.fmod ? p.fmod[i] : 0.0f);
             phase -= std::floor(phase);
         }
         lastTableIndex = tableIndex = posToIndex(p.position);
@@ -424,6 +420,10 @@ struct VoicedWTParams {
      * Serum's 0..1 amount. The laws are measured (calibration/probe_warp_fm.py, probe_filterwarp.py). */
     int   xwarp = 0;
     float xamount = 0.0f;
+    int   xsrc = 0;                       /* the modulator of an FM / PD / RM / AM warp: 0 the Sub, 1..3 oscillator A..C */
+    int   xwarp2 = 0;                     /* the oscillator's second warp (Serum has two), applied after the first */
+    float xamount2 = 0.0f;
+    int   xsrc2 = 0;
 };
 
 /* What each warp does at an amount, from Serum:
@@ -431,7 +431,7 @@ struct VoicedWTParams {
  *  - PD from Sub: the phase pushed by the Sub, index 33.6 a^4 rad (the same at every pitch).
  *  - FM from Sub: the frequency pushed by the Sub, a deviation of 58 200 a^4 Hz, so the index is that over the Sub's frequency.
  *  - RM from Sub: (1 - a) x + a 1.314 x S, the carrier falling to nothing at 1.
- * The Sub is taken at unit level whatever its own level. */
+ * The Sub, or the oscillator, is taken at unit level whatever its own level. */
 inline float filterWarpCornerHz(float a)
 {
     static const float A[12] = { 0.0f, 0.05f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
@@ -445,6 +445,9 @@ inline float filterWarpCornerHz(float a)
 inline constexpr float kXwarpPdCycles = 33.6f / 6.28318530718f;   /* PD index in cycles at amount 1 (x a^4) */
 inline constexpr float kXwarpFmHz     = 58200.0f;                  /* FM deviation at amount 1, Hz (x a^4) */
 inline constexpr float kXwarpRmGain   = 1.314f;
+inline constexpr float kXwarpOscScale = 1.52f;
+/* An oscillator as the modulator is 1.52 times as strong as the Sub at the same amount (calibration/probe_warp_osc.py: FM deviation 90 000 a^4 Hz against the Sub's
+ * 58 200, PD index 51 a^4 against 33.6, RM / AM sidebands a against 0.657 a). Mode 6, AM, is x (1 + a 1.314 k S). */
 
 /* The stack is DC-blocked ONCE, on its own buffer, not by each stream.
  *
@@ -479,45 +482,67 @@ public:
             oscs[(size_t) i].noteOn(i < n ? phases[i] : -1.0f);
         blockerL.reset();
         blockerR.reset();
-        fwL = fwR = 0.0f;
+        fwL[0] = fwL[1] = fwR[0] = fwR[1] = 0.0f;
     }
     void noteOn(float phase = -1.0f)
     {
         for (auto &o : oscs) o.noteOn(phase);
         blockerL.reset();
         blockerR.reset();
-        fwL = fwR = 0.0f;
+        fwL[0] = fwL[1] = fwR[0] = fwR[1] = 0.0f;
     }
 
-    /* `sub` is the Sub's waveform at unit level for the block, needed only by the FM / PD / RM warps (null: those warps are off). */
-    void processAdding(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *sub = nullptr)
+    /* `src[0..3]` are the modulators' waveforms at unit level for the block (the Sub, then oscillators A..C), null where not rendered; the FM / PD / RM / AM warps read them. */
+    void processAdding(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *const *src = nullptr)
     {
-        const int xw = vp.xwarp;
-        const bool needSub = xw >= 3 && xw <= 5;
-        const bool active = xw >= 1 && xw <= 5 && vp.xamount > 0.0f && (!needSub || sub);
-        const float a = std::min(std::max(vp.xamount, 0.0f), 1.0f), a4 = (a * a) * (a * a);
-        /* Filter warps: a one-pole (trapezoidal) at the corner, once per stack, since the filter is linear and the stack is the sum of its streams */
-        float fg = 0.0f;
-        if (active && xw <= 2) {
-            const float k = std::tan(std::min((float) M_PI * filterWarpCornerHz(a) / (float) sampleRate, 1.5533f));
-            fg = k / (1.0f + k);
+        struct Slot { int kind = 0; float a = 0.0f, gain = 1.0f, g = 0.0f; const float *sig = nullptr; };
+        Slot s[2];
+        for (int k = 0; k < 2; k++) {
+            const int w = k ? vp.xwarp2 : vp.xwarp;
+            const float a = std::min(std::max(k ? vp.xamount2 : vp.xamount, 0.0f), 1.0f);
+            if (w < 1 || w > 6 || a <= 0.0f) continue;
+            if (w >= 3) {
+                const int si = std::min(std::max(k ? vp.xsrc2 : vp.xsrc, 0), 3);
+                if (!src || !src[si]) continue;
+                s[k].sig = src[si]; s[k].gain = si == 0 ? 1.0f : kXwarpOscScale;
+            } else {
+                /* Filter warps: a one-pole (trapezoidal) at the corner, once per stack, since the filter is linear and the stack is the sum of its streams */
+                const float kk = std::tan(std::min((float) M_PI * filterWarpCornerHz(a) / (float) sampleRate, 1.5533f));
+                s[k].g = kk / (1.0f + kk);
+            }
+            s[k].kind = w; s[k].a = a;
         }
         while (n > 0) {
             const int todo = std::min(n, kStackBlock);
             float sl[kStackBlock] = {}, sr[kStackBlock] = {};
-            renderStack(note, vp, sl, sr, todo, active && (xw == 3 || xw == 4) ? sub : nullptr, xw == 3 ? 2 : 1,
-                        xw == 3 ? kXwarpFmHz / (float) sampleRate * a4 : kXwarpPdCycles * a4);
-            if (active && xw == 5) {
-                const float dry = 1.0f - a, wet = a * kXwarpRmGain;
-                for (int i = 0; i < todo; i++) {
-                    const float g = dry + wet * sub[i];
-                    sl[i] *= g; sr[i] *= g;
-                }
-            } else if (active && xw <= 2) {
-                const bool hp = xw == 2;
-                for (int i = 0; i < todo; i++) {
-                    float v = (sl[i] - fwL) * fg, y = v + fwL; fwL = y + v; sl[i] = hp ? sl[i] - y : y;
-                    v = (sr[i] - fwR) * fg; y = v + fwR; fwR = y + v; sr[i] = hp ? sr[i] - y : y;
+            float pm[kStackBlock], fm[kStackBlock];
+            bool hasPm = false, hasFm = false;
+            for (int k = 0; k < 2; k++) {
+                if (s[k].kind != 3 && s[k].kind != 4) continue;
+                const float a4 = (s[k].a * s[k].a) * (s[k].a * s[k].a);
+                const bool fmk = s[k].kind == 3;
+                float *dst = fmk ? fm : pm;
+                bool &has = fmk ? hasFm : hasPm;
+                if (!has) { for (int i = 0; i < todo; i++) dst[i] = 0.0f; has = true; }
+                const float depth = (fmk ? kXwarpFmHz / (float) sampleRate : kXwarpPdCycles) * a4 * s[k].gain;
+                for (int i = 0; i < todo; i++) dst[i] += depth * s[k].sig[i];
+            }
+            renderStack(note, vp, sl, sr, todo, hasPm ? pm : nullptr, hasFm ? fm : nullptr);
+            for (int k = 0; k < 2; k++) {
+                const int kind = s[k].kind;
+                if (kind == 5 || kind == 6) {
+                    const float dry = kind == 5 ? 1.0f - s[k].a : 1.0f, wet = s[k].a * kXwarpRmGain * s[k].gain;
+                    for (int i = 0; i < todo; i++) {
+                        const float g = dry + wet * s[k].sig[i];
+                        sl[i] *= g; sr[i] *= g;
+                    }
+                } else if (kind == 1 || kind == 2) {
+                    const bool hp = kind == 2;
+                    const float fg = s[k].g;
+                    for (int i = 0; i < todo; i++) {
+                        float v = (sl[i] - fwL[k]) * fg, y = v + fwL[k]; fwL[k] = y + v; sl[i] = hp ? sl[i] - y : y;
+                        v = (sr[i] - fwR[k]) * fg; y = v + fwR[k]; fwR[k] = y + v; sr[i] = hp ? sr[i] - y : y;
+                    }
                 }
             }
             for (int i = 0; i < todo; i++) {
@@ -525,20 +550,20 @@ public:
                 r[i] += sr[i] - blockerR.process(sr[i]);
             }
             l += todo; r += todo; n -= todo;
-            if (sub) sub += todo;
+            for (int k = 0; k < 2; k++) if (s[k].sig) s[k].sig += todo;
         }
     }
 
 private:
     static constexpr int kStackBlock = 128;
 
-    void renderStack(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *mod, int modKind, float modDepth)
+    void renderStack(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *pmod, const float *fmod)
     {
         WTOscillator::Params p;
         p.position = vp.position; p.bend = vp.bend; p.formant = vp.formant;
         p.asym = vp.asym; p.fold = vp.fold; p.sync = vp.sync;
         p.shape = vp.shape; p.shapeGain = vp.shapeGain; p.shapeOut = vp.shapeOut;
-        if (mod) { p.mod = mod; p.modKind = modKind; p.modDepth = modDepth; }
+        p.pmod = pmod; p.fmod = fmod;
 
         const int voices = std::clamp(vp.voices, 1, (int) oscs.size());
         if (voices == 1) {
@@ -570,7 +595,7 @@ private:
     std::vector<WTOscillator> oscs;
     DCBlocker blockerL, blockerR;
     double sampleRate = 44100.0;
-    float fwL = 0.0f, fwR = 0.0f;        /* the filter warp's state */
+    float fwL[2] = {0.0f, 0.0f}, fwR[2] = {0.0f, 0.0f};        /* the filter warps' state, one per warp slot */
 };
 
 } // namespace tb

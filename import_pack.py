@@ -231,6 +231,7 @@ def main():
     ap.add_argument("src", type=Path)
     ap.add_argument("--bank", required=True)
     ap.add_argument("--out", type=Path, default=Path("out_import"))
+    ap.add_argument("--resume", action="store_true", help="carry on a stopped run: a preset already written to the bank folder is kept as it is and not converted again (the rest are redone, their Serum renders are cached)")
     ap.add_argument("--limit", type=int, default=0, help="stop after this many kept presets")
     ap.add_argument("--max-level-gap", type=float, default=3.0, help="drop a preset whose finished level is further than this from Serum's (dB)")
     ap.add_argument("--band-floor", type=float, default=BAND_FLOOR_DB, help="hold each octave band at this many dB under the loudest band before the gate compares them (masked bands are inaudible); 0 = off")
@@ -265,6 +266,9 @@ def main():
         while name.lower() in used:
             name, n = f"{d2m.ascii_name(p.stem)[:36]} {n}", n + 1
         used.add(name.lower())
+        if a.resume and (bank_dir / f"{name}.json").exists():
+            kept.append(name)
+            continue
         if not H.usable(tree):
             skipped.append((name, ["a wavetable Serum's Tables folder does not have"]))
             continue

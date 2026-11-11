@@ -159,7 +159,7 @@ public:
         active = true;
         fastKill = false;
 
-        for (int o = 0; o < kOscs; o++) osc[o].setWavetable(c.table[o]);
+        for (int o = 0; o < kOscs; o++) { osc[o].setWavetable(c.table[o]); modOsc[o].setWavetable(c.table[o]); }
         smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
         smp2.start(c.sample2, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
         smp3.start(c.sample3, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
@@ -195,6 +195,7 @@ public:
                 ph = (float) rand() / (float) RAND_MAX;
             o.noteOn(phases, kMaxUnison);
         }
+        for (auto &m : modOsc) m.noteOn(0.0f);
         sub.noteOn(0.0f);
         noise.noteOn(0.0f);
         /* Serum's noise is mono with a random left/right level imbalance per note (2.3 dB on average, calibration/noise_stereo: correlation 1.000, side/mid -13..-29 dB) */
@@ -265,6 +266,7 @@ public:
             swapped |= lastTable[o] && c.table[o] != lastTable[o];
             lastTable[o] = c.table[o];
             osc[o].setWavetable(c.table[o]);
+            modOsc[o].setWavetable(c.table[o]);
         }
 
         updateParams(c, n);
@@ -322,22 +324,38 @@ public:
         };
         static const int kOscPost[kOscs] = { TB_P_WT1_POST, TB_P_WT2_POST, TB_P_WT3_POST };
         static const int kOscBal[kOscs] = { TB_P_WT1_BAL, TB_P_WT2_BAL, TB_P_WT3_BAL };
-        /* The FM / PD / RM warps take the Sub as their modulator, at unit level whatever its own level (even silent). It is rendered once here, and the
-         * audible Sub, if any, is this same signal scaled, so the two stay in step. */
-        float subSig[kBlock];
-        bool subSigOn = false;
-        for (int o = 0; o < kOscs; o++)
-            subSigOn |= oscGain[o] > 0.0f && vp[o].xwarp >= 3 && vp[o].xamount > 0.0f;
+        /* The FM / PD / RM / AM warps take the Sub or another oscillator as their modulator, at unit level whatever its own level (even silent). Each is rendered once
+         * here (the oscillator as a single voice: its table, position, pitch, sync and bend, none of its own warps); the audible Sub, if any, is its signal scaled, so
+         * the two stay in step. */
+        float subSig[kBlock], oscSig[kOscs][kBlock];
+        const float *srcs[4] = { nullptr, nullptr, nullptr, nullptr };
+        bool needSrc[4] = { false, false, false, false };
+        for (int o = 0; o < kOscs; o++) {
+            if (!(oscGain[o] > 0.0f)) continue;
+            if (vp[o].xwarp >= 3 && vp[o].xamount > 0.0f) needSrc[vp[o].xsrc] = true;
+            if (vp[o].xwarp2 >= 3 && vp[o].xamount2 > 0.0f) needSrc[vp[o].xsrc2] = true;
+        }
+        const bool subSigOn = needSrc[0];
         if (subSigOn) {
             float unusedR[kBlock] = {};
             for (int i = 0; i < n; i++) subSig[i] = 0.0f;
             StereoOscillator::Params unit = subParams;
             unit.leftGain = 1.0f; unit.rightGain = 0.0f;
             sub.processAdding(subNote, unit, subSig, unusedR, n);
+            srcs[0] = subSig;
+        }
+        for (int j = 0; j < kOscs; j++) {
+            if (!needSrc[j + 1]) continue;
+            VoicedWTParams m = vp[j];
+            m.voices = 1; m.gain = 1.0f; m.pan = 0.0f; m.spread = 0.0f; m.xwarp = m.xwarp2 = 0;
+            float unusedR[kBlock] = {};
+            for (int i = 0; i < n; i++) oscSig[j][i] = 0.0f;
+            modOsc[j].processAdding(oscNote[j], m, oscSig[j], unusedR, n);
+            srcs[j + 1] = oscSig[j];
         }
         for (int o = 0; o < kOscs; o++)
             if (oscGain[o] > 0.0f)
-                addSource(P[kOscPost[o]], kOscBal[o], TB_P_WT1_BUS1 + 2 * o, [&](float *l, float *r) { osc[o].processAdding(oscNote[o], vp[o], l, r, n, subSigOn ? subSig : nullptr); });
+                addSource(P[kOscPost[o]], kOscBal[o], TB_P_WT1_BUS1 + 2 * o, [&](float *l, float *r) { osc[o].processAdding(oscNote[o], vp[o], l, r, n, srcs); });
         if (subParams.leftGain + subParams.rightGain > 0.0f)
             addSource(P[TB_P_SUB_POST], TB_P_SUB_BAL, TB_P_SUB_BUS1, [&](float *l, float *r) {
                 if (!subSigOn) { sub.processAdding(subNote, subParams, l, r, n); return; }
@@ -586,19 +604,19 @@ private:
         static const struct OscKeys {
             int pos, level, tune, uni, det, spread, pan, sync, bend, form;
             int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync;
-            int shape, sgain, sout, xw, xa;
+            int shape, sgain, sout, xw, xa, xs, xw2, xa2, xs2;
         } kOsc[kOscs] = {
             { TB_P_WT1_POS, TB_P_WT1_LEVEL, TB_P_WT1_TUNE, TB_P_WT1_UNI, TB_P_WT1_DETUNE,
               TB_P_WT1_SPREAD, TB_P_WT1_PAN, TB_P_WT1_SYNC, TB_P_WT1_BEND, TB_P_WT1_FORMANT,
               MD_WT1_POS, MD_WT1_LEVEL, MD_WT1_TUNE, MD_WT1_BEND, MD_WT1_FORMANT, MD_WT1_PAN,
-              MD_WT1_SYNC, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA },
+              MD_WT1_SYNC, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA, TB_P_WT1_XS, TB_P_WT1_XW2, TB_P_WT1_XA2, TB_P_WT1_XS2 },
             { TB_P_WT2_POS, TB_P_WT2_LEVEL, TB_P_WT2_TUNE, TB_P_WT2_UNI, TB_P_WT2_DETUNE,
               TB_P_WT2_SPREAD, TB_P_WT2_PAN, TB_P_WT2_SYNC, TB_P_WT2_BEND, TB_P_WT2_FORMANT,
               MD_WT2_POS, MD_WT2_LEVEL, MD_WT2_TUNE, MD_WT2_BEND, MD_WT2_FORMANT, MD_WT2_PAN,
-              MD_WT2_SYNC, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA },
+              MD_WT2_SYNC, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA, TB_P_WT2_XS, TB_P_WT2_XW2, TB_P_WT2_XA2, TB_P_WT2_XS2 },
             { TB_P_WT3_POS, TB_P_WT3_LEVEL, TB_P_WT3_TUNE, TB_P_WT3_UNI, TB_P_WT3_DETUNE,
               TB_P_WT3_SPREAD, TB_P_WT3_PAN, TB_P_WT3_SYNC, -1, -1,
-              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA },
+              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA, TB_P_WT3_XS, TB_P_WT3_XW2, TB_P_WT3_XA2, TB_P_WT3_XS2 },
         };
 
         int unison[kOscs];
@@ -626,8 +644,12 @@ private:
             v.shape = std::clamp((int) P[k.shape], 0, 4);
             v.shapeGain = 0.02f * std::pow(15000.0f, P[k.sgain] / 127.0f);
             v.shapeOut = 0.5f * std::pow(120.0f, P[k.sout] / 127.0f);
-            v.xwarp = std::clamp((int) P[k.xw], 0, 5);                   /* Serum's filter / FM / PD / RM warp (wt_oscillator.h), the amount in thousandths */
+            v.xwarp = std::clamp((int) P[k.xw], 0, 6);                   /* Serum's filter / FM / PD / RM / AM warps (wt_oscillator.h), the amount in thousandths */
             v.xamount = std::clamp(P[k.xa] * 0.001f, 0.0f, 1.0f);
+            v.xsrc = std::clamp((int) P[k.xs], 0, 3);
+            v.xwarp2 = std::clamp((int) P[k.xw2], 0, 6);
+            v.xamount2 = std::clamp(P[k.xa2] * 0.001f, 0.0f, 1.0f);
+            v.xsrc2 = std::clamp((int) P[k.xs2], 0, 3);
             oscGain[o] = v.gain;
 
             /* An oscillator counts from its pot and its routing, not its live
@@ -767,6 +789,7 @@ private:
                                       VoicedWTOscillator(kMaxUnison),
                                       VoicedWTOscillator(kMaxUnison) };
     VoicedWTParams vp[kOscs];
+    VoicedWTOscillator modOsc[kOscs] = { VoicedWTOscillator(1), VoicedWTOscillator(1), VoicedWTOscillator(1) };     /* the oscillators as FM / PD / RM / AM modulators */
     StereoOscillator sub, noise;
     StereoOscillator::Params subParams, noiseParams;
     /* The filter's cutoff moves with the envelope and the LFOs, and the coefficients were set once per block: a step at each block edge,

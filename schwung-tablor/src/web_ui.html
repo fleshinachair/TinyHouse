@@ -1904,6 +1904,7 @@ function impSummary() {
     }
     IMP.bankEl.value = cleanBank(nm);
   }
+  if (IMP.afterAdd) { var f = IMP.afterAdd; IMP.afterAdd = null; f(); }          /* the run is waiting for a folder: it has arrived */
 }
 
 /* ---- the Move's file manager ---- */
@@ -2039,6 +2040,34 @@ function findWavs(refs) {
   return found;
 }
 
+/* A run that needs wavetables or samples the chosen files do not hold stops here and asks for the Serum 2 folder, once; dropped, chosen, or skipped, the run goes on. */
+function askFolder(lackT, lackS) {
+  return new Promise(function (resolve) {
+    var box = el("div", "imp-ask", IMP.bodyEl), names = lackT.concat(lackS.map(function (x) { return x.rel; }));
+    el("div", "rep-warn", box, "Not in the files you chose: " + names.slice(0, 4).join(", ") + (names.length > 4 ? " and " + (names.length - 4) + " more" : "") + ". Give the importer your Xfer or Serum 2 folder to find " + (names.length === 1 ? "it" : "them") + ".");
+    var drop = el("div", "imp-drop", box, "Drop your Xfer or Serum 2 folder here");
+    drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+    drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
+    var row = el("div", "imp-row", box), inp = el("input", null, box);
+    inp.type = "file"; inp.style.display = "none"; inp.setAttribute("webkitdirectory", ""); inp.setAttribute("directory", "");
+    inp.addEventListener("change", function () { addAny(pickList(inp)); inp.value = ""; });
+    var pick = el("button", "imp-b", row, "Choose folder…"), skip = el("button", "imp-b", row, "Import without them");
+    function done() { IMP.afterAdd = null; if (box.parentNode) box.parentNode.removeChild(box); resolve(); }
+    IMP.afterAdd = done;
+    skip.addEventListener("click", done);
+    pick.addEventListener("click", async function () {
+      if (typeof window.showDirectoryPicker !== "function") { inp.click(); return; }
+      try {
+        var dir = await window.showDirectoryPicker({ id: "serum2", mode: "read", startIn: "documents" }), c = await classifyDir(dir, 0);
+        if (c.kind === "root" || c.kind === "presets") await saveRoot(c.dir);
+        addClassified(c, await readClassified(c));
+      } catch (e) { if (!(e && e.name === "AbortError")) inp.click(); }
+    });
+    impStatus("Waiting for your Serum 2 folder…", 10);
+  });
+}
+
 async function runImport() {
   if (IMP.busy) return;
   IMP.busy = true; IMP.goEl.disabled = true;
@@ -2073,6 +2102,16 @@ async function runImport() {
       }
     }
     await convertSome(names, 10, 55, "Converting");
+
+    var lackT = [], lackS = [], seenT = {}, seenS = {};
+    Object.keys(results).forEach(function (n) {
+      results[n].missing_tables.forEach(function (t) { if (!seenT[t]) { seenT[t] = 1; if (!findWavs([t])[t]) lackT.push(t); } });
+      results[n].samples.forEach(function (x) {
+        var key = x.kind + "|" + x.rel;
+        if (results[n].missing_samples.indexOf(x.rel) >= 0 && !seenS[key]) { seenS[key] = 1; if (!findSmp(x.rel, x.kind === "noise")) lackS.push(x); }
+      });
+    });
+    if (lackT.length || lackS.length) await askFolder(lackT, lackS);
 
     var refs = {};
     Object.keys(results).forEach(function (n) { results[n].missing_tables.forEach(function (t) { refs[t] = 1; }); });
@@ -2226,7 +2265,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
 /* ---- the dialog ---- */
 function impBuildForm() {
   var body = IMP.bodyEl; body.textContent = "";
-  IMP.presets = []; IMP.wavs = []; IMP.tables = []; IMP.smps = []; IMP.units = null; IMP.rootBank = null; IMP.bankTouched = false;
+  IMP.presets = []; IMP.wavs = []; IMP.tables = []; IMP.smps = []; IMP.units = null; IMP.rootBank = null; IMP.bankTouched = false; IMP.afterAdd = null;
   function picker(label, attrs, onpick, asTables) {
     var inp = el("input", null, body); inp.type = "file"; inp.style.display = "none";
     for (var a in attrs) inp.setAttribute(a, attrs[a]);
@@ -2243,18 +2282,20 @@ function impBuildForm() {
   drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
   drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
-  el("div", "imp-note", body, "A single preset is all you need. Its wavetables and samples are found through your Serum 2 folder below, if you have chosen it; without them an oscillator that uses one stays silent.");
-  el("div", "imp-h", body, "Your Serum 2 folder (optional)");
+  el("div", "imp-note", body, "A single preset is all you need. If it uses a wavetable or sample that is not inside the preset, you are asked for your Serum 2 folder then.");
   var seq = IMP.formSeq = (IMP.formSeq || 0) + 1;
-  var fb = el("input", null, body); fb.type = "file"; fb.style.display = "none";
-  fb.setAttribute("webkitdirectory", ""); fb.setAttribute("directory", "");
-  fb.addEventListener("change", function () { addAny(pickList(fb)); fb.value = ""; });
-  rootRow(body, seq, fb);
+  if (typeof window.showDirectoryPicker === "function") {
+    el("div", "imp-h", body, "Your Serum 2 folder (optional)");
+    var fb = el("input", null, body); fb.type = "file"; fb.style.display = "none";
+    fb.setAttribute("webkitdirectory", ""); fb.setAttribute("directory", "");
+    fb.addEventListener("change", function () { addAny(pickList(fb)); fb.value = ""; });
+    rootRow(body, seq, fb);
+  }      /* otherwise (this page is plain http) the folder is asked for only when a preset needs something from it: the browser's folder prompt then comes up as seldom as it can */
   var more = el("details", "imp-more", body);
   el("summary", null, more, "Other ways to choose: a pack folder, or the wavetable and sample folders separately");
   var rowb = el("div", "imp-row", more);
   rowb.appendChild(picker("Folder…", { webkitdirectory: "", directory: "" }, function (l) { addAny(l); }));
-  el("div", "imp-note", more, "Only needed when the Serum 2 folder above was not chosen: Serum's own wavetables (Tables folder) and the audio of Sample or Multisample oscillators and recorded noises (Samples, Multisamples; same place as Tables). Only the files your presets use are read and copied to the Move; without them that oscillator stays silent. Presets in a pack bring their own wavetables.");
+  el("div", "imp-note", more, "Only needed to hand the importer folders in advance (otherwise it asks for your Serum 2 folder when a preset needs it): Serum's own wavetables (Tables folder) and the audio of Sample or Multisample oscillators and recorded noises (Samples, Multisamples; same place as Tables). Only the files your presets use are read and copied to the Move; without them that oscillator stays silent. Presets in a pack bring their own wavetables.");
   var r2 = el("div", "imp-row", more);
   r2.appendChild(picker("Tables folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, true); }, true));
   r2.appendChild(picker("Samples folder…", { webkitdirectory: "", directory: "" }, function (l) { addPicks(l, "smp"); }));

@@ -213,14 +213,50 @@ def export_sample(sample_rel: str, dest: Path, base_note: int = 60, loop_pct: tu
     return write_set([_region(audio, rate, 0, 127, base_note, loop, 0.0, ping_pong=ping_pong, xfade=xfade)], dest)
 
 
+# Serum's Convolution reverb: the impulse response is a file under Serum's Impulses folder, or stored in the preset (embeddedIR, planar float channels). The engine's convolver (conv.h) reads it
+# as a one-region TBS3 set: the converter writes the IR after the Size stretch, the Decay envelope and the level (fxmap.conv_plan), as int16 at peak 0.99 with the level in the region's volume.
+def ir_audio(node: dict) -> tuple[np.ndarray, float] | None:
+    """(frames x channels float audio, sample rate) of a Conv node's IR, or None if its file is not on this machine."""
+    ir = node.get("embeddedIR")
+    if ir is not None and np.size(ir):
+        nc = max(int(node.get("numChannels") or 1), 1)
+        a = np.asarray(ir, dtype=np.float64).reshape(nc, -1).T
+        nf = int(node.get("numFrames") or len(a))
+        return a[:nf, :2], float(node.get("sampleRate") or 44100)
+    rel = node.get("relativePathToIR")
+    rel = str(rel).replace("\\", "/") if rel else None
+    p = _real(_root("Impulses") / rel) if rel else None
+    if p is None and rel and BROWSER_DIR is not None:                       # the page has not decoded it: a PC run that also has Serum's folder reads it from there
+        p = _real(SERUM_ROOT / "Impulses" / rel)
+    if p is None:
+        return None
+    a, rate = _read(p, dtype="float64")
+    return a[:, :2], float(rate)
+
+
+def write_ir(audio: np.ndarray, rate: float, gain_db: float, dest: Path) -> Path:
+    """The (already processed) IR as a one-region set; gain_db is the level the engine plays it at (the audio itself is normalised to peak 0.99)."""
+    if audio.ndim == 1:
+        audio = audio[:, None]
+    audio = audio[:, :2]
+    peak = float(np.abs(audio).max()) or 1.0
+    pcm = np.round(audio / peak * 0.99 * 32767.0).astype("<i2")
+    head = struct.pack("<BBBBBBffffffIB", 0, 127, 60, 0, 0, 127, 0.0, 0.0, float(rate), 0.0, float(gain_db + 20.0 * np.log10(peak / 0.99)), 0.0, len(pcm), pcm.shape[1])
+    return write_set([head + pcm.tobytes()], dest)
+
+
 def sample_osc(tree: dict, i: int) -> dict | None:
     """What the converter needs of oscillator i if it is a Sample or Multisample: kind, file, loop %, pitch settings."""
     o = tree.get(f"Oscillator{i}")
     pp = o.get("plainParams") if isinstance(o, dict) else None
-    if not isinstance(pp, dict) or pp.get("kParamType") not in ("kOsc_Sample", "kOsc_MultiSample"):
+    if not isinstance(pp, dict) or pp.get("kParamType") not in ("kOsc_Sample", "kOsc_MultiSample", "kOsc_Spectral"):
         return None
     multi = pp["kParamType"] == "kOsc_MultiSample"
-    node = o.get(f"MultiSampleOsc{i}" if multi else f"SampleOsc{i}", {})
+    # A Spectral oscillator resynthesises its sample (scan, spectral filter), which the engine cannot. Its audio played as a sample at the same keys gives the right octave-band
+    # shape: Serum's Spectral oscillator alone against the sample from root C4 on notes 48 / 60 / 72, sustain 3.9 / 9.0 / 4.4 dB and attack 1.7 / 4.3 / 6.0 dB rms in octave bands
+    # (root C3 or C5: 12-16 dB); without it the oscillator is missing and the top octaves are 23-38 dB short. The scan movement and the spectral filter are not carried.
+    spectral = pp["kParamType"] == "kOsc_Spectral"
+    node = o.get(f"MultiSampleOsc{i}" if multi else f"SpectralOsc{i}" if spectral else f"SampleOsc{i}", {})
     # A Sample oscillator loops only in kForward and kPingPong (Loop Start/End default to the whole file); no stored mode, kOff and kTailed play the file once
     # through, whatever points are stored (probe_loop_mode.py). A Multisample's loops come from its SFZ (export_multisample).
     mode = pp.get("kParamLoopMode")
@@ -231,7 +267,7 @@ def sample_osc(tree: dict, i: int) -> dict | None:
     embedded = not multi and not file and _embed(node)
     if embedded:
         file = embedded
-    return {"multi": multi, "file": file, "embedded": bool(embedded), "base_note": int(node.get("baseNote", 60)),
+    return {"multi": multi, "spectral": spectral, "file": file, "embedded": bool(embedded), "base_note": int(node.get("baseNote", 60)),
             "loop": loop, "ping_pong": loop is not None and mode == "kPingPong", "xfade": min(max(float(pp.get("kParamLoopCrossfade", 0.0)), 0.0), 100.0) / 100.0 if loop else 0.0, "octave": float(pp.get("kParamOctave", 0.0)), "pitch": float(pp.get("kParamPitch", 0.0)),
             "fine": float(pp.get("kParamFine", 0.0)), "level": float(pp.get("kParamVolume", 0.75))}
 

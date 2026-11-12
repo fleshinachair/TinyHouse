@@ -346,7 +346,7 @@ def physical(tree: dict, header: dict) -> dict:
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
         pp, cv = _pp(node), (node.get("curveData") or {})
-        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "smooth": pp.get("kParamSmooth"), "mode": pp.get("kParamDefaultMode"), "type": pp.get("kParamType"),
+        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "smooth": pp.get("kParamSmooth"), "mode": pp.get("kParamDefaultMode"), "env": pp.get("kParamMode") == "Envelope", "type": pp.get("kParamType"),
                      "x": cv.get("xVals"), "y": cv.get("yVals"), "c": cv.get("curveVals"), "name": node.get("curveDisplayName")})
     # Serum's routing slots 0..4 are osc A, B, C, noise, sub. Measured with a closed filter:
     # only A reaches the filter by default, the others bypass it unless routed there.
@@ -488,6 +488,7 @@ TABLOR_DEFAULTS = {
     "smp_set": "", "smp_level": 0, "smp_tune": 0, "smp_fine": 0, "smp_post": 0, "smp_fixed": 0,
     "smp2_set": "", "smp2_level": 0, "smp2_tune": 0, "smp2_fine": 0, "smp2_post": 0, "smp2_fixed": 0,
     "smp3_set": "", "smp3_level": 0, "smp3_tune": 0, "smp3_fine": 0, "smp3_post": 0, "smp3_fixed": 0,
+    "conv_set": "",
     "wt1_pos": 0, "wt2_pos": 0, "wt1_level": 100, "wt2_level": 0, "wt1_tune": 0, "wt2_tune": 0,
     "wt1_uni": 1, "wt1_detune": 0, "wt1_spread": 0, "wt1_pan": 64,
     "wt2_uni": 1, "wt2_detune": 0, "wt2_spread": 0, "wt2_pan": 64,
@@ -858,6 +859,8 @@ def params_sig(P: dict) -> str:
         skip = skip | {k for k in P if k.startswith("smp2_")}
     if not P.get("smp3_set"):
         skip = skip | {k for k in P if k.startswith("smp3_")}
+    if not P.get("conv_set"):
+        skip = skip | {"conv_set", "conv_mix"}
     if not P.get("fxf_on", 0):
         skip = skip | {k for k in P if k.startswith("fxf_")}
     if not any(P.get(k, 0) for k in ("wt1_bal", "wt2_bal", "wt3_bal", "sub_bal", "noise_bal", "smp_bal", "smp2_bal", "smp3_bal")):      # no source reaches Filter 2
@@ -1072,12 +1075,17 @@ def curve_value(xs: list, ys: list, cs: list, xq: float) -> float:
 
 
 def lfo_shape_pots(l: dict) -> list:
-    """16 points (0..127) of one cycle of a Serum LFO shape: its points joined by segments whose bend is stored,
-    or a sine when it has none."""
+    """16 points (0..127) of one cycle of a Serum LFO shape: its points joined by segments whose bend is stored, or a sine when it has none. An Envelope-mode LFO (plays once and
+    holds, engine mode 2) has its 16 points spread over 0..1 inclusive, so the last one is the held end value."""
     xs, ys, cs = l.get("x") or [], l.get("y") or [], l.get("c") or []
+    one_shot = bool(l.get("env"))
     if len(xs) < 2 or len(xs) != len(ys):
         return [round(127 * (0.5 + 0.5 * math.sin(2 * math.pi * k / 16))) for k in range(16)]
-    return [round(127 * curve_value(xs, ys, cs, k / 16)) for k in range(16)]
+    if len(xs) >= 3 and xs[0] == xs[1] and abs(ys[0] - ys[-1]) > 0.05:
+        # a shape whose first point sits on the second's x (a vertical edge at the start) and whose first y is not the last's: Serum's value comes back to the FIRST point's, not to the
+        # last stored y (calibration/probe_lfo_env.py on Synth_Pierre's LFO 1: 1.0 falling to 0.5 = 1 - y0, in Trig mode as well as Envelope; one shape measured)
+        ys = list(ys[:-1]) + [ys[0]]
+    return [round(127 * curve_value(xs, ys, cs, k / (15 if one_shot else 16))) for k in range(16)]
 
 
 def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list) -> list:
@@ -1165,7 +1173,7 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             if d.get("sync") is None or d.get("sync"):         # an unwritten BeatSync is ON: the Rate picks a note division (LFO_SYNC_BANDS)
                 hz = lfo_sync_hz(d["rate"], bool(d.get("triplets"))) or hz
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
-        P[f"lfo{n}_mode"] = 0 if d.get("mode") in (None, 0, 0.0) else 1
+        P[f"lfo{n}_mode"] = 2 if d.get("env") else 0 if d.get("mode") in (None, 0, 0.0) else 1          # Envelope: plays the shape once and holds its end (calibration/probe_lfo_env.py)
         P[f"lfo{n}_smooth"] = lfo_smooth_pot(d.get("smooth"))
         # a Random S&H LFO has no period, so a sine table puts a tone on its destination that Serum does not have (Lead - Other Side:
         # its 26 Hz Random S&H into an oscillator's level was a steady tremolo against Serum's flute-like note). Built flat at its mid level instead: a
@@ -1565,7 +1573,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{sk}_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
         P[f"{sk}_fine"] = round(_clamp(sinfo["fine"], -100, 100))
         P[f"{sk}_post"] = post_of(so["id"])
-        note.append(f"sample oscillator carried: {sinfo['file']} ({'multisample' if sinfo['multi'] else 'sample'})")
+        note.append(f"sample oscillator carried: {sinfo['file']} ({'multisample' if sinfo['multi'] else 'spectral oscillator played as a sample: scan and spectral filter not carried' if sinfo.get('spectral') else 'sample'})")
     # ---- FX buses: each source's send to Bus 1 / Bus 2 (Serum's level cubed is the gain, probe_bus.py) ----
     send_keys = {**{oid: f"wt{slot}" for oid, slot in slot_of.items()}, 4: "sub", 3: "noise"}
     for sk, s_ in zip(("smp", "smp2", "smp3"), smps):
@@ -1787,8 +1795,18 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     # ---- FX block -------------------------------------------------------------
     fx_p, fx_notes, fx_info = fxmap.map_fx(ph["name"], ph.get("fx_nodes", []), ctx={"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     t_out = fx_p.pop("comp_thresh_out_db", None)
+    cplan = fxmap.CONV_PLANS.pop(ph["name"], None)
+    if cplan is not None:                                  # the Convolution reverb's impulse response, written as a set beside the samples (sample_export.write_ir)
+        digest = hashlib.sha1(cplan["audio"].round(6).tobytes() + repr((cplan["rate"], round(cplan["gain_db"], 3))).encode()).hexdigest()[:10]
+        cdest = wt_out.parent / "Samples" / subdir / f"conv_{digest}.tbs"
+        if not cdest.exists():
+            SE.write_ir(cplan["audio"], cplan["rate"], cplan["gain_db"], cdest)
+        fx_p["conv_set"] = f"{MOVE_SAMPLE_ROOT}/{subdir}/{cdest.name}"
     fx_p_extra = {k: fx_p.pop(k) for k in ("comp_thresh2_out_db", "comp_thresh3_out_db") if k in fx_p}
     P.update(fx_p)
+    if fx_info.get("conv_level_db") and CAL["master_db0"] is not None:
+        # a short Convolution IR carried as EQ bands (its shape, mean removed) also changes the level (IpTrim and the IR's gain): take it off the closed-form master
+        P["volume"] = pot_volume(20 * math.log10((P["volume"] / 127) ** 2 * MASTER_MAX + 1e-9) - fx_info["conv_level_db"])
     if t_out is not None:
         # the threshold was measured at Serum's output; the engine's compressor sits before the master gain, so take that gain (at the volume the
         # closed-form law gives, before any loudness fit) off it
@@ -1813,7 +1831,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     P["eq_on"] = int(any(P[f"eq{n}_type"] for n in range(1, 5)) or any(P.get(f"eq{t}{n}_type", 0) for t in "ms" for n in range(1, 5)))
     P["wide_on"] = int(P["fx_wide"] > 0)
     P["dly_on"] = int(P["dly_mix"] > 0 or P.get("dly2_mix", 0) > 0)
-    P["rev_on"] = int(P["rev_mix"] > 0)
+    P["rev_on"] = int(P["rev_mix"] > 0 or (P.get("conv_mix", 0) > 0 and bool(P.get("conv_set"))))      # the Convolution reverb shares the reverb stage's switch
     if CARRY_BUSES:
         note += map_bus_racks(ph, P, feg if (flt_routes and not bypassed) else None)
     # The performance knobs (Decay macro, Drive, the two shelves) are neutral in every preset, written out

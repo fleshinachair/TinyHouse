@@ -42,7 +42,7 @@ struct tablor_instance {
     char  module_dir[512] = {};
 
     /* wavetable selection = absolute file paths ("" = built-in Init) */
-    char  wt_path[TB_WT_SLOTS + 3][512] = {};      /* slot TB_WT_SLOTS is the sample set, the next two the second and third */
+    char  wt_path[TB_WT_SLOTS + 4][512] = {};      /* slot TB_WT_SLOTS is the sample set, the next two the second and third, the last the convolution reverb's impulse response */
 
     /* presets: factory (from the module) + UNLIMITED user .tblr files in
      * the user library (filename = preset name, content = TBLR1 blob).
@@ -751,7 +751,7 @@ static int param_index(const char *key)
 /* Which wavetable slot a param drives: wt1_table -> 0 ... wt3_table -> 2. */
 static int tb_path_slot(int param_idx)
 {
-    return param_idx == TB_P_WT1_TABLE ? 0 : param_idx == TB_P_WT2_TABLE ? 1 : param_idx == TB_P_SMP_SET ? TB_WT_SLOTS : param_idx == TB_P_SMP2_SET ? TB_WT_SLOTS + 1 : param_idx == TB_P_SMP3_SET ? TB_WT_SLOTS + 2 : 2;
+    return param_idx == TB_P_WT1_TABLE ? 0 : param_idx == TB_P_WT2_TABLE ? 1 : param_idx == TB_P_SMP_SET ? TB_WT_SLOTS : param_idx == TB_P_SMP2_SET ? TB_WT_SLOTS + 1 : param_idx == TB_P_SMP3_SET ? TB_WT_SLOTS + 2 : param_idx == TB_P_CONV_SET ? TB_WT_SLOTS + 3 : 2;
 }
 
 /* The same for the wtN_select / wtN_shape keys, which are not params. */
@@ -793,6 +793,7 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
         if (osc == TB_WT_SLOTS) inst->engine.setSample(nullptr);
         else if (osc == TB_WT_SLOTS + 1) inst->engine.setSample2(nullptr);
         else if (osc == TB_WT_SLOTS + 2) inst->engine.setSample3(nullptr);
+        else if (osc == TB_WT_SLOTS + 3) inst->engine.setConv(nullptr);
         else if (osc >= 0 && osc < TB_WT_SLOTS) inst->engine.setTable(osc, nullptr);
     }
 
@@ -800,6 +801,12 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
         const std::string p = path;
         const int which = osc - TB_WT_SLOTS;
         inst->loader.post([inst, p, which] {
+            if (which == 3) {                                            /* the convolution reverb's IR: read, then transformed into a plan here, off the audio thread */
+                if (p.empty()) { inst->engine.setConv(nullptr); return; }
+                tb::SampleSet ir;
+                inst->engine.setConv(tb::sampleLoad(p.c_str(), ir) ? tb::convBuild(ir, 44100.0f) : nullptr);
+                return;
+            }
             auto put = [&](std::shared_ptr<tb::SampleSet> s) { if (which == 2) inst->engine.setSample3(std::move(s)); else if (which == 1) inst->engine.setSample2(std::move(s)); else inst->engine.setSample(std::move(s)); };
             if (p.empty()) { put(nullptr); return; }
             auto set = std::make_shared<tb::SampleSet>();
@@ -1235,6 +1242,7 @@ static void reset_to_defaults(tablor_instance *inst)
     set_table_path(inst, TB_WT_SLOTS, "");
     set_table_path(inst, TB_WT_SLOTS + 1, "");
     set_table_path(inst, TB_WT_SLOTS + 2, "");
+    set_table_path(inst, TB_WT_SLOTS + 3, "");
     republish_macro_names(inst);
 }
 
@@ -1768,7 +1776,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
         }
         /* a state restore may have landed while we were scanning: re-apply
          * whatever paths it stored, now that the list and loader are live */
-        for (int osc = 0; osc <= TB_WT_SLOTS + 2; osc++)
+        for (int osc = 0; osc <= TB_WT_SLOTS + 3; osc++)
             if (inst->wt_path[osc][0]) {
                 char keep[512];
                 snprintf(keep, sizeof keep, "%s", inst->wt_path[osc]);

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "param_map.h"
+#include "conv.h"
 #include "../ported/filter.h"
 
 namespace tb {
@@ -146,6 +147,7 @@ struct FxSettings {
     float delay2Mix = 0, delay2Ms = 250, delay2RMs = 250, delay2Fb = 0.4f, delay2LoHz = 20, delay2HiHz = 16000;   /* a second delay after the first (Serum racks with two) */
     int   delay2Ping = 0;
     float revMix = 0, revT60 = 2.0f, revDampHz = 8000, revLoHz = 20, revWidth = 1.0f;
+    float convMix = 0;        /* Serum's Conv Wet 0..1: the dry part cos(pi w / 2), the convolved part sin^2(pi w / 2) of the Wet-100 level (calibration/probe_conv_blend.py) */
     struct Band { int type = EQ_OFF; float hz = 1000, gainDb = 0, q = 1; } band[4];
     Band msBand[2][4];        /* the EQs inside a SplitMS node: [0] the Mid branch, [1] the Side branch (fxmap.ms_branches) */
     bool eqEnable = true;     /* the EQ's own switch: it fades in and out, the bands keep running */
@@ -456,7 +458,16 @@ public:
     }
 
     /* True if any stage would change the signal: the engine skips process() otherwise. */
-    bool active() const { return anyActive; }
+    bool active() const { return anyActive || (st.convMix > 0.0f && convP) || convWetCur > 0.0f || convRan; }
+
+    /* The convolver's plan (conv.h), built by the loader: the audio thread only swaps the pointer. A new plan starts from silence. */
+    void setConvPlan(const std::shared_ptr<ConvPlan> &p)
+    {
+        if (p == convP) return;
+        convP = p;
+        if (convP) convP->reset();
+        convWetCur = 0.0f; convDryCur = 1.0f; convRan = false;
+    }
 
     void set(const FxSettings &s)
     {
@@ -549,6 +560,9 @@ public:
                 else if (dly[k].ran) { clearDelay(dly[k]); dly[k].ran = false; }
             }
         }
+
+        if ((st.convMix > 0.0f && convP) || convWetCur > 0.0f) { processConv(L, R, n); convRan = true; }
+        else if (convRan) { if (convP) convP->reset(); convRan = false; }
 
         if (st.revMix > 0.0f || revWetCur > 0.0f) { processReverb(L, R, n); revRan = true; }
         else if (revRan) { clearReverb(); revRan = false; }
@@ -910,6 +924,24 @@ private:
         u.fbLp[0] = u.fbLp[1] = u.fbHp[0] = u.fbHp[1] = 0;
         u.wetCur = 0; u.dryCur = 1;
     }
+    /* The convolution reverb: out = cos(pi w / 2) dry + sin^2(pi w / 2) convolved, w = Wet (Serum's measured blend; the IR carries the Wet-100 level). */
+    void processConv(float *L, float *R, int n)
+    {
+        if (!convP) { convWetCur = 0.0f; convDryCur = 1.0f; return; }
+        const float w = std::min(std::max(st.convMix, 0.0f), 1.0f);
+        const float s = std::sin(1.5707963f * w);
+        const float tgtWet = s * s, tgtDry = std::cos(1.5707963f * w);
+        const float dw = (tgtWet - convWetCur) / (float) n, dd = (tgtDry - convDryCur) / (float) n;
+        for (int i = 0; i < n; i++) {
+            float wl, wr;
+            convP->step(L[i], R[i], wl, wr);
+            convWetCur += dw; convDryCur += dd;
+            L[i] = L[i] * convDryCur + wl * convWetCur;
+            R[i] = R[i] * convDryCur + wr * convWetCur;
+        }
+        convWetCur = tgtWet; convDryCur = tgtDry;
+    }
+
     void clearReverb()
     {
         for (auto &l : lines) { std::fill(l.buf.begin(), l.buf.end(), 0.0f); l.lp = 0; }
@@ -943,6 +975,9 @@ private:
     Line lines[kLines];
     struct Allpass { std::vector<float> buf; int pos = 0; };
     Allpass aps[kAps];
+    std::shared_ptr<ConvPlan> convP;
+    float convWetCur = 0.0f, convDryCur = 1.0f;
+    bool convRan = false;
     float revWetCur = 0.0f, revDryCur = 1.0f;
     float revHp[2] = { 0, 0 };
     bool revRan = false;

@@ -250,6 +250,11 @@ SAMPLE2 = dict(
     post  = enum("smp2_post", "SMQR", "Sample 2 Route", ROUTE, 0),
     fixed = enum("smp2_fixed", "SMQX", "Sample 2 Pitch", ["Track", "Fixed"], 0),
 )
+# Serum's Conv reverb as a convolver (conv.h): the impulse response is a sample-set file (TBS, the Size stretch, the Decay envelope and the level baked in by the converter), the mix is Serum's Wet.
+CONV = dict(
+    set = wtfile("conv_set", "CNVS", "Conv IR Set"),
+    mix = pot("conv_mix", "CNVM", "Conv Mix", 0),
+)
 SAMPLE3 = dict(
     set   = wtfile("smp3_set", "SMRS", "Sample 3 Set"),
     level = pot("smp3_level", "SMRL", "Sample 3 Level", 0),
@@ -307,7 +312,7 @@ MOD_DST = ["None",
            "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
-# rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on), and a 16-point shape (one cycle,
+# rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
 # 0..127 for 0..1, read with linear interpolation; the default is a sine). A route says which LFO drives which of the
 # same destinations the spare envelopes use (MOD_DST), by a bipolar amount (64 = none). `lfo_bip` picks whether an
 # LFO swings 0..1 (Uni: it only pushes the destination one way) or -1..+1 around it.
@@ -316,7 +321,7 @@ N_LFO, N_ROUTE, N_SHAPE = 4, 8, 16
 LFO_SHAPE_DEFAULT = [round(127 * (0.5 + 0.5 * _m.sin(2 * _m.pi * k / N_SHAPE))) for k in range(N_SHAPE)]
 LFOS = [dict(
     rate = pot(f"lfo{n}_rate", f"L{n}RT", f"LFO{n} Rate", 60),
-    mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free"], 0),
+    mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free", "Env"], 0),
     shape = [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)],
     # Serum's LFO Smooth: a one-pole low-pass on the LFO's output, 2 ms to 0.7 s (log), 0 = off (calibration/probe_lfo_smooth.py)
     smooth = pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0),
@@ -613,6 +618,8 @@ BANKS = [
     ("Warps", False, [row(O1["xw"], O1["xa"], O1["xs"], O1["xw2"], O1["xa2"], O1["xs2"]),
                       row(O2["xw"], O2["xa"], O2["xs"], O2["xw2"], O2["xa2"], O2["xs2"]),
                       row(O3["xw"], O3["xa"], O3["xs"], O3["xw2"], O3["xa2"], O3["xs2"])]),
+    # After the Warps, for the same reason. Set by the converter; no page on the device.
+    ("Conv", False, [row(CONV["set"], CONV["mix"])]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -718,7 +725,7 @@ def chain_param(p):
 # exactly like the wavetable enums. A static entry would duplicate the key.
 # The LFO shapes, rates, modes and routes are hidden and only ever set by the converter or a preset load, so the host has
 # no use for them in chain_params (they would double its size); they stay in the param table, the state blob and set_param.
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$)")
 chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"])]
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"

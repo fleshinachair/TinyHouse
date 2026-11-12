@@ -88,7 +88,7 @@ def enabled(node: dict) -> bool:
 
 WET_DEFAULT = {"Reverb": 25.0, "Delay": 25.0, "Conv": 25.0}
 BODE_IDLE_KEYS = {"kParamWet", "kParamLevelOut", "kParamRange", "kParamSwapAB", "kParamMonoInput", "kParamRetrig", "kParamBeatSync"}
-DRY_KINDS = ("Distortion", "Comp", "Bode", "Filter", "Utils", "Split", "SplitMS")      # effects whose Wet 0 is bypass (not Chorus / Flanger / Phaser: those still add)
+DRY_KINDS = ("Distortion", "Comp", "Bode", "Filter", "Utils", "Split", "Split3", "SplitMS")      # effects whose Wet 0 is bypass (not Chorus / Flanger / Phaser: those still add)
 
 
 def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) -> list[dict]:
@@ -258,9 +258,9 @@ def branch_nodes(nodes: list[dict]) -> set[int]:
             inside.add(i)
             skip -= 1
             continue
-        if kind_of(n) in ("Split", "SplitMS") and enabled(n):
+        if kind_of(n) in ("Split", "Split3", "SplitMS") and enabled(n):
             pp = plain(n)
-            skip = int(round(pp.get("kParamModuleCount1", 0))) + int(round(pp.get("kParamModuleCount2", 0)))
+            skip = sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3))         # a Split3 (three frequency bands) has a third branch
     return inside
 
 
@@ -272,9 +272,12 @@ def ms_branches(nodes: list[dict]) -> dict[int, str]:
         if skip > 0:
             skip -= 1
             continue
-        if kind_of(n) in ("Split", "SplitMS") and enabled(n):
+        if kind_of(n) in ("Split", "Split3", "SplitMS") and enabled(n):
             pp = plain(n)
             c1, c2 = int(round(pp.get("kParamModuleCount1", 0))), int(round(pp.get("kParamModuleCount2", 0)))
+            if kind_of(n) == "Split3":
+                skip = c1 + c2 + int(round(pp.get("kParamModuleCount3", 0)))
+                continue
             if kind_of(n) == "SplitMS":
                 for j in range(i + 1, i + 1 + c1):
                     out[j] = "mid"
@@ -914,6 +917,189 @@ def utils_filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None 
     return out, why
 
 
+# Serum's Convolution reverb with a SHORT embedded IR (a microphone or speaker response, a few tens of ms) is a static filter, which the EQ stage can stand in for. Measured on Serum
+# (calibration/probe_conv_size.py: noise through one Conv at Wet 100 %, its 1/3-octave power response against the same noise without it; Synth_Pierre's 33 ms condenser-mic IR):
+#   - the response is the IR's |H| after the IR is stretched in time by s = max(0.2, (Size / 100) ** 0.7)  (fit 0.3-0.6 dB rms from Size 20 up, 1.2 dB at the 0.2 floor), not the stored IR's own;
+#   - the gain is the IpTrim knob in dB plus a level that depends on Size (CONV_LEVEL_DB, over the response's mean in dB between 80 Hz and 14 kHz, resampled the way conv_target does);
+#   - unstored Size and IpTrim are 100 % and -18 dB.
+# Only Wet >= 99.5 is carried: a blend with the dry signal is a comb filter whose phase this does not model. Damping / Tone / Decay / Predelay are not probed, so a Conv that stores
+# any of them is not carried either.
+CONV_STRETCH_MIN, CONV_SIZE_EXP = 0.2, 0.7
+CONV_LEVEL_DB = [(10.0, 20.13), (20.0, 13.08), (35.0, 12.72), (50.0, 12.05), (75.0, 12.92), (100.0, 12.35)]
+CONV_DEFAULTS = {"kParamSize": 100.0, "kParamIpTrim": -18.0}
+CONV_KNOBS = {"kParamEnable", "kParamSize", "kParamIpTrim", "kParamWet"}
+CONV_MAX_STRETCHED_S = 0.05
+_conv_cache: dict = {}
+
+
+def conv_target(ir: np.ndarray, size: float, trim_db: float, sr: float = SR) -> tuple[np.ndarray, float, float]:
+    """(response on FGRID in dB with its mean over 80 Hz-14 kHz removed, that mean plus the gain in dB, the stretched IR's length in s) of a Conv node's IR at these knobs."""
+    s = max(CONV_STRETCH_MIN, (min(max(size, 0.0), 100.0) / 100.0) ** CONV_SIZE_EXP) * SR / sr
+    n = len(ir)
+    r = np.interp(np.arange(int(n * s) + 1) / s, np.arange(n), ir, right=0.0)
+    h = np.abs(np.fft.rfft(r, 65536)) ** 2
+    ff = np.fft.rfftfreq(65536, 1.0 / SR)
+    w = 1.0 / 6.0
+    db = np.array([10 * np.log10(h[(ff >= fc * 2 ** -w) & (ff <= fc * 2 ** w)].mean() + 1e-18) for fc in FGRID])
+    band = (FGRID >= 80.0) & (FGRID <= 14000.0)
+    mean = float(db[band].mean())
+    level = float(np.interp(size, [a for a, _ in CONV_LEVEL_DB], [b for _, b in CONV_LEVEL_DB])) + trim_db
+    return db - mean, mean + level, len(r) / SR
+
+
+def fit_curve(target: np.ndarray, max_bands: int = 6) -> tuple[list[dict], float]:
+    """The EQ bands (bell / shelves, greedily added where they reduce the rms error most) whose sum is closest to a target curve on FGRID, and the error left."""
+    resid = target.copy()
+    bands = []
+    for _ in range(max_bands):
+        base = float(np.sqrt(np.mean(resid ** 2)))
+        best = (base * 0.93, None)                                 # a band must take 7 % off the error to be worth a slot
+        for kind, centre in (("bell", float(FGRID[int(np.argmax(np.abs(resid)))])), ("loshelf", 200.0), ("hishelf", 3000.0)):
+            b, err = fit_one(resid, kind, centre, spread=2.0 if kind == "bell" else 1.5)
+            if err < best[0]:
+                best = (err, b)
+        if best[1] is None:
+            break
+        bands.append(best[1])
+        resid = resid - biquad_db(best[1]["kind"], best[1]["fc"], best[1]["gain"], best[1]["q"], FGRID)
+    return bands, float(np.sqrt(np.mean(resid ** 2)))
+
+
+def conv_bands(nodes: list[dict], handled: set) -> tuple[list[dict], list[str], list[str], float]:
+    """The EQ bands that stand in for each enabled master-signal Conv with a short embedded IR, the notes, why any were left out, and the gain (dB) they take out of the shape."""
+    out, notes, why, level = [], [], [], 0.0
+    inside = branch_nodes(nodes)
+    for i, n in enumerate(nodes):
+        if kind_of(n) != "Conv" or not enabled(n) or i in inside:
+            continue
+        pp, node = plain(n), n["FXConv"]
+        ir = node.get("embeddedIR")
+        if ir is None or not len(np.ravel(ir)):
+            continue                                              # a file IR (Serum's own folder), which the converter does not read: left to the caller's "not carried"
+        if set(pp) - CONV_KNOBS:
+            why.append("Convolution reverb stores " + ", ".join(sorted(k[6:] for k in set(pp) - CONV_KNOBS)) + " (not probed)")
+            continue
+        if pp.get("kParamWet", WET_DEFAULT["Conv"]) < 99.5:
+            why.append(f"Convolution reverb at Wet {pp.get('kParamWet', WET_DEFAULT['Conv']):.0f} % (a blend with the dry signal)")
+            continue
+        arr = np.asarray(ir, dtype=float).ravel()
+        nf, nc = int(node.get("numFrames", len(arr))), max(int(node.get("numChannels", 1)), 1)
+        arr = arr[:nf] if nc > 1 else arr
+        size, trim = float(pp.get("kParamSize", CONV_DEFAULTS["kParamSize"])), float(pp.get("kParamIpTrim", CONV_DEFAULTS["kParamIpTrim"]))
+        key = (hash(arr.tobytes()), size, trim, float(node.get("sampleRate", SR)))
+        if key not in _conv_cache:
+            tgt, lvl, dur = conv_target(arr, size, trim, float(node.get("sampleRate", SR)) or SR)
+            _conv_cache[key] = (tgt, lvl, dur) + fit_curve(tgt)
+        tgt, lvl, dur, bands, err = _conv_cache[key]
+        if dur > CONV_MAX_STRETCHED_S:
+            why.append(f"Convolution reverb is a {dur * 1000:.0f} ms reverb, not a filter")
+            continue
+        handled.add(i)
+        out += [dict(b) for b in bands]
+        level += lvl
+        notes.append(f"Convolution (a {dur * 1000:.0f} ms IR at Size {size:.0f}) carried as {len(bands)} EQ band(s), rms {err:.1f} dB, {lvl:+.1f} dB gain")
+    return out, notes, why, level
+
+
+# Serum's Convolution reverb as the engine's convolver (schwung-tablor/src/dsp/conv.h): an IR file played at the node's own settings, the IR written already processed.
+# Measured on Serum (calibration/probe_conv_blend.py, probe_conv_file.py, probe_conv_levels.py, probe_conv_norm.py):
+#   - Wet: a crossfade, dry cos(pi w / 2) and wet sin^2(pi w / 2) of the Wet-100 gain (within 3 % at Wet 10..75): the engine applies it, the pot holds Wet;
+#   - Size: the time stretch s = max(0.2, (Size / 100) ** 0.7), also on a 4.9 s IR (0.2 dB rms of shape);
+#   - Decay: an exponential envelope of -52.8 dB per Decay seconds of the stretched IR, for Decay below 35 (off from 40 up);
+#   - Damping up to 90 and Attack up to 0.01 do nothing audible;
+#   - level: Serum's gain is IpTrim plus the IR's own band-mean power (80 Hz - 14 kHz) plus CONV_FILE_OFFSET_DB; across nine factory IRs that offset is +2.0 dB with a spread of 3 dB, and Size and
+#     Decay move it by a further -4..+6 dB depending on the IR (probe_conv_levels.py): without Serum to measure, the level of a file IR is good to about 3-5 dB.
+CONV_DECAY_OFF, CONV_DECAY_DB = 35.0, 52.8
+CONV_IR_MAX_S, CONV_IR_FLOOR_DB = 6.0, -80.0
+CONV_FILE_OFFSET_DB = 2.0
+CONV_MODELLED = {"kParamEnable", "kParamSize", "kParamIpTrim", "kParamWet", "kParamDecay", "kParamDamping", "kParamAttack"}
+CONV_PLANS: dict = {}                      # preset name -> the plan map_fx made, for the caller that writes the IR file (deephouse2move.map_to_tablor)
+
+
+def conv_ir_processed(audio: np.ndarray, rate: float, size: float, decay: float | None) -> np.ndarray:
+    """The IR after Serum's Size stretch and Decay envelope, cut where it is 80 dB under its peak (and at CONV_IR_MAX_S)."""
+    s = max(CONV_STRETCH_MIN, (min(max(size, 0.0), 100.0) / 100.0) ** CONV_SIZE_EXP)
+    n = len(audio)
+    idx = np.arange(int(n * s) + 1) / s
+    y = np.stack([np.interp(idx, np.arange(n), audio[:, c], right=0.0) for c in range(audio.shape[1])], 1)
+    if decay is not None and decay < CONV_DECAY_OFF:
+        t = np.arange(len(y)) / rate
+        y = y * (10.0 ** (-CONV_DECAY_DB * t / max(decay, 0.05) / 20.0))[:, None]
+    y = y[:int(CONV_IR_MAX_S * rate)]
+    pk = float(np.abs(y).max())
+    if pk <= 0.0:
+        return y[:1]
+    w = max(int(0.01 * rate), 1)
+    env = np.abs(y).max(1)
+    blocks = np.array([env[i:i + w].max() for i in range(0, len(env), w)])
+    live = np.nonzero(blocks > pk * 10.0 ** (CONV_IR_FLOOR_DB / 20.0))[0]
+    end = min(len(y), (int(live[-1]) + 1) * w) if len(live) else len(y)
+    y = y[:end].copy()
+    fade = min(int(0.02 * rate), len(y) // 4)
+    if fade > 1:
+        y[-fade:] *= np.linspace(1.0, 0.0, fade)[:, None]
+    return y
+
+
+def conv_gain_measured(y: np.ndarray, rate: float, serum_level_db: float, cli: Path) -> float | None:
+    """The convolver's gain (dB) that puts the engine's steady noise level through this (processed) IR at Wet 100 where Serum's Conv alone put it (serum_level_db re the dry noise): the
+    IR is written at gain 0, rendered by the CLI, and the difference is the gain. None if the CLI is not built or the render fails."""
+    import sample_export as SE
+    if not cli.exists():
+        return None
+    sub = "_conv_probe"
+    d = ROOT / "out/move/data/UserData/UserLibrary/Samples" / sub
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        f = SE.write_ir(y, rate, 0.0, d / "probe.tbs")
+        ref_db = M.window_db(render_cli(noise_patch({}), 3.0, 2.9, cli), 1.5, 3.0)
+        got = render_cli(noise_patch({"conv_set": f"/data/UserData/UserLibrary/Samples/{sub}/{f.name}", "conv_mix": 127, "rev_on": 1}), 3.0, 2.9, cli)
+        lev = M.window_db(got, 1.5, 3.0) - ref_db
+    except Exception:
+        return None
+    return serum_level_db - lev if math.isfinite(lev) and lev > -90.0 else None
+
+
+def conv_plan(name: str, nodes: list[dict], handled=(), fp: dict | None = None, cli: Path | None = None) -> tuple[dict, list[str]]:
+    """The pot values (conv_mix) and notes for the first enabled master-signal Conv that the EQ stand-in did not take; the IR to write goes to CONV_PLANS[name]."""
+    import sample_export as SE
+    CONV_PLANS.pop(name, None)
+    inside = branch_nodes(nodes)
+    todo = [i for i, n in enumerate(nodes) if kind_of(n) == "Conv" and enabled(n) and i not in inside and i not in handled]
+    if not todo:
+        return {}, []
+    node, pp = nodes[todo[0]]["FXConv"], plain(nodes[todo[0]])
+    notes = []
+    if len(todo) > 1:
+        notes.append(f"{len(todo)} Convolution reverbs: only the first is carried")
+    wet = float(pp.get("kParamWet", WET_DEFAULT["Conv"]))
+    if wet <= 0.0:
+        return {}, notes
+    got = SE.ir_audio(node)
+    if got is None:
+        notes.append(f"Convolution reverb not carried (its IR file {node.get('relativePathToIR')} is not on this machine)")
+        return {}, notes
+    audio, rate = got
+    size, trim = float(pp.get("kParamSize", CONV_DEFAULTS["kParamSize"])), float(pp.get("kParamIpTrim", CONV_DEFAULTS["kParamIpTrim"]))
+    decay = float(pp["kParamDecay"]) if "kParamDecay" in pp else None
+    y = conv_ir_processed(audio, rate, size, decay)
+    gain, how = trim + CONV_FILE_OFFSET_DB, f"estimated from the IR (+-3-5 dB)"
+    meas = (fp or {}).get("conv", {}).get("level100_db") if isinstance((fp or {}).get("conv"), dict) else None
+    if meas is not None and cli is not None:
+        g = conv_gain_measured(y, rate, float(meas), cli)
+        if g is not None and abs(g - gain) < 30.0:
+            gain, how = g, f"set from Serum's own level ({g - trim - CONV_FILE_OFFSET_DB:+.1f} dB from the estimate)"
+    CONV_PLANS[name] = {"audio": y, "rate": rate, "gain_db": gain, "level": how, "file": str(node.get("relativePathToIR") or "embedded IR"), "size": size, "decay": decay, "trim": trim}
+    left = [k[6:] for k in sorted(set(pp) - CONV_MODELLED)]
+    if pp.get("kParamDamping", 0.0) > 90.0:
+        left.append("Damping above 90")
+    if pp.get("kParamAttack", 0.0) > 0.01:
+        left.append("Attack")
+    notes.append(f"Convolution reverb carried by the engine's convolver: {CONV_PLANS[name]['file']} at Size {size:.0f}" + (f", Decay {decay:.1f}" if decay is not None and decay < CONV_DECAY_OFF else "") +
+                 f", Wet {wet:.0f} %, {len(y) / rate:.2f} s after the stretch, level {how}" + (f" (not modelled: {', '.join(left)})" if left else ""))
+    return {"conv_mix": int(round(min(max(wet, 0.0), 100.0) / 100.0 * 127))}, notes
+
+
 def curve(bands: list[dict]) -> np.ndarray:
     y = np.zeros_like(FGRID)
     for b in bands:
@@ -1003,8 +1189,15 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
     fbands, fwhy = fbands + ubands, fwhy + uwhy_f
     dbands, dwhy = dist_filter_bands(nodes)
     fbands, fwhy = fbands + dbands, fwhy + dwhy
-    bands = bands + fbands
+    conv_handled: set = set()
+    cbands, cnotes, cwhy, clevel = conv_bands(nodes, conv_handled)
+    bands = bands + fbands + cbands
     notes, info = [], {"eq_bands_in": len(bands), "filter_fx_bands": len(fbands), "filter_fx_handled": sorted(handled)}
+    if conv_handled:
+        info.update(conv_handled=sorted(conv_handled), conv_level_db=round(clevel, 2))
+    notes += cnotes
+    if cwhy:
+        info["conv_why"] = cwhy
     if fbands:
         notes.append("Filter FX (and Utils HPF / LPF) carried as " + ", ".join(f"{b['kind']} {b['fc']:.0f} Hz" for b in fbands) + " in the EQ")
     if fwhy:
@@ -1374,7 +1567,7 @@ def fx_defaults() -> dict:
     P = {"fx_space": 100}
     P.update(map_eq([])[0])
     P.update({"dist_drive": 0, "dist_mode": 0, "dist_mix": 127, "dist_cal": 0, "dist_out": 64, "dist_level": 64, "dist_pre": 0, "dist_pre_freq": 64, "dist_pre_q": 40, "fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64, "dly_mix": 0, "dly_sync": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50,
-              "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0, "rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127,
+              "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0, "rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127, "conv_mix": 0,
               "comp_on": 1, "comp_thresh": 127, "comp_ratio": 0, "comp_attack": 40, "comp_release": 60, "comp_makeup": 0, "comp_mix": 0, "comp_knee": 32,
               "comp_multi": 0, "comp_thresh2": 127, "comp_thresh3": 127, "comp_gain1": 64, "comp_gain2": 64, "comp_gain3": 64, "comp_below": 0,
               "chor_on": 0, "chor_mix": 0, "chor_rate": 37, "chor_d1": 21, "chor_d2": 22, "chor_depth": 64, "chor_fb": 0, "chor_filt": 127, "chor_fmode": 0,
@@ -1410,6 +1603,18 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         notes.append(f"{', '.join(stray)} in a Split branch (one frequency band only) not carried")
     p, n, i = map_eq(nodes, ctx)
     P.update(p); notes += n; info.update(i)
+    p, n = conv_plan(name, nodes, info.get("conv_handled", ()), fp, cli)
+    P.update(p); notes += n
+    if fp and "reverb" in fp and (name in CONV_PLANS or info.get("conv_handled")):
+        # A Conv the engine carries itself (its convolver, or the EQ stand-in) must not be counted again by the reverb stage: the fingerprint's reverb holds its tail unless it was measured
+        # on the Reverb nodes alone (fx_fingerprint.py: reverb_noconv). Without that, a rack that also holds a Reverb needs measuring again; a rack with only the Conv has no reverb left.
+        fp = dict(fp)
+        if "reverb_noconv" in fp:
+            fp["reverb"] = fp["reverb_noconv"]
+        else:
+            fp.pop("reverb")
+            if any(kind_of(x) == "Reverb" and enabled(x) for i, x in enumerate(nodes) if i not in inside):
+                notes.append("Reverb not carried: the stored fingerprint includes the Conv's tail (measure the fingerprint again)")
     p, n, i = map_delay(nodes, fp)
     P.update(p); notes += n; info.update(i)
     if fp is None and any(kind_of(x) in ("Reverb", "Conv", "HyperD") for i, x in enumerate(nodes) if i not in inside):
@@ -1419,8 +1624,9 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         P.update(p); notes += n
         p, n = map_wide_static(outer)
         P.update(p); notes += n
-        if any(kind_of(x) == "Conv" for x in outer):
-            notes.append("Convolution reverb not carried")
+        left = [x for x in outer if kind_of(x) == "Conv" and enabled(x) and not any(x is nodes[j] for j in info.get("conv_handled", ())) and name not in CONV_PLANS]
+        if left and not any(x.startswith("Convolution reverb") for x in notes):
+            notes.append("Convolution reverb not carried" + (f" ({'; '.join(info['conv_why'])})" if info.get("conv_why") else ""))
     elif not cli.exists():
         if fp and ("reverb" in fp or "wide" in fp):
             notes.append("Reverb and width not carried: calibration/tablor_cli.exe is not built")
@@ -1460,7 +1666,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # A SplitMS whose branches hold nothing but EQs is carried (their bands are the engine's mid / side EQs: map_eq); one with another effect in a branch is not.
     ms_idx = ms_branches(nodes)
     ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) or dry(nodes[j]) for j in ms_idx) and all(
-        kind_of(nodes[j]) != "Split" or not enabled(nodes[j]) for j in branch_nodes(nodes))
+        kind_of(nodes[j]) not in ("Split", "Split3") or not enabled(nodes[j]) for j in branch_nodes(nodes))
     # A Utils is carried when its width / mono-below went to the master stage and its HPF / LPF to the EQ (utils_filter_bands); LevelOut is a uniform gain (the loudness fit),
     # Balance (a pan, 6 factory presets) is not carried.
     utils_ok = lambda i, x: i in info.get("filter_fx_handled", ()) and not uwhy and abs(float(plain(x).get("kParamBalance", 0.0))) < 1.0
@@ -1468,11 +1674,11 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # within 0.1 dB of no split (calibration/probe_split_plain.py; probe_splitms.py found the same for the mid / side split).
     def split_clear(i, x):
         pp = plain(x)
-        k = int(round(pp.get("kParamModuleCount1", 0))) + int(round(pp.get("kParamModuleCount2", 0)))
+        k = sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3))
         return all(not enabled(nodes[j]) or dry(nodes[j]) for j in range(i + 1, min(i + 1 + k, len(nodes))))
-    ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "SplitMS", "Utils") and enabled(x) and not dry(x)
+    ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "Split3", "SplitMS", "Utils") and enabled(x) and not dry(x)
                       and not (kind_of(x) == "Utils" and utils_ok(i, x)) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
-                      and not (kind_of(x) == "SplitMS" and ms_plain) and not (kind_of(x) in ("Split", "SplitMS") and split_clear(i, x))})
+                      and not (kind_of(x) == "SplitMS" and ms_plain) and not (kind_of(x) in ("Split", "Split3", "SplitMS") and split_clear(i, x))})
     dyn_i = (dynamic_filter(nodes, ctx) or {}).get("index")
     if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) and i not in info.get("filter_fx_handled", ()) and i != dyn_i for i, x in enumerate(nodes)):
         ignored = sorted(set(ignored) | {"Filter"})

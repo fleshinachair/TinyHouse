@@ -140,7 +140,7 @@ def floored_band_error(eb, sb, floor=BAND_FLOOR_DB):
         e, s = np.maximum(e, -floor), np.maximum(s, -floor)
     return float(np.sqrt(np.mean(np.square(e - s))))
 
-INAUDIBLE_KINDS = ("Filter", "Bode", "Split", "SplitMS", "Comp", "Distortion", "Utils")
+INAUDIBLE_KINDS = ("Filter", "Bode", "Split", "Split3", "SplitMS", "Comp", "Distortion", "Utils")
 AB_SLACK_BANDS = 1.5          # dB above Serum's own render-to-render noise (same band metric) that the effect-off render may differ by and still count as inaudible
 AB_MAX_LEVEL = 1.0            # dB: the effect-off render's level against the full one (a bigger gap is an effect that matters, whatever the bands say)
 
@@ -170,9 +170,9 @@ def ignored_effects_off(tree, header, name, why):
         k = fxmap.kind_of(n)
         if k in kinds and fxmap.enabled(n) and not (k == "Filter" and i in handled):
             off.add(i)
-            if k in ("Split", "SplitMS"):
+            if k in ("Split", "Split3", "SplitMS"):
                 pp = fxmap.plain(n)
-                off |= set(range(i + 1, min(i + 1 + int(round(pp.get("kParamModuleCount1", 0))) + int(round(pp.get("kParamModuleCount2", 0))), len(nodes))))
+                off |= set(range(i + 1, min(i + 1 + sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3)), len(nodes))))
     if not off:
         return None
     t2 = copy.deepcopy(tree)
@@ -227,7 +227,10 @@ def measure_fingerprints(name, tree, meas):
             t2["FXRack0"]["FX"] = copy.deepcopy(nodes)
             racks.append((f"{name}#bus{b}", t2))
     for nm, tr in racks:
-        if fxmap.fingerprint_for(nm) is not None:
+        known = fxmap.fingerprint_for(nm)
+        # a fingerprint from before the convolver has no Conv measurement (conv, reverb_noconv): measured again when the rack holds a Conv
+        has_conv = known is not None and "Conv" in (known.get("fx") or [])
+        if known is not None and not (has_conv and "conv" not in known):
             continue
         if not meas or meas[0][0].audio_seconds > 1000:
             meas[:] = [FP.start_measuring()]

@@ -107,6 +107,20 @@ def measure(serum, base, ref_db, dry_noise2, tree):
             "wet_ratio": M.wet_ratio(act, full),
             "level100_db": M.window_db(steady, 1.5, 3.0) - ref_db,
             "n": len(rv)}
+    cv = [x for x in nodes if kind_of(x) == "Conv"]
+    if cv:
+        # The engine carries a Conv with its own convolver (fxmap.conv_plan), so the reverb stage must not count its tail again: the Reverb nodes alone (reverb_noconv), and the first Conv
+        # alone at Wet 100, its steady level on the noise (conv, which sets the convolver's gain)
+        rv0 = [x for x in rv if kind_of(x) != "Conv"]
+        if rv0:
+            act0 = render(serum, with_nodes(base, rv0), 5.0, 0.12)
+            full0 = render(serum, with_nodes(base, force_wet(rv0, REVERB)), 5.0, 0.12)
+            steady0 = render(serum, with_nodes(base, force_wet(rv0, REVERB)), 3.0, 2.9)
+            if act0 is not None and full0 is not None and steady0 is not None:
+                rec["reverb_noconv"] = M.reverb_tail(full0) | {"wet_ratio": M.wet_ratio(act0, full0), "level100_db": M.window_db(steady0, 1.5, 3.0) - ref_db, "n": len(rv0)}
+        cst = render(serum, with_nodes(base, force_wet(cv[:1], ("Conv",))), 3.0, 2.9)
+        if cst is not None:
+            rec["conv"] = {"level100_db": M.window_db(cst, 1.5, 3.0) - ref_db}
     dl = [x for x in nodes if kind_of(x) in DELAY]
     if dl:
         pp = [x["FXDelay"].get("plainParams") for x in dl]

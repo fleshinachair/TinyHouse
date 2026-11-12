@@ -1681,6 +1681,7 @@ function addRoot(list) {
     var top = (segs[0] || "").toLowerCase(), rel = segs.join("/"), low = rel.toLowerCase();
     if (top === "tables") { if (/\.wav$/.test(low)) IMP.tables.push({ file: it.file, rel: rel, fromRoot: true }); }
     else if (top === "samples" || top === "multisamples") { if (/\.(flac|wav|aif|aiff|ogg|mp3|sfz)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel, fromRoot: true }); }
+    else if (top === "impulses") { if (/\.(flac|wav|aif|aiff|ogg|mp3)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel, fromRoot: true, imp: true }); }      /* a Convolution reverb's impulse responses */
     else if (top === "presets") {
       var s = segs.slice(1);
       if (/\.wav$/.test(low)) { IMP.wavs.push({ file: it.file, rel: s.join("/"), fromRoot: true }); return; }
@@ -1781,7 +1782,7 @@ async function walkDir(dir, base, out) {
 async function readClassified(c) {
   var out = [], base = c.dir.name + "/";
   if (c.kind === "root") {
-    var k = await kidsOf(c.dir), want = ["presets", "tables", "samples", "multisamples"];
+    var k = await kidsOf(c.dir), want = ["presets", "tables", "samples", "multisamples", "impulses"];
     for (var i = 0; i < want.length; i++) if (k[want[i]] && k[want[i]].kind === "directory") await walkDir(k[want[i]], base + k[want[i]].name + "/", out);
   } else if (c.kind === "presets") await walkDir(c.dir, "Serum 2 Presets/Presets/", out);
   else await walkDir(c.dir, base, out);
@@ -2011,10 +2012,10 @@ async function decodeAudio(file) {
   return out;
 }
 /* The picked file for a path Serum stored: its own path under a Samples / Multisamples folder, or (a noise slot names it from a library folder) its last two parts. */
-function findSmp(rel, loose) {
+function findSmp(rel, loose, ir) {
   var r = cleanRel(rel).toLowerCase(), tail = r.split("/").slice(-2).join("/"), hit = null, i, p;
-  for (i = 0; i < IMP.smps.length && !hit; i++) { p = IMP.smps[i].rel.toLowerCase(); if (p === r || p.slice(-(r.length + 1)) === "/" + r) hit = IMP.smps[i]; }
-  if (!hit && loose) for (i = 0; i < IMP.smps.length && !hit; i++) { p = IMP.smps[i].rel.toLowerCase(); if (p.slice(-(tail.length + 1)) === "/" + tail) hit = IMP.smps[i]; }
+  for (i = 0; i < IMP.smps.length && !hit; i++) { if (!!IMP.smps[i].imp !== !!ir) continue; p = IMP.smps[i].rel.toLowerCase(); if (p === r || p.slice(-(r.length + 1)) === "/" + r) hit = IMP.smps[i]; }      /* impulse responses (ir) are looked for among the Impulses folder's files only, samples among the others */
+  if (!hit && loose) for (i = 0; i < IMP.smps.length && !hit; i++) { if (!!IMP.smps[i].imp !== !!ir) continue; p = IMP.smps[i].rel.toLowerCase(); if (p.slice(-(tail.length + 1)) === "/" + tail) hit = IMP.smps[i]; }
   return hit;
 }
 
@@ -2108,7 +2109,7 @@ async function runImport() {
       results[n].missing_tables.forEach(function (t) { if (!seenT[t]) { seenT[t] = 1; if (!findWavs([t])[t]) lackT.push(t); } });
       results[n].samples.forEach(function (x) {
         var key = x.kind + "|" + x.rel;
-        if (results[n].missing_samples.indexOf(x.rel) >= 0 && !seenS[key]) { seenS[key] = 1; if (!findSmp(x.rel, x.kind === "noise")) lackS.push(x); }
+        if (results[n].missing_samples.indexOf(x.rel) >= 0 && !seenS[key]) { seenS[key] = 1; if (!findSmp(x.rel, x.kind === "noise", x.kind === "ir")) lackS.push(x); }
       });
     });
     if (lackT.length || lackS.length) await askFolder(lackT, lackS);
@@ -2146,9 +2147,9 @@ async function runImport() {
       var audio = [];
       if (sfzs.length) audio = JSON.parse(await impCall("sfz", { rels: sfzs }));
       var jobs = audio.map(function (a) { return { root: "Multisamples/", rel: a, loose: false, key: null }; });
-      needKeys.forEach(function (k) { if (needSmp[k].kind !== "multi") jobs.push({ root: "Samples/", rel: cleanRel(needSmp[k].rel), loose: needSmp[k].kind === "noise", key: k }); });
+      needKeys.forEach(function (k) { if (needSmp[k].kind !== "multi") jobs.push({ root: needSmp[k].kind === "ir" ? "Impulses/" : "Samples/", rel: cleanRel(needSmp[k].rel), loose: needSmp[k].kind === "noise", ir: needSmp[k].kind === "ir", key: k }); });
       for (var ji = 0; ji < jobs.length; ji++) {
-        var jb = jobs[ji], jf = findSmp(jb.rel, jb.loose);
+        var jb = jobs[ji], jf = findSmp(jb.rel, jb.loose, jb.ir);
         impStatus("Decoding samples… " + (ji + 1) + " of " + jobs.length, 56 + 12 * ji / jobs.length);
         if (!jf) continue;
         try {

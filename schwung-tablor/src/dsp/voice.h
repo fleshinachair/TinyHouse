@@ -104,14 +104,19 @@ inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
  * as such a filter, of the same absolute time constant at any LFO rate (calibration/probe_lfo_smooth.py). */
 inline float potLfoSmoothTau(float v) { return v < 0.5f ? 0.0f : 0.002f * std::pow(350.0f, pot01(v)); }
 
+inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[TB_P_LFO1_MODE + lfo * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)]); }
+inline bool lfoIsFree(const float *P, int lfo) { return lfoModeOf(P, lfo) == 1; }          /* 0 Trig, 1 Free, 2 Env */
+inline bool lfoIsOneShot(const float *P, int lfo) { return lfoModeOf(P, lfo) == 2; }
+
 /* The shape: 16 points of one cycle, 0..127 for 0..1, read round the loop with linear interpolation. */
-inline float lfoShapeAt(const float *P, int lfo, float phase)
+inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = false)
 {
-    const float x = phase * (float) kLfoShape;
-    const int i0 = ((int) x) & (kLfoShape - 1);
+    /* a one-shot (Env) LFO runs the table from its first point to its last once: the last point is the held end value */
+    const float x = oneShot ? std::min(phase, 1.0f) * (float) (kLfoShape - 1) : phase * (float) kLfoShape;
+    const int i0 = oneShot ? std::min((int) x, kLfoShape - 1) : ((int) x) & (kLfoShape - 1);
     const float fr = x - std::floor(x);
     const int base = TB_P_LFO1_S0 + lfo * (TB_P_LFO2_S0 - TB_P_LFO1_S0);
-    const float a = P[base + i0], b = P[base + ((i0 + 1) & (kLfoShape - 1))];
+    const float a = P[base + i0], b = P[base + (oneShot ? std::min(i0 + 1, kLfoShape - 1) : ((i0 + 1) & (kLfoShape - 1)))];
     return pot01(a + (b - a) * fr);
 }
 
@@ -201,7 +206,7 @@ public:
         /* Serum's noise is mono with a random left/right level imbalance per note (2.3 dB on average, calibration/noise_stereo: correlation 1.000, side/mid -13..-29 dB) */
         noisePan = ((float) rand() / (float) RAND_MAX * 2.0f - 1.0f) * 0.27f;
         for (int l = 0; l < kLfos; l++)             /* Trig restarts at the top of the cycle, Free joins the running one */
-            { lfoPhase[l] = P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] >= 1.0f ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; }
+            { lfoPhase[l] = lfoIsFree(P, l) ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; }
 
         filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
@@ -228,7 +233,7 @@ public:
         bool legato = P[TB_P_LEGATO] > 0.5f && !isReleasing();       /* a releasing voice has to be brought back in whatever the legato switch says */
         if (!legato) {              /* env retrig switches cut: always retrig */
             for (int l = 0; l < kLfos; l++)
-                if (P[TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)] < 1.0f) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; }
+                if (!lfoIsFree(P, l)) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; }
             filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
             adsr.noteOn();
@@ -559,9 +564,10 @@ private:
                 const int rate = TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE);
                 if (blockSize > 0) {
                     lfoPhase[l] += potLfoHz(P[rate]) * (float) blockSize / (float) sampleRate;
-                    lfoPhase[l] -= std::floor(lfoPhase[l]);
+                    if (lfoIsOneShot(P, l)) lfoPhase[l] = std::min(lfoPhase[l], 1.0f);        /* Env: plays once, then holds its end */
+                    else lfoPhase[l] -= std::floor(lfoPhase[l]);
                 }
-                lfoOut[l] = lfoShapeAt(P, l, lfoPhase[l]);                    // 0..1
+                lfoOut[l] = lfoShapeAt(P, l, lfoPhase[l], lfoIsOneShot(P, l));                    // 0..1
                 const float tau = potLfoSmoothTau(P[TB_P_LFO1_SMOOTH + l * (TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH)]);
                 if (tau > 0.0f) {
                     /* the smoother starts at the LFO's first value (measured), then follows it with the block-rate one-pole */

@@ -122,6 +122,12 @@ def sample_needs(tree: dict) -> list[dict]:
         info = SE.sample_osc(tree, i)
         if info and info.get("file") and not info.get("embedded"):       # audio stored in the preset is never asked of the folder
             out.append({"kind": "multi" if info["multi"] else "sample", "rel": str(info["file"]).replace("\\", "/")})
+    for r in ("FXRack0", "FXRack1", "FXRack2"):                # a Convolution reverb's impulse response file (one stored in the preset is never asked of the folder)
+        rack = tree.get(r)
+        for node in (rack.get("FX", []) if isinstance(rack, dict) else []):
+            c = node.get("FXConv") if isinstance(node, dict) else None
+            if isinstance(c, dict) and c.get("relativePathToIR") and not c.get("embeddedIR"):
+                out.append({"kind": "ir", "rel": str(c["relativePathToIR"]).replace("\\", "/")})
     nz = SE.noise_sample(tree)
     if nz is not None:                                         # a one-shot click or hit
         out.append({"kind": "noise", "rel": str(nz["file"]).replace("\\", "/")})
@@ -136,7 +142,7 @@ def sample_needs(tree: dict) -> list[dict]:
 
 
 def _have_sample(n: dict) -> bool:
-    root = "Multisamples" if n["kind"] == "multi" else "Samples"
+    root = "Multisamples" if n["kind"] == "multi" else "Impulses" if n["kind"] == "ir" else "Samples"
     if n["kind"] == "noise":
         return SE.find_sample(n["rel"]) is not None
     return SE._real(SE._root(root) / n["rel"]) is not None

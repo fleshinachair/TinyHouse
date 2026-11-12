@@ -817,6 +817,7 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.delay2Ping = (int) pots[TB_P_DLY2_MODE] == 1;
 
     s.revMix = revOn ? std::min(pot01(pots[TB_P_REV_MIX]) * space, 1.0f) : 0.0f;
+    s.convMix = revOn ? std::min(pot01(pots[TB_P_CONV_MIX]) * space, 1.0f) : 0.0f;
     s.revT60 = 0.2f * std::pow(150.0f, pot01(pots[TB_P_REV_DECAY]));
     s.revDampHz = potEqFreq(pots[TB_P_REV_DAMP]);
     s.revLoHz = potEqFreq(pots[TB_P_REV_LO]);
@@ -852,7 +853,8 @@ void Engine::refreshFx()
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
         std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 &&
-        std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0) return;
+        std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX]) return;
+    convSeen = pots[TB_P_CONV_MIX];
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
     std::memcpy(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen);
@@ -1008,6 +1010,7 @@ void Engine::renderBlock(int16_t *out, int frames)
             }
             for (int i = 0; i < n; i++) { L[i] += busBuf[2 * b][i]; R[i] += busBuf[2 * b + 1][i]; }
         }
+        fx.setConvPlan(std::atomic_load(&convPlan));
         if (fx.active())
             fx.process(L, R, n);
         for (int i = 0; i < n; i++) { L[i] += dryBuf[0][i]; R[i] += dryBuf[1][i]; }          /* Out: past the effects */

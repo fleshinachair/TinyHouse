@@ -171,6 +171,8 @@ public:
     void setSample(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet, std::move(s)); }
     void setSample2(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet2, std::move(s)); }
     void setSample3(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet3, std::move(s)); }
+    /* The convolution reverb's plan (conv.h); null clears it. */
+    void setConv(std::shared_ptr<ConvPlan> p) { std::atomic_store(&convPlan, std::move(p)); }
 
     void allNotesOff(bool allowTail);
 
@@ -311,6 +313,7 @@ private:
     float fxSeen[TB_P_REV_ON - TB_P_DLY_MIX + 1] = {};
     float distSeen[TB_P_COMP_BELOW - TB_P_DIST_DRIVE + 1] = {};      /* the distortion and compressor pots are contiguous */
     float compOnSeen = -1.0f;
+    float convSeen = -1.0f;
     uint32_t ditherState = 2463534242u;                                /* the output dither's generator */
     float modSeen[TB_P_PHAS_POLES - TB_P_CHOR_ON + 1] = {};           /* the chorus, flanger and phaser pots are contiguous */
     float distPreSeen[TB_P_DIST_PRE_Q - TB_P_DIST_PRE + 1] = {};                /* the distortion's pre-filter pots are contiguous */
@@ -321,6 +324,7 @@ private:
     std::vector<Voice> voices;
     std::shared_ptr<Wavetable> table[kOscs];
     std::shared_ptr<SampleSet> sampleSet, sampleSet2, sampleSet3;
+    std::shared_ptr<ConvPlan> convPlan;
 
     /* mono mode state: held-note stack, last-note priority */
     static constexpr int kStackMax = 32;

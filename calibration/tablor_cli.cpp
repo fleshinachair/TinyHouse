@@ -71,6 +71,13 @@ int main(int argc, char **argv)
             if (k == "smp3_set") e.setSample3(set); else if (k == "smp2_set") e.setSample2(set); else e.setSample(set);
             continue;
         }
+        if (k == "conv_set") {                                       /* the convolution reverb's impulse response (a TBS file) */
+            if (v.empty()) continue;
+            SampleSet ir;
+            if (!sampleLoad((root + v).c_str(), ir)) { fprintf(stderr, "conv set failed: %s\n", v.c_str()); return 3; }
+            e.setConv(convBuild(ir, 44100.0f));
+            continue;
+        }
         if (k == "wt1_table" || k == "wt2_table" || k == "wt3_table") {
             if (v != "Init") {
                 auto t = loadTable(root + v);

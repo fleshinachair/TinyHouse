@@ -20,6 +20,7 @@ native)
     $CXX $SRC "$ROOT/tests/test_dsp.cpp" "$ROOT/src/ported/wavetable.cpp" "$ROOT/src/ported/audiofilter/ParametricCreator.cpp" -o "$OUT/native_dsp_test.exe"
     $CXX $SRC "$ROOT/tests/test_fx.cpp" $ENGINE -o "$OUT/native_fx_test.exe"
     $CXX $SRC "$ROOT/tests/test_demo.cpp" $ENGINE -o "$OUT/native_demo_test.exe"
+    $CXX $SRC "$ROOT/tests/test_conv.cpp" -o "$OUT/native_conv_test.exe"
     $CXX $SRC "$ROOT/../calibration/tablor_cli.cpp" $ENGINE -o "$ROOT/../calibration/tablor_cli.exe"
     ;;
 arm)
@@ -32,6 +33,8 @@ arm)
     $CXX $SRC "$ROOT/tests/test_engine.cpp" $ENGINE -lm -o "$OUT/tablor_engine_test"
     $CXX $SRC "$ROOT/tests/test_fx.cpp" $ENGINE -lm -o "$OUT/tablor_fx_test"
     $CXX $SRC "$ROOT/tools/enginebench.cpp" $ENGINE -lm -o "$OUT/tablor_enginebench"
+    $CXX $SRC "$ROOT/tests/test_conv.cpp" -lm -o "$OUT/tablor_conv_test"
+    $CXX $SRC "$ROOT/tools/convbench.cpp" -lm -o "$OUT/tablor_convbench"
     ;;
 *) echo "usage: $0 native|arm" >&2; exit 2 ;;
 esac

@@ -780,6 +780,8 @@ def usable(tree):
         p = o["plainParams"] if isinstance(o["plainParams"], dict) else {}
         if not p.get("kParamEnable", 1.0 if i == 0 else 0.0) or p.get("kParamType", "kOsc_WT") != "kOsc_WT":
             continue
+        if o[f"WTOsc{i}"].get("embeddedWTData"):                  # the table is stored in the preset: Serum and the converter both play that copy, the file need not exist
+            continue
         rel = o[f"WTOsc{i}"].get("relativePathToWT", "").replace("\\", "/").lstrip("/")
         if rel and not any((SERUM_TABLES / c).is_file() for c in (rel, "S2 Tables/" + rel)):
             return False

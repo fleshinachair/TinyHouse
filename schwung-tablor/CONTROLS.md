@@ -178,15 +178,16 @@ the page the device opens to.
 | 7 | **EQ4 Gain** | `eq4_gain` | 0..127 (pot) | 64 |
 | 8 | **EQ4 Q** | `eq4_q` | 0..127 (pot) | 64 |
 
-## GLOBAL  (7 controls)
+## GLOBAL  (8 controls)
 
 | # | Control | Key | Values | Default |
 |---|---------|-----|--------|---------|
 | 1 | **Voice Mode** | `voice_mode` | Poly / Mono | Poly |
 | 2 | **Voices** | `voices` | 1..8 (int) | 8 |
-| 3 | **Glide** | `glide` | 0..127 (pot) | 0 |
-| 4 | **Glide Mode** | `glide_mode` | Off / Glissando / Portamento | Off |
-| 5 | **Legato** | `legato` | Off / On | Off |
-| 6 | **PB Range** | `pb_range` | 0..24 (int) | 2 |
-| 7 | **Volume** | `volume` | 0..127 (pot) | 100 |
+| 3 | **Unison Cap** | `uni_cap` | 1..16 (int) | 16 (off) |
+| 4 | **Glide** | `glide` | 0..127 (pot) | 0 |
+| 5 | **Glide Mode** | `glide_mode` | Off / Glissando / Portamento | Off |
+| 6 | **Legato** | `legato` | Off / On | Off |
+| 7 | **PB Range** | `pb_range` | 0..24 (int) | 2 |
+| 8 | **Volume** | `volume` | 0..127 (pot) | 100 |
 

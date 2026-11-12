@@ -1314,6 +1314,9 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
                 p = (*semi) ? semi + 1 : semi;
                 continue;
             }
+            /* Unison Cap is the player's live limit on this slot, not part of a sound: a preset taken from the store leaves it where it is
+             * (only the host's own restore of the slot's saved state brings it back). */
+            if (!host_restore && !strcmp(kbuf, "uni_cap")) { p = (*semi) ? semi + 1 : semi; continue; }
             const bool onBus = kbuf[0] == 'b' && (kbuf[1] == '1' || kbuf[1] == '2') && kbuf[2] == '.';
             int idx = param_index(onBus ? kbuf + 3 : kbuf);
             if (idx >= 0 && onBus) {

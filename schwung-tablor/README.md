@@ -30,7 +30,8 @@ upstream release and are not used on the device.
   16-voice unison with detune + stereo spread. WT1 and WT2 also have bend
   (phase distortion) and formant shift; WT3 is the plain layer
 - **A shared budget of 64 wavetable oscillators**, split by the Voices control:
-  8 voices get 8 each, 4 get 16, mono gets them all. Stacks scale down to fit
+  8 voices get 8 each, 4 get 16, mono gets them all. Stacks scale down to fit.
+  **Unison Cap** (last dial on Main) lowers every stack live to save CPU
 - **Sub oscillator** (sine / triangle / saw / square / pulse) and **noise**
   (white / pink)
 - **Multimode filter** — LP / HP / BP / Notch, 12 or 24 dB/oct, with its own

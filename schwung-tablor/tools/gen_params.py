@@ -434,6 +434,7 @@ GLOBAL = dict(
     gmode  = enum("glide_mode", "GMOD", "Glide Mode", GLIDE_MODES, 0),
     legato = enum("legato", "LEGA", "Legato", ONOFF, 0),
     pb     = num("pb_range", "BEND", "PB Range", 0, 24, 2),
+    ucap   = num("uni_cap", "UCAP", "Unison Cap", 1, 16, 16),   # live performance limit on every oscillator's unison stack (16 = off); not stored in presets
     vol    = pot("volume", "VOL", "Master Gain", 36),         # +18 dB range (Engine kMasterMax): 36 is the old default, 100
 )
 
@@ -569,13 +570,13 @@ BANKS = [
         row(MODFX["prate"], MODFX["pdep"], MODFX["pdep2"], MODFX["pfrq"], MODFX["pfb"], MODFX["pph"], MODFX["ppol"]),
     ]),
     ("Global", True, [
-        row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["glide"], GLOBAL["gmode"],
+        row(GLOBAL["mode"], GLOBAL["voices"], GLOBAL["ucap"], GLOBAL["glide"], GLOBAL["gmode"],
             GLOBAL["legato"], GLOBAL["pb"], GLOBAL["vol"]),
     ]),
     # The three pages the device shows (TinyHouse). The banks above stay in the table, so every parameter
     # still exists, is saved in a preset's state and is on the web UI; they just have no page on the Move.
     ("Main", False, [
-        row(FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"]),
+        row(FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"], GLOBAL["ucap"]),
     ]),
     ("Tone", False, [
         # Row 0 has no page: Low Shelf lost its knob to the third position (it stays on the web UI), and it is kept here, in its old place in the
@@ -750,6 +751,7 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The roo
     ("Macros",  0, "Macros"),
     ("Effects", 0, "Effects"),
     ("Mod FX",  0, "Mod FX"),
+    ("Global",  0, "Voice"),
 ]
 
 # THE HOST CACHES ONLY THE FIRST 256 DECLARED KEYS (MAX_CHAIN_PARAMS in Schwung's chain host). A set of a key past that is a cache miss, and a miss

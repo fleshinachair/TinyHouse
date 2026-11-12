@@ -59,11 +59,19 @@ importer has no Serum to compare against), so set **Volume** and the effects to 
 
 | Page | What is on it |
 |---|---|
-| **Main** | filter freq, res and envelope amount, decay, sub, width, space, bank |
+| **Main** | filter freq, res and envelope amount, decay, sub, width, space, **Unison Cap** |
 | **Tone** | the three wavetable positions (an oscillator that is off shows an empty slot), attack, release, drive, high shelf, volume |
 | **Macros** | the preset's eight Serum macros, as dials. A macro the preset does not use is shown as an empty slot. Touch a knob and the top bar shows its name and value |
 | **Effects**, **Mod FX** | each effect on or off, with its main controls |
+| **Voice** | voice mode, **Voices**, **Unison Cap**, glide, glide mode, legato, pitch-bend range, volume |
 | **Demo** | plays a MIDI part from a folder on the Move so you can audition a bank: it waits for Play and joins on the next bar |
+
+**If it clicks or glitches, turn down Unison Cap and Voices.** The Move renders every slot's sound on one audio thread, so a busy set (four slots, long
+unison stacks, a reverb on each) can run out of time for a block and click. **Unison Cap** is the last dial on **Main**: it limits every oscillator's
+unison stack, wavetable, sample and Hyper alike, in the slot you have selected, and it is one turn away mid-performance. Fully up (16) leaves each preset
+as it was made. Turned down it takes load off at once, usually without much change to the sound in a mix, and turning it up restores the full stack.
+It is a live limit, not part of the sound: it is not stored in presets, so loading another preset keeps your setting (it does come back with a saved set).
+**Voices**, on the **Voice** page, is the second lever: fewer voices means fewer simultaneous notes, and the oscillator budget is shared among them.
 
 A preset's macros come across live: turning a macro moves the same parameters Serum's would (cutoff, effect mix, wavetable position and so on).
 

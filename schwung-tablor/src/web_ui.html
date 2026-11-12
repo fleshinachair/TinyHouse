@@ -1359,7 +1359,7 @@ function buildGlobal(page) {
   var g = el("div", "grid g3", page);
   var v = panel("Voice", g);
   row([["voice_mode", "Mode"], ["legato", "Legato"], ["glide_mode", "Glide"]], v.body);
-  row([["voices", "Voices"], ["glide", "Glide time"], ["pb_range", "Bend range"]], v.body);
+  row([["voices", "Voices"], ["uni_cap", "Unison cap"], ["glide", "Glide time"], ["pb_range", "Bend range"]], v.body);
   var o = panel("Output", g);
   row([["volume", "Master gain"], ["decay", "Decay"], ["drive", "Drive"]], o.body);
   row([["lo_shelf", "Low shelf"], ["hi_shelf", "High shelf"]], o.body);

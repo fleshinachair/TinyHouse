@@ -741,7 +741,7 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.eqEnable = all && pots[TB_P_EQ_ON] >= 1.0f;
     s.distDrive = all ? pot01(pots[TB_P_DIST_DRIVE]) : 0.0f;
     s.distMix = pot01(pots[TB_P_DIST_MIX]);
-    s.hydVoices = all ? std::clamp((int) pots[TB_P_HYD_UNI], 1, 8) : 1;
+    s.hydVoices = all ? std::clamp(std::min((int) pots[TB_P_HYD_UNI], (int) this->pots[TB_P_UNI_CAP]), 1, 8) : 1;     /* Unison Cap: the slot's own, also for a bus rack */
     s.hydDetune = pot01(pots[TB_P_HYD_DET]);
     s.hydRate = pot01(pots[TB_P_HYD_RATE]);
     s.hydWet = all ? pot01(pots[TB_P_HYD_WET]) : 0.0f;

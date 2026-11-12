@@ -485,9 +485,9 @@ TABLOR_DEFAULTS = {
     "wt1_post": 0, "wt2_post": 0, "wt3_post": 0, "sub_post": 0, "noise_post": 0,
     "wt1_bal": 0, "wt2_bal": 0, "wt3_bal": 0, "sub_bal": 0, "noise_bal": 0, "smp_bal": 0, "smp2_bal": 0, "smp3_bal": 0,
     "flt2_type": 1, "flt2_freq": 127, "flt2_res": 0, "flt2_env": 64, "flt2_drive": 0, "flt2_key": 0, "flt_gain": 0, "flt2_gain": 0,
-    "smp_set": "", "smp_level": 0, "smp_tune": 0, "smp_fine": 0, "smp_post": 0, "smp_fixed": 0,
-    "smp2_set": "", "smp2_level": 0, "smp2_tune": 0, "smp2_fine": 0, "smp2_post": 0, "smp2_fixed": 0,
-    "smp3_set": "", "smp3_level": 0, "smp3_tune": 0, "smp3_fine": 0, "smp3_post": 0, "smp3_fixed": 0,
+    "smp_set": "", "smp_level": 0, "smp_tune": 0, "smp_fine": 0, "smp_post": 0, "smp_fixed": 0, "smp_uni": 1, "smp_det": 0, "smp_spread": 0,
+    "smp2_set": "", "smp2_level": 0, "smp2_tune": 0, "smp2_fine": 0, "smp2_post": 0, "smp2_fixed": 0, "smp2_uni": 1, "smp2_det": 0, "smp2_spread": 0,
+    "smp3_set": "", "smp3_level": 0, "smp3_tune": 0, "smp3_fine": 0, "smp3_post": 0, "smp3_fixed": 0, "smp3_uni": 1, "smp3_det": 0, "smp3_spread": 0,
     "conv_set": "",
     "wt1_pos": 0, "wt2_pos": 0, "wt1_level": 100, "wt2_level": 0, "wt1_tune": 0, "wt2_tune": 0,
     "wt1_uni": 1, "wt1_detune": 0, "wt1_spread": 0, "wt1_pan": 64,
@@ -1573,6 +1573,17 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{sk}_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
         P[f"{sk}_fine"] = round(_clamp(sinfo["fine"], -100, 100))
         P[f"{sk}_post"] = post_of(so["id"])
+        if not so.get("noise") and so["unison"] > 1:
+            # Serum's Unison on a Sample / Multisample oscillator: the same stack as a wavetable's (detune across the stack, stereo spread), up to the engine's 8 streams
+            P[f"{sk}_uni"] = _clamp(so["unison"], 1, 8)
+            sdet = _clamp(so["detune"] + fold[("Oscillator", "kParamDetune", so["id"])], 0.0, 1.0) ** CAL["detune_exp"] * CAL["detune_scale"]
+            if CAL["detune_wid"] and so["detune_wid"] is not None:
+                sdet *= interp(CAL["detune_wid"], so["detune_wid"])
+            P[f"{sk}_det"] = round(_clamp(sdet, 0, 1) * 127)
+            sst = so["stereo_pct"] if so["stereo_pct"] is not None else CAL["stereo_default"]
+            P[f"{sk}_spread"] = round(_clamp(sst / 100 * CAL["width_scale"], 0, 1) * 127)
+            if so["unison"] > 8:
+                appr.append(f"sample unison {so['unison']} fits as 8")
         note.append(f"sample oscillator carried: {sinfo['file']} ({'multisample' if sinfo['multi'] else 'spectral oscillator played as a sample: scan and spectral filter not carried' if sinfo.get('spectral') else 'sample'})")
     # ---- FX buses: each source's send to Bus 1 / Bus 2 (Serum's level cubed is the gain, probe_bus.py) ----
     send_keys = {**{oid: f"wt{slot}" for oid, slot in slot_of.items()}, 4: "sub", 3: "noise"}

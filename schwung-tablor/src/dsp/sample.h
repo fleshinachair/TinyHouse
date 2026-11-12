@@ -88,25 +88,55 @@ struct SamplePlayer {
      * next block read freed memory. The last share goes when the voice ends or starts another note. */
     std::shared_ptr<const SampleSet> own;
     const SampleRegion *r = nullptr;
-    double pos = 0.0;                           /* in frames */
+    static constexpr int kMaxUnison = 8;
+    double pos[kMaxUnison] = {};                /* in frames: one read position per unison stream */
+    int    dir[kMaxUnison] = {};                /* +1 forward, -1 backward (ping-pong loops) */
+    bool   alive[kMaxUnison] = {};              /* a stream of a sample with no loop ends at the file's end; the oscillator is on while any stream is */
     float  fade = 0.0f;                         /* attack ramp 0..1 */
-    int    dir = 1;                             /* +1 forward, -1 backward (ping-pong loops) */
     bool   on = false;
 
     void start(const std::shared_ptr<const SampleSet> &set, int note, int vel = 100)
     {
         own = set;
         r = set ? set->pick(note, vel) : nullptr;
-        pos = 0.0; fade = 0.0f; dir = 1;
+        for (int i = 0; i < kMaxUnison; i++) { pos[i] = 0.0; dir[i] = 1; alive[i] = true; }
+        fade = 0.0f;
         on = r != nullptr;
     }
 
     void release() { on = false; r = nullptr; own.reset(); }
 
-    /* Adds n samples to l/r. semis: the pitch offset from the region's root key (note - root, plus the oscillator's own tuning and bend). */
-    void processAdding(float semis, float gain, float sr, float *l, float *rt, int n)
+    /* Adds n samples to l/r. semis: the pitch offset from the region's root key (note - root, plus the oscillator's own tuning and bend).
+     * Unison, as the wavetable oscillators have it: `voices` streams detuned evenly across `detune` semitones, alternating to the two sides by `spread` (0..1) with the
+     * middle one of an odd stack in the centre, each 1/sqrt(voices) in level. One voice is the plain stereo sample. */
+    void processAdding(float semis, float gain, float sr, float *l, float *rt, int n, int voices = 1, float detune = 0.0f, float spread = 0.0f)
     {
         if (!on || !r) return;
+        voices = std::clamp(voices, 1, kMaxUnison);
+        const float comp = 1.0f / std::sqrt((float) voices);
+        bool any = false;
+        for (int v = 0; v < voices; v++) {
+            if (!alive[v]) continue;
+            float st = semis, gl = 1.0f, gr = 1.0f;
+            if (voices > 1) {
+                st += -detune / 2.0f + detune / (float) (voices - 1) * (float) v;
+                const bool middle = (voices & 1) && v == voices / 2;
+                const float pan = std::clamp(spread * (middle ? 0.0f : (v & 1) ? 1.0f : -1.0f), -1.0f, 1.0f);
+                gl = (1.0f - pan) * comp; gr = (1.0f + pan) * comp;
+            }
+            stream(v, st, gain, gl, gr, sr, l, rt, n);
+            any = any || alive[v];
+        }
+        fade = std::min(1.0f, fade + (float) n / (0.010f * sr));          /* the streams all read the same attack ramp, which moves once a block here */
+        if (!any) release();
+    }
+
+private:
+    void stream(int u, float semis, float gain, float gl, float gr, float sr, float *l, float *rt, int n)
+    {
+        double &pos = this->pos[u];
+        int &dir = this->dir[u];
+        float fade = this->fade;                             /* a stream's own copy of the ramp */
         const double step = std::pow(2.0, (double) (semis + r->tuneCents / 100.0f) / 12.0) * (double) r->rate / (double) sr;
         const int fr = r->frames, ch = r->channels;
         const double ls = r->loops ? (double) r->loopStart * fr : 0.0, le = r->loops ? (double) r->loopEnd * fr : (double) fr;
@@ -135,7 +165,7 @@ struct SamplePlayer {
                 else if (dir < 0 && pos <= ls) { pos = std::min(2.0 * ls - pos, le - 1e-3); dir = 1; }
             } else if (pos >= le) {
                 if (r->loops && le > ls + 1.0) pos = ls + std::fmod(pos - ls, le - ls);
-                else { release(); return; }
+                else { alive[u] = false; return; }
             }
             float a, b;
             read(pos, a, b);
@@ -150,8 +180,8 @@ struct SamplePlayer {
                 }
             }
             fade = std::min(1.0f, fade + fadeStep);
-            l[i] += a * k * fade;
-            rt[i] += b * k * fade;
+            l[i] += a * k * fade * gl;
+            rt[i] += b * k * fade * gr;
             pos += dir * step;
         }
     }

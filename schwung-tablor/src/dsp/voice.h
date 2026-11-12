@@ -379,19 +379,19 @@ public:
             const float knob = pot01(P[TB_P_SMP_LEVEL]);
             const bool fixedPitch = P[TB_P_SMP_FIXED] >= 0.5f;                 /* a sample that does not follow the keyboard (Serum's noise slot samples) */
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp.r->root) + c.pitchBendSemis) + P[TB_P_SMP_TUNE] + P[TB_P_SMP_FINE] / 100.0f;
-            addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smp.processAdding(semis, knob * knob, (float) sampleRate, l, r, n); });
+            addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smp.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, (int) P[TB_P_SMP_UNI], potDetune(P[TB_P_SMP_DET]), pot01(P[TB_P_SMP_SPREAD])); });
         }
         if (smp2.on && P[TB_P_SMP2_LEVEL] > 0.0f) {                /* the second sample oscillator: the same, with its own controls */
             const float knob = pot01(P[TB_P_SMP2_LEVEL]);
             const bool fixedPitch = P[TB_P_SMP2_FIXED] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp2.r->root) + c.pitchBendSemis) + P[TB_P_SMP2_TUNE] + P[TB_P_SMP2_FINE] / 100.0f;
-            addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smp2.processAdding(semis, knob * knob, (float) sampleRate, l, r, n); });
+            addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smp2.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, (int) P[TB_P_SMP2_UNI], potDetune(P[TB_P_SMP2_DET]), pot01(P[TB_P_SMP2_SPREAD])); });
         }
         if (smp3.on && P[TB_P_SMP3_LEVEL] > 0.0f) {                /* the third (Serum has three oscillators, any of them a sample) */
             const float knob = pot01(P[TB_P_SMP3_LEVEL]);
             const bool fixedPitch = P[TB_P_SMP3_FIXED] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp3.r->root) + c.pitchBendSemis) + P[TB_P_SMP3_TUNE] + P[TB_P_SMP3_FINE] / 100.0f;
-            addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smp3.processAdding(semis, knob * knob, (float) sampleRate, l, r, n); });
+            addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smp3.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, (int) P[TB_P_SMP3_UNI], potDetune(P[TB_P_SMP3_DET]), pot01(P[TB_P_SMP3_SPREAD])); });
         }
 
         /* velocity */

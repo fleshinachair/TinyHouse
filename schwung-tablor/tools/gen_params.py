@@ -240,6 +240,9 @@ SAMPLE = dict(
     fine  = num("smp_fine",  "SMPF", "Sample Fine", -100, 100, 0),
     post  = enum("smp_post", "SMPR", "Sample Route", ROUTE, 0),
     fixed = enum("smp_fixed", "SMPX", "Sample Pitch", ["Track", "Fixed"], 0),
+    uni   = num("smp_uni",    "SMPU", "Sample Unison", 1, 8, 1),
+    det   = pot("smp_det",    "SMPD", "Sample Detune", 0),
+    spread = pot("smp_spread", "SMPW", "Sample Spread", 0),
 )
 # A second sample oscillator for presets that stack two (Serum's oscillators A and B both on Sample / Multisample): the same controls and laws as the first.
 SAMPLE2 = dict(
@@ -249,6 +252,9 @@ SAMPLE2 = dict(
     fine  = num("smp2_fine",  "SMQF", "Sample 2 Fine", -100, 100, 0),
     post  = enum("smp2_post", "SMQR", "Sample 2 Route", ROUTE, 0),
     fixed = enum("smp2_fixed", "SMQX", "Sample 2 Pitch", ["Track", "Fixed"], 0),
+    uni   = num("smp2_uni",    "SMQU", "Sample 2 Unison", 1, 8, 1),
+    det   = pot("smp2_det",    "SMQD", "Sample 2 Detune", 0),
+    spread = pot("smp2_spread", "SMQW", "Sample 2 Spread", 0),
 )
 # Serum's Conv reverb as a convolver (conv.h): the impulse response is a sample-set file (TBS, the Size stretch, the Decay envelope and the level baked in by the converter), the mix is Serum's Wet.
 CONV = dict(
@@ -262,6 +268,9 @@ SAMPLE3 = dict(
     fine  = num("smp3_fine",  "SMRF", "Sample 3 Fine", -100, 100, 0),
     post  = enum("smp3_post", "SMRR", "Sample 3 Route", ROUTE, 0),
     fixed = enum("smp3_fixed", "SMRX", "Sample 3 Pitch", ["Track", "Fixed"], 0),
+    uni   = num("smp3_uni",    "SMRU", "Sample 3 Unison", 1, 8, 1),
+    det   = pot("smp3_det",    "SMRD", "Sample 3 Detune", 0),
+    spread = pot("smp3_spread", "SMRW", "Sample 3 Spread", 0),
 )
 SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
@@ -590,10 +599,10 @@ BANKS = [
         row(TONE["cmulti"], TONE["ct2"], TONE["ct3"], TONE["cg1"], TONE["cg2"], TONE["cg3"], TONE["cbl"]),
         row(FILTER2["on"], FILTER2["type"], FILTER2["freq"], FILTER2["res"], FILTER2["env"]),
         row(ROUTES["wt1"], ROUTES["wt2"], ROUTES["wt3"], ROUTES["sub"], ROUTES["noise"]),
-        row(SAMPLE["set"], SAMPLE["level"], SAMPLE["tune"], SAMPLE["fine"], SAMPLE["post"], SAMPLE["fixed"]),
+        row(SAMPLE["set"], SAMPLE["level"], SAMPLE["tune"], SAMPLE["fine"], SAMPLE["post"], SAMPLE["fixed"], SAMPLE["uni"], SAMPLE["det"]),
         row(VFILTER2["type"], VFILTER2["freq"], VFILTER2["res"], VFILTER2["env"], VFILTER2["drive"], VFILTER2["key"], VGAIN["g1"], VGAIN["g2"]),
         row(BALANCES["wt1"], BALANCES["wt2"], BALANCES["wt3"], BALANCES["sub"], BALANCES["noise"], BALANCES["smp"]),
-        row(NOISE["hp"], NOISE["lp"], FX["dsync"], FX["vlaw"]),
+        row(NOISE["hp"], NOISE["lp"], FX["dsync"], FX["vlaw"], SAMPLE["spread"], SAMPLE2["spread"], SAMPLE3["spread"]),
         row(BUSES["wt1_1"], BUSES["wt1_2"], BUSES["wt2_1"], BUSES["wt2_2"], BUSES["wt3_1"], BUSES["wt3_2"]),
         row(BUSES["sub_1"], BUSES["sub_2"], BUSES["noise_1"], BUSES["noise_2"], BUSES["smp_1"], BUSES["smp_2"]),
         row(BUSES["flt1_1"], BUSES["flt1_2"], BUSES["flt2_1"], BUSES["flt2_2"], FLTOUT["f1"], FLTOUT["f2"]),
@@ -607,9 +616,9 @@ BANKS = [
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[2][k], EQS[3][k])]),
         row(O1["shape"], O1["sgain"], O1["sout"], O2["shape"], O2["sgain"], O2["sout"]),
         row(O3["shape"], O3["sgain"], O3["sout"]),
-        row(SAMPLE2["set"], SAMPLE2["level"], SAMPLE2["tune"], SAMPLE2["fine"], SAMPLE2["post"], SAMPLE2["fixed"]),
+        row(SAMPLE2["set"], SAMPLE2["level"], SAMPLE2["tune"], SAMPLE2["fine"], SAMPLE2["post"], SAMPLE2["fixed"], SAMPLE2["uni"], SAMPLE2["det"]),
         row(BALANCES["smp2"], BUSES["smp2_1"], BUSES["smp2_2"]),
-        row(SAMPLE3["set"], SAMPLE3["level"], SAMPLE3["tune"], SAMPLE3["fine"], SAMPLE3["post"], SAMPLE3["fixed"]),
+        row(SAMPLE3["set"], SAMPLE3["level"], SAMPLE3["tune"], SAMPLE3["fine"], SAMPLE3["post"], SAMPLE3["fixed"], SAMPLE3["uni"], SAMPLE3["det"]),
         row(BALANCES["smp3"], BUSES["smp3_1"], BUSES["smp3_2"]),
     ]),
     # Last, so no earlier parameter's number moves. The page is on the device (PAGE_MAP).

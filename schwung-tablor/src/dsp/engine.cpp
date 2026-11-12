@@ -461,8 +461,11 @@ void Engine::demoSync()
     const double t = useTr ? hostBeat * 96.0 : demoSongTicks(hostBpm);
     const long bar = (long) std::floor(t / kBar);
     if (demoArmed && demoArmTr != useTr) demoArmed = false;                   /* armed on the other clock: its bar numbers mean nothing here */
-    if (!demoArmed) { demoArmed = true; demoArmTr = useTr; demoArmBar = bar; return; }
-    if (bar <= demoArmBar) return;
+    constexpr double kLate = 48.0;                                            /* half a beat: a transport that has just started (beat 0), or a bar that has only just begun, is joined at once, from its first bar */
+    if (!(useTr && t - (double) bar * kBar < kLate)) {
+        if (!demoArmed) { demoArmed = true; demoArmTr = useTr; demoArmBar = bar; return; }
+        if (bar <= demoArmBar) return;
+    }
     const double boundary = (double) bar * kBar;
     demoFiredTo = std::fmod(boundary, (double) d->len);
     demoPos = demoFiredTo + (t - boundary);

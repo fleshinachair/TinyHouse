@@ -146,6 +146,7 @@ int main()
         for (size_t i = 401; i < rms1.size(); i++) if (rms1[i] > 0.004 && rms1[i - 1] <= 0.004) on.push_back(beats[i]);
         bool okLock = !on.empty();
         for (double b : on) { double m = std::fmod(b, 8.0); if (m > 0.1 && m < 7.9) okLock = false; }
+        CHECK(rms1[400] > 0.004 || rms1[401] > 0.004 || rms1[402] > 0.004, "Play at beat 0: the first bar is played at once (not from the next bar)");
         CHECK(okLock, "every note starts on a multiple of 8 beats of the transport (%zu onsets, first at beat %.2f)", on.size(), on.empty() ? -1.0 : on[0]);
         beat = -1.0;                                                         /* Stop */
         for (int i = 0; i < 60; i++) step(true);

@@ -71,30 +71,48 @@ inline float sawDown(float phase, float freq, float sampleRate)
 
 /* ---- noise, verbatim ---- */
 
+/* A bell-shaped random number of standard deviation `sd`, cheap enough for every sample of every voice: four uniform 16-bit draws from one xorshift64* step, summed
+ * (Irwin-Hall, n = 4: the same mean and variance as the Gaussian std::normal_distribution gave, which costs a libc++ polar-method rejection loop per sample; the
+ * spectrum of the noise is the same flat one and the levels, set by the variance, do not move; the tails stop at 3.5 sd, which noise never shows). */
+class FastGauss {
+public:
+    explicit FastGauss(float sd) : scale(sd / 37837.227f)
+    {
+        std::random_device rd;
+        state = ((uint64_t) rd() << 32 | rd()) | 1ULL;
+    }
+    inline float next()
+    {
+        state ^= state >> 12; state ^= state << 25; state ^= state >> 27;
+        const uint64_t r = state * 0x2545F4914F6CDD1DULL;
+        const int sum = (int) (r & 0xffff) + (int) ((r >> 16) & 0xffff) + (int) ((r >> 32) & 0xffff) + (int) (r >> 48);
+        return (float) (sum - 131070) * scale;
+    }
+private:
+    float scale;
+    uint64_t state;
+};
+
 class WhiteNoise {
 public:
-    WhiteNoise() { std::random_device rd; generator.seed(rd()); }
-    inline float nextSample() { return dist(generator); }
+    inline float nextSample() { return dist.next(); }
 private:
-    std::default_random_engine generator;
-    std::normal_distribution<float> dist { 0.0f, 0.1f };
+    FastGauss dist { 0.1f };
 };
 
 /* Brown noise: white through a one-pole leak (corner about 5 Hz), 6 dB/octave per Hz above it, 3 dB per octave in an octave band. The gain sets its level against pink's
  * (Serum's Brown is 0.6 dB above its Pink, calibration/probe_noise_color.py). */
 class BrownNoise {
 public:
-    BrownNoise() { std::random_device rd; generator.seed(rd()); }
     inline float nextSample()
     {
-        y = kLeak * y + dist(generator);
+        y = kLeak * y + dist.next();
         return y * kGain;
     }
     static constexpr float kLeak = 0.9873f;           /* corner about 90 Hz: Serum's Brown stops rising below 100 Hz (calibration/probe_noise_color.py) */
     static constexpr float kGain = 0.0275f;
 private:
-    std::default_random_engine generator;
-    std::normal_distribution<float> dist { 0.0f, 1.0f };
+    FastGauss dist { 1.0f };
     float y = 0.0f;
 };
 

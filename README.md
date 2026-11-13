@@ -106,6 +106,7 @@ On top of that there are **two FX buses**, each a full copy of the rack. Oscilla
 - Two filters, in parallel or in series: the common ladder, high-pass and low-pass models, and the notch, band-reject, Exp, Scream, RM and DJMixer models (each matched to the closest engine filter, measured against Serum).
 - Envelopes, four LFOs, and the routes from macros, velocity, note number, mod wheel and random sources.
 - The whole effects chain above, and the two FX buses.
+- Convolution (Space) reverbs, with the impulse response from Serum's Impulses folder or stored in the preset.
 
 **Not carried yet**
 - FM, ring-mod and phase-distortion warps driven by the noise or by Filter 1 (the Sub- and oscillator-driven ones are carried), DLM, spectral tables, Sync Var.
@@ -114,7 +115,6 @@ On top of that there are **two FX buses**, each a full copy of the rack. Oscilla
 - A second distortion, compressor or delay; band-split (Split) branches; the Bode frequency shifter; a filter placed before the distortion; sends moved by an
   LFO or envelope.
 - Tempo-synced LFOs are read as plain rates in Hz.
-- Convolution (Space) reverbs.
 - Serum 1 presets. Serum 2 only.
 
 A preset using something in the second list still imports, with that part left out, and the import report says which. How closely it then sounds like
@@ -161,6 +161,37 @@ bash schwung-tablor/scripts/deploy.sh ableton@move.local
 ```
 
 Then reload the slot (or restart the Shadow UI) so the new module loads. `deploy.sh` replaces the module safely while the Move is running.
+
+## Where TinyHouse keeps its files, and removing it
+
+Everything TinyHouse writes goes to the Move's `/data` partition, and you can see all of it in Schwung's file manager (`http://move.local:7700/files`). Each
+bank is a folder name, and the same name is used in three places:
+
+| What | Where |
+|---|---|
+| Presets (`<name>.json`) | `/data/UserData/schwung/presets/tinyhouse/<bank>/` |
+| Wavetables (`.wav`) | `/data/UserData/UserLibrary/Wavetables/<bank>/` (tables stored inside a Serum preset: `<bank>/embedded/`) |
+| Sample sets (`.tbs`: Sample and Multisample oscillators, convolution-reverb impulses `conv_<id>.tbs`) | `/data/UserData/UserLibrary/Samples/<bank>/` |
+| Demo parts | `/data/UserData/schwung/midi/tinyhouse/` |
+| The module (`dsp.so`, the remote UI page, the converter) | `/data/UserData/schwung/modules/sound_generators/tinyhouse/` |
+
+**How imported Serum files work.** Importing only *reads* your Serum files, in the browser. Nothing in your Serum folders is changed. For each preset, the
+wavetables and samples it uses are converted and sent to the Move, into the bank's own folders above, next to the preset's `.json`, which names them by full path.
+
+- A file is sent only if it is not already there. If the same file (same size and same start, middle and end) is on the Move, it is skipped, so importing
+  a pack again is quick. A preset with the same name in the same bank is replaced.
+- Each bank keeps its **own copy** of what it uses, even when another bank uses the same table. That costs disk space but means a bank can be deleted on its own.
+- Nothing is deleted automatically. A file stays after you re-import a preset that no longer uses it, or delete a preset in the file manager.
+- **Delete bank** (remote UI) removes the bank's presets and its `Wavetables/<bank>` and `Samples/<bank>` folders. It keeps a folder if another bank's presets
+  still use it, and it never removes the wavetable packs that come with the module (`Factory`, `Adventure Kid`, `Neu KatalYst`).
+
+**Uninstalling.** Removing the module in Schwung's Module Store removes only the module folder. Your presets, sample sets and wavetables stay, so a
+reinstall finds them again. To remove everything, delete (in the file manager):
+
+1. `schwung/presets/tinyhouse` and `schwung/midi/tinyhouse`.
+2. The TinyHouse banks' folders inside `UserLibrary/Samples` and `UserLibrary/Wavetables` (the folders named after your banks, such as `Imports`).
+   Leave the other folders there alone: other modules keep their files beside them.
+3. `UserLibrary/Wavetables/.tablor-seeded`, a small marker file the module leaves. It does no harm if you keep it.
 
 ## For developers
 

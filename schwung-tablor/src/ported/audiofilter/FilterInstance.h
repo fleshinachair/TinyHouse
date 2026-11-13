@@ -38,6 +38,47 @@ void processFilter(FilterState<DataType>& state, const FilterParams<DataType>& p
     }
 }
 
+// Two channels through one biquad stage in the same loop. Each channel's arithmetic is exactly processFilter's, but the two recurrences are independent, so the
+// CPU runs one while it waits on the other (the single-channel loop is bound by the latency of its z1 / z2 chain). Used for a stereo pair with one stage.
+template <class DataType>
+void processFilterStereo(FilterState<DataType>& sa, FilterState<DataType>& sb, const FilterParams<DataType>& params,
+                         DataType* outA, DataType* outB, const DataType* inA, const DataType* inB, int numSamples)
+{
+    for (auto i = 0; i < numSamples; ++i)
+    {
+        const auto xa = inA[i], xb = inB[i];
+
+        const auto hpa = (xa - (params.f + params.r)*sa.z1 - sa.z2) * params.g;
+        const auto hpb = (xb - (params.f + params.r)*sb.z1 - sb.z2) * params.g;
+        const auto bpa = sa.z1 + params.f*hpa;
+        const auto bpb = sb.z1 + params.f*hpb;
+        const auto lpa = sa.z2 + params.f*bpa;
+        const auto lpb = sb.z2 + params.f*bpb;
+
+        sa.z1 = 2 * bpa - sa.z1;
+        sb.z1 = 2 * bpb - sb.z1;
+        sa.z2 = 2 * lpa - sa.z2;
+        sb.z2 = 2 * lpb - sb.z2;
+
+        outA[i] = params.h * hpa + params.b * bpa + params.l * lpa;
+        outB[i] = params.h * hpb + params.b * bpb + params.l * lpb;
+    }
+
+    if (params.useCompensation)
+    {
+        for (auto i = 0; i < numSamples; ++i)
+        {
+            const auto xa = outA[i], xb = outB[i];
+            const auto ya = xa * params.c0 + sa.x1 * params.c1 + sa.x2 * params.c2;
+            const auto yb = xb * params.c0 + sb.x1 * params.c1 + sb.x2 * params.c2;
+            sa.x2 = sa.x1; sb.x2 = sb.x1;
+            sa.x1 = xa;    sb.x1 = xb;
+            outA[i] = ya;
+            outB[i] = yb;
+        }
+    }
+}
+
 // Processes a higher order filter cascade. Of course, it expects the order for state and parameters to be the same.
 template <class DataType>
 void processFilterCascade(FilterStateCascade<DataType>& state, const FilterParamsCascade<DataType>& params, DataType* out, const DataType* in, int numSamples)
@@ -143,6 +184,11 @@ public:
     // for example: DataType* in[numChannels] = {inL, inR};
     void processBlock(DataType** out, const DataType** in, int numSamples)
     {
+        if (states.size() == 2 && params.size() == 1 && states[0]->size() == 1 && states[1]->size() == 1 && out[0] && out[1] && in[0] && in[1])
+        {
+            processFilterStereo<DataType>((*states[0])[0], (*states[1])[0], params[0], out[0], out[1], in[0], in[1], numSamples);
+            return;
+        }
         for (size_t ch = 0; ch < states.size(); ++ch)
             processFilterCascade<DataType>(*states[ch], params, out[ch], in[ch], numSamples);
     }

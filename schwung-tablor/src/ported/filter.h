@@ -42,8 +42,8 @@ public:
         biquad2.resize(1);
     }
 
-    void setSampleRate(double sr) { sampleRate = sr; }
-    void setType(Type t)          { type = t; }
+    void setSampleRate(double sr) { if (sr != sampleRate) { sampleRate = sr; ok1 = ok2 = false; } }
+    void setType(Type t)          { if (t != type) { type = t; ok1 = ok2 = false; } }
     void setSlope(Slope s)        { slope = s; }
     float getFrequency() const    { return freq; }
 
@@ -53,18 +53,22 @@ public:
         inst2.clear();
     }
 
+    /* The coefficients are a pure function of (type, freq, gain, Q, sample rate), so a call that repeats the last one (a steady cutoff across the block's pieces, the next
+     * block of a held note) changes nothing and is skipped; the second stage is only designed while the slope uses it. Designing the pair was a large part of a voice's
+     * per-block cost, paid again for every piece a note-boundary split cut the block into. */
     void setParams(float freq_, float q_, float g_ = 0.0f)
     {
         freq = freq_; q = q_; g = g_;
         if (type == none) return;
 
-        AudioFilter::ParametricCreator::createMZTiStage(
-            biquad1[0], freq, gainToDecibels(g), q, conv(type), sampleRate);
-        inst1.setParams(biquad1);
-
-        AudioFilter::ParametricCreator::createMZTiStage(
-            biquad2[0], freq, gainToDecibels(g), kFilterQ, conv(type), sampleRate);
-        inst2.setParams(biquad2);
+        if (!(ok1 && freq_ == d1f && q_ == d1q && g_ == d1g)) {
+            AudioFilter::ParametricCreator::createMZTiStage(
+                biquad1[0], freq, gainToDecibels(g), q, conv(type), sampleRate);
+            inst1.setParams(biquad1);
+            ok1 = true; d1f = freq_; d1q = q_; d1g = g_;
+        }
+        if (slope == db24) designStage2();
+        else ok2 = false;
     }
 
     /* In-place stereo processing. */
@@ -78,6 +82,7 @@ public:
             inst1.processBlock(chans, inChans, n);
             break;
         case db24:
+            if (!ok2) designStage2();                         /* the slope was switched since the last setParams */
             inst1.processBlock(chans, inChans, n);
             inst2.processBlock(chans, inChans, n);
             break;
@@ -85,6 +90,15 @@ public:
     }
 
 private:
+    void designStage2()
+    {
+        if (ok2 && freq == d2f && g == d2g) return;
+        AudioFilter::ParametricCreator::createMZTiStage(
+            biquad2[0], freq, gainToDecibels(g), kFilterQ, conv(type), sampleRate);
+        inst2.setParams(biquad2);
+        ok2 = true; d2f = freq; d2g = g;
+    }
+
     static AudioFilter::FilterType conv(Type t)
     {
         switch (t) {
@@ -105,6 +119,8 @@ private:
     Slope slope = db12;
     double sampleRate = 44100.0;
     float freq = 2000.0f, q = kFilterQ, g = 0.0f;
+    bool ok1 = false, ok2 = false;                            /* the stages hold the design for d1* / d2* */
+    float d1f = 0, d1q = 0, d1g = 0, d2f = 0, d2g = 0;
 
     AudioFilter::BiquadParamCascade biquad1, biquad2;
     AudioFilter::FilterInstance<float> inst1, inst2;

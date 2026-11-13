@@ -94,8 +94,28 @@ def _store(rel: str, data: bytes) -> None:
     elif low.endswith((".serumpack", ".zip")):
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             for n in z.namelist():
-                if not n.endswith("/") and n.lower().endswith((".serumpreset", ".wav")):
+                nl = n.lower()
+                if n.endswith("/"):
+                    continue
+                if nl.endswith(PACK_AUDIO):
+                    segs = _safe_rel(n).split("/")
+                    k = next((i for i, s in enumerate(segs[:-1]) if s.lower() in ("samples", "multisamples", "impulses")), None)
+                    if k is not None:                      # the pack's own Samples / Multisamples / Impulses: kept for the page to decode (a sample is not a wavetable)
+                        dest = _work() / "packaudio" / "/".join(segs[k:])
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_bytes(z.read(n))
+                        continue
+                if nl.endswith((".serumpreset", ".wav")):
                     _store(n, z.read(n))
+
+
+PACK_AUDIO = (".wav", ".flac", ".aif", ".aiff", ".ogg", ".mp3", ".sfz")
+
+
+def pack_audio_json() -> str:
+    """The sample, multisample and impulse files that came inside packs: [[path under the pack's root, e.g. "Samples/Packs/X/a.wav", where it is in Pyodide's file system]]."""
+    base = _work() / "packaudio"
+    return json.dumps([[f.relative_to(base).as_posix(), f.as_posix()] for f in sorted(base.rglob("*")) if f.is_file()] if base.is_dir() else [])
 
 
 def add_files(files) -> int:

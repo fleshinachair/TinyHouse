@@ -314,6 +314,11 @@ self.onmessage = async function (e) {
         py.FS.mkdirTree(dir);
         py.FS.writeFile("/smp/" + g.path, new Uint8Array(g.buf));
       }
+    } else if (m.cmd === "packaudio") {                    /* the audio files that came inside packs: [[name, path in Pyodide]] */
+      out = JSON.parse(py.runPython("import_web.pack_audio_json()"));
+    } else if (m.cmd === "packget") {                      /* one of them, as bytes */
+      var pd = py.FS.readFile(m.path), pab = pd.buffer.slice(pd.byteOffset, pd.byteOffset + pd.byteLength);
+      out = pab; transfer = [pab];
     } else if (m.cmd === "sfz") {
       py.globals.set("_rels", JSON.stringify(m.rels));
       out = py.runPython("import_web.sfz_audio_json(_rels)");
@@ -1621,6 +1626,7 @@ function impStart(onProgress) {
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 async function readBuf(file) {
+  if (file && file.pack) return impCall("packget", { path: file.pack });       /* a file that came inside a pack, held by the converter */
   if (file && typeof file.getFile === "function") file = await file.getFile();       /* a remembered folder's entries are handles, opened only when read */
   return new Promise(function (res, rej) {
     var fr = new FileReader();
@@ -1988,6 +1994,35 @@ function delSay(text, ms) {
   delBtn.textContent = text; clearTimeout(delTimer);
   delTimer = setTimeout(function () { delArmed = ""; delBtn.textContent = "Delete bank"; }, ms || 6000);
 }
+var SEEDED_WT = ["adventure kid", "neu katalyst", "factory"];       /* wavetable packs the module copies into the user folder once and does not copy back */
+/* For a bank about to be deleted: which of its Wavetables / Samples folders must stay. Returns { Wavetables: why|false, Samples: why|false }; "why" is text
+ * (or true when the other banks could not all be read). A preset names its files by full path in its state string, so the other banks' preset files
+ * are searched for ".../Wavetables/<bank>/" and ".../Samples/<bank>/". */
+async function foldersStillUsed(name) {
+  var out = { Wavetables: false, Samples: false };
+  if (SEEDED_WT.indexOf(name.toLowerCase()) >= 0) out.Wavetables = "a pack that comes with the module";
+  var need = { Wavetables: "/Wavetables/" + name + "/", Samples: "/Samples/" + name + "/" }, used = {}, unread = 0, who = {};
+  var jobs = [];
+  PS.banks.forEach(function (b) {
+    if (b.n === name || b.n === "User") return;
+    b.p.forEach(function (pn) { jobs.push({ bank: b.n, path: PRESET_ROOT + "/" + b.n + "/" + pn + ".json" }); });
+  });
+  for (var i = 0; i < jobs.length; i += 8) {
+    await Promise.all(jobs.slice(i, i + 8).map(async function (j) {
+      try {
+        var r = await fetch("/files/download?path=" + encodeURIComponent(j.path), { credentials: "same-origin" });
+        if (!r.ok) { unread++; return; }
+        var t = await r.text();
+        ["Wavetables", "Samples"].forEach(function (k) { if (t.indexOf(need[k]) >= 0) { used[k] = 1; who[k] = who[k] || j.bank; } });
+      } catch (e) { unread++; }
+    }));
+  }
+  ["Wavetables", "Samples"].forEach(function (k) {
+    if (used[k]) out[k] = "a preset in “" + who[k] + "” uses it";
+    else if (unread && !out[k]) out[k] = "could not read " + unread + " preset" + (unread === 1 ? "" : "s") + " in the other banks to check";
+  });
+  return out;
+}
 async function deleteBank() {
   var bk = PS.banks[PS.viewBank];
   if (!bk) { delSay("No bank to delete"); return; }
@@ -2003,8 +2038,14 @@ async function deleteBank() {
   try {
     var r = await deleteRemote(PRESET_ROOT + "/" + name);
     if (!r.ok) throw new Error("the Move refused (" + r.status + ")");
-    var more = ["/data/UserData/UserLibrary/Wavetables/", "/data/UserData/UserLibrary/Samples/"];
-    for (var i = 0; i < more.length; i++) { try { await deleteRemote(more[i] + name); } catch (e) {} }   /* a bank without them: the manager says no, which is fine */
+    /* The wavetable and sample folders of the same name go too, unless another bank's presets still point into them (read from the Move), or the
+     * folder is one of the module's seeded wavetable packs. If the other banks cannot all be read, the folders are kept. */
+    var kept = await foldersStillUsed(name), more = ["Wavetables", "Samples"], keptNote = [];
+    for (var i = 0; i < more.length; i++) {
+      var why = kept[more[i]];
+      if (why) { keptNote.push(more[i] + (why === true ? "" : " (" + why + ")")); continue; }
+      try { await deleteRemote("/data/UserData/UserLibrary/" + more[i] + "/" + name); } catch (e) {}   /* a bank without them: the manager says no, which is fine */
+    }
     send("rescan", 1);
     for (var t = 0; t < 10; t++) {
       await sleep(t ? 700 : 1200);
@@ -2016,7 +2057,7 @@ async function deleteBank() {
     PS.viewBank = Math.min(PS.viewBank, Math.max(0, PS.banks.length - 1));
     if (wasCurrent) { PS.b = 0; PS.i = 0; }
     renderPbar(); renderBrowser();
-    delSay("Deleted “" + name + "”", 3000);
+    delSay("Deleted “" + name + "”" + (keptNote.length ? "; kept its " + keptNote.join(" and ") + " folder" + (keptNote.length > 1 ? "s" : "") : ""), keptNote.length ? 12000 : 3000);
   } catch (e) { delSay("Could not delete “" + name + "”: " + e.message, 8000); }
 }
 function b64bytes(s) {
@@ -2041,8 +2082,41 @@ function sniffRate(b) {
   } catch (e) {}
   return 0;
 }
+/* AIFF / AIFF-C with plain PCM (8, 16, 24, 32 bit; "sowt" is the little-endian kind): browsers do not decode these, so they are read here. Returns the 16-bit result decodeAudio hands over, or null. */
+function decodeAiff(buf) {
+  var u = new Uint8Array(buf), d = new DataView(buf);
+  if (u.length < 12 || String.fromCharCode(u[0], u[1], u[2], u[3]) !== "FORM") return null;
+  var comm = null, ssnd = null, o = 12;
+  while (o + 8 <= u.length) {
+    var id = String.fromCharCode(u[o], u[o + 1], u[o + 2], u[o + 3]), sz = d.getUint32(o + 4);
+    if (id === "COMM" && o + 26 <= u.length) {
+      var ex = d.getUint16(o + 8 + 8) & 0x7fff, hi = d.getUint32(o + 8 + 10);
+      comm = { ch: d.getUint16(o + 8), frames: d.getUint32(o + 10), bits: d.getUint16(o + 14), rate: Math.round(hi / Math.pow(2, 31 - (ex - 16383))),
+               type: sz >= 22 ? String.fromCharCode(u[o + 26], u[o + 27], u[o + 28], u[o + 29]) : "NONE" };
+    } else if (id === "SSND") ssnd = { at: o + 16 + d.getUint32(o + 8), end: Math.min(u.length, o + 8 + sz) };
+    o += 8 + sz + (sz & 1);
+  }
+  if (!comm || !ssnd || comm.ch < 1 || [8, 16, 24, 32].indexOf(comm.bits) < 0) return null;
+  var little = comm.type === "sowt", bytes = comm.bits / 8, ch = Math.min(comm.ch, 2);
+  if (comm.type !== "NONE" && comm.type !== "sowt" && comm.type !== "twos") return null;
+  var n = Math.min(comm.frames, Math.floor((ssnd.end - ssnd.at) / (bytes * comm.ch)));
+  if (n < 1) return null;
+  var out = new ArrayBuffer(8 + n * ch * 2), dv = new DataView(out), pcm = new Int16Array(out, 8, n * ch);
+  dv.setUint32(0, comm.rate >= 8000 && comm.rate <= 96000 ? comm.rate : 44100, true); dv.setUint32(4, ch, true);
+  for (var i = 0; i < n; i++) for (var c = 0; c < ch; c++) {
+    var p = ssnd.at + (i * comm.ch + c) * bytes, v;
+    if (bytes === 1) v = (d.getInt8(p)) << 8;
+    else if (bytes === 2) v = d.getInt16(p, little);
+    else if (bytes === 3) v = little ? ((u[p + 2] << 24 | u[p + 1] << 16 | u[p] << 8) >> 16) : ((u[p] << 24 | u[p + 1] << 16 | u[p + 2] << 8) >> 16);
+    else v = d.getInt32(p, little) >> 16;
+    pcm[i * ch + c] = v;
+  }
+  return out;
+}
 async function decodeAudio(file) {
   var buf = await readBuf(file), rate = sniffRate(buf);
+  var aif = decodeAiff(buf);
+  if (aif) return aif;
   if (!(rate >= 8000 && rate <= 96000)) rate = 44100;
   var Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   var ab = await new Ctx(1, 1, rate).decodeAudioData(buf);
@@ -2135,6 +2209,10 @@ async function runImport() {
     }
     var names = await impCall("names", {});
     if (!names.length) throw new Error("No presets were found in what was chosen.");
+    IMP.smps = IMP.smps.filter(function (x) { return !x.packed; });          /* samples, multisamples and impulses the packs carry are looked for like the picked folders' */
+    (await impCall("packaudio", {})).forEach(function (pa) {
+      IMP.smps.push({ file: { pack: pa[1] }, rel: pa[0], packed: true, imp: /^impulses\//i.test(pa[0]) });
+    });
 
     async function convertSome(list, from, to, label) {
       for (var j = 0; j < list.length; j += 6) {

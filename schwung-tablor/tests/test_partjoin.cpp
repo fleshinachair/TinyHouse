@@ -42,6 +42,9 @@ int main()
     std::string root = std::string(getenv("TMP") ? getenv("TMP") : "/tmp") + "/pj_test";
     MKDIR(root.c_str()); MKDIR((root + "/Imports").c_str());
     const std::string d = root + "/Imports";
+    for (const char *old : { "/Big set.tbs", "/Big set.tbs.joining", "/Mixed.tbs", "/Mixed.tbs.part0000of0002", "/Mixed.tbs.part0001of0003",
+                             "/Big set.tbs.part0000of0001", "/Big set.tbs.part0000of0003", "/Big set.tbs.part0001of0003", "/Big set.tbs.part0002of0003" })
+        remove((d + old).c_str());                  /* what an earlier run left behind */
 
     /* names */
     {

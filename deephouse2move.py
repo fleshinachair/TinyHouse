@@ -985,6 +985,51 @@ def write_embedded_table(data: list, wt_out: Path, subdir: str) -> str:
     return f"{MOVE_WT_ROOT}/{subdir}/embedded/{name}"
 
 
+FLIP_TOLERANCE = 0.01      # Serum's Flip warp is a morph that repeats: amount 0 and 1 are the table as it is, 0.5 is the table read BACKWARDS (a time reversal, every
+#                            harmonic's phase negated, magnitudes unchanged) at every table position (calibration/probe_flip.py: at 0.5 and 0.5034 the magnitudes agree to 0.03 dB and the
+#                            phases exactly; 0.05 away it is already 1.9 dB / 70 deg off, and 0.15-0.35 is a different, noisy shape). So only those two ends are carried.
+
+
+def reverse_table(move_path: str, wt_out: Path) -> str | None:
+    """A copy of a wavetable with every frame read backwards (sample i takes the sample at N - i, so sample 0 stays where it is), next to the original, and its Move path. The frame
+    size is the table's own `clm ` chunk (Serum's layout); a table without one, a stereo one, or one that is not a plain PCM / float WAV gives None."""
+    if not move_path.startswith(MOVE_WT_ROOT + "/"):
+        return None
+    src = wt_out / move_path[len(MOVE_WT_ROOT) + 1:]
+    if not src.is_file():
+        return None
+    raw = src.read_bytes()
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        return None
+    pos, width, chans, frame, data = 12, 0, 0, 0, None
+    while pos + 8 <= len(raw):
+        cid, size = raw[pos:pos + 4], struct.unpack("<I", raw[pos + 4:pos + 8])[0]
+        body = raw[pos + 8:pos + 8 + size]
+        if cid == b"fmt " and len(body) >= 16:
+            tag, chans, _, _, _, bits = struct.unpack("<HHIIHH", body[:16])
+            width = bits // 8 if tag in (1, 3) else 0
+        elif cid == b"clm ":
+            m = re.match(rb"<!>(\d+)", body)
+            frame = int(m.group(1)) if m else 0
+        elif cid == b"data":
+            data = (pos + 8, size)
+        pos += 8 + size + (size & 1)
+    if not (width and chans == 1 and 32 <= frame <= 4096 and data):
+        return None
+    start, size = data
+    size = min(size, len(raw) - start)
+    step = frame * width
+    out = bytearray(raw)
+    for f in range(size // step):
+        base = start + f * step
+        cells = [raw[base + i * width: base + (i + 1) * width] for i in range(frame)]
+        out[base:base + step] = b"".join(cells[(frame - i) % frame] for i in range(frame))
+    dest = src.with_name(src.stem + "_flipped" + src.suffix)
+    if not dest.exists():
+        dest.write_bytes(bytes(out))
+    return move_path[:len(move_path) - len(src.name)] + dest.name
+
+
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 # A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
@@ -1455,10 +1500,16 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{k}_spread"] = (round(_clamp(stereo / 100 * CAL["width_scale"], 0, 1) * 127)
                             if P[f"{k}_uni"] > 1 else 0)
         P[f"{k}_pan"] = round(_clamp(64 + 63 * o["pan"] / 100, 0, 127))
+        flip_rev = None                   # the Flip warp at 0.5: the table is read backwards (reverse_table, once the table's path is known)
         for wi, w in enumerate(o["warp"]):
+            if w["mode"] == "kFlip" and w["amount"] >= 1 - FLIP_TOLERANCE:
+                continue                  # Flip at its end is the table as it is
             if w["amount"] < WARP_NOISE_FLOOR:
                 continue
-            if w["mode"] == "kEvenOdd" and w["amount"] >= 0.9:
+            if w["mode"] == "kFlip" and abs(w["amount"] - 0.5) <= FLIP_TOLERANCE and not any(
+                    v["amount"] >= WARP_NOISE_FLOOR for v in o["warp"][:wi]):       # only as the first warp: a warp after it reads the reversed table, as it does in Serum
+                flip_rev = {"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]}
+            elif w["mode"] == "kEvenOdd" and w["amount"] >= 0.9:
                 # Even/Odd at its end keeps only the even harmonics (calibration/osc_survey.py: Lead - HotLap's oscillator starts at the second harmonic in Serum): the
                 # same wave an octave up. The harmonic amplitudes are those of the table's even harmonics, which the engine cannot take out; the pitch is right.
                 P[f"{k}_tune"] = round(_clamp(P[f"{k}_tune"] + 12, -48, 48))
@@ -1497,6 +1548,14 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             path = write_embedded_table(o["embedded"], wt_out, subdir)
             note.append(f"{k}: the preset's own embedded wavetable ({len(o['embedded']) // EMBEDDED_FRAME} frames)")
             ref = None
+        if flip_rev and path:
+            rev = reverse_table(path, wt_out)
+            if rev:
+                path = rev
+                appr.append(f"{k} warp Flip carried as the table read backwards (measured: the same magnitudes, every harmonic's phase negated)")
+            else:
+                crit.append(f"{k} warp Flip unsupported (the wavetable could not be reversed: no frame size in the file)")
+                unsup_warps.append(flip_rev)
         paths[f"{k}_table"] = path or "Init"
         if path is None and ref:
             missing.append(ref)

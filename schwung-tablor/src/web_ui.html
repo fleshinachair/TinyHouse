@@ -1647,9 +1647,13 @@ function cleanBank(s) {
 }
 
 /* ---- picking ---- */
+/* Serum 1 presets (.fxp) and banks (.fxb) are not Serum 2 presets: they are counted so the page can say so instead of quietly finding nothing */
+function noteOld(low, rel) { if (/\.(fxp|fxb)$/.test(low)) (IMP.old = IMP.old || {})[rel] = 1; }
+function oldCount() { return Object.keys(IMP.old || {}).length; }
 function addPicks(list, asTables) {
   list.forEach(function (it) {
     var rel = cleanRel(it.rel), low = rel.toLowerCase();
+    noteOld(low, rel);
     if (asTables === "smp") { if (/\.(flac|wav|aif|aiff|ogg|mp3|sfz)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel }); }
     else if (/\.wav$/.test(low)) (asTables ? IMP.tables : IMP.wavs).push({ file: it.file, rel: rel });
     else if (!asTables && /\.(serumpreset|serumpack|zip)$/.test(low)) IMP.presets.push({ file: it.file, rel: rel });
@@ -1688,6 +1692,7 @@ function addRoot(list) {
     var segs = cleanRel(it.rel).split("/");
     segs.shift();                                             /* the picked folder's own name, whatever it is called */
     var top = (segs[0] || "").toLowerCase(), rel = segs.join("/"), low = rel.toLowerCase();
+    noteOld(low, rel);
     if (top === "tables") { if (/\.wav$/.test(low)) IMP.tables.push({ file: it.file, rel: rel, fromRoot: true }); }
     else if (top === "samples" || top === "multisamples") { if (/\.(flac|wav|aif|aiff|ogg|mp3|sfz)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel, fromRoot: true }); }
     else if (top === "impulses") { if (/\.(flac|wav|aif|aiff|ogg|mp3)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel, fromRoot: true, imp: true }); }      /* a Convolution reverb's impulse responses */
@@ -1903,6 +1908,8 @@ function impSummary() {
   if (n) parts.push(n + (n === 1 ? " preset" : " presets"));
   if (k) parts.push(k + (k === 1 ? " pack" : " packs"));
   IMP.sumEl.textContent = (parts.length ? parts.join(" and ") + " chosen" : "Nothing chosen yet") + (w ? " · " + w + " wavetable files available" : "") + (IMP.smps.length ? " · " + IMP.smps.length + " sample files available" : "");
+  var o = oldCount();
+  if (o) IMP.sumEl.textContent += " · " + o + " Serum 1 " + (o === 1 ? "file" : "files") + " (.fxp / .fxb) left out: only Serum 2 presets (.SerumPreset, .SerumPack) can be imported";
   IMP.goEl.disabled = IMP.busy || !(n || k);
   if (!IMP.bankTouched && IMP.bankEl) {
     var first = IMP.presets[0], nm = "Imports";
@@ -2219,7 +2226,7 @@ async function runImport() {
       impStatus("Reading presets… " + (i + 1) + " of " + queue.length, 2 + 8 * (i + 1) / queue.length);
     }
     var names = await impCall("names", {});
-    if (!names.length) throw new Error("No presets were found in what was chosen.");
+    if (!names.length) throw new Error(oldCount() ? "No Serum 2 presets were found. The " + oldCount() + " .fxp/.fxb files chosen are Serum 1 presets, which cannot be imported: only Serum 2 presets (.SerumPreset) and packs (.SerumPack) can." : "No presets were found in what was chosen.");
     IMP.smps = IMP.smps.filter(function (x) { return !x.packed; });          /* samples, multisamples and impulses the packs carry are looked for like the picked folders' */
     (await impCall("packaudio", {})).forEach(function (pa) {
       IMP.smps.push({ file: { pack: pa[1] }, rel: pa[0], packed: true, imp: /^impulses\//i.test(pa[0]) });
@@ -2420,7 +2427,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
 /* ---- the dialog ---- */
 function impBuildForm() {
   var body = IMP.bodyEl; body.textContent = "";
-  IMP.presets = []; IMP.wavs = []; IMP.tables = []; IMP.smps = []; IMP.units = null; IMP.rootBank = null; IMP.bankTouched = false; IMP.afterAdd = null;
+  IMP.presets = []; IMP.wavs = []; IMP.tables = []; IMP.smps = []; IMP.units = null; IMP.rootBank = null; IMP.bankTouched = false; IMP.afterAdd = null; IMP.old = {};
   function picker(label, attrs, onpick, asTables) {
     var inp = el("input", null, body); inp.type = "file"; inp.style.display = "none";
     for (var a in attrs) inp.setAttribute(a, attrs[a]);

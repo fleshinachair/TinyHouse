@@ -1020,6 +1020,17 @@ def comp_params(nodes: list[dict], dyn_i: int | None = None) -> tuple[dict, list
     return {}, []
 
 
+UTILS_STEREO_KEYS = ("kParamWidth", "kParamLFMono", "kParamLFXover", "kParamBalance")
+
+
+def utils_level_why(nodes: list[dict], ctx: dict | None) -> list[str]:
+    """A Utils Level Out moved by an envelope or LFO (a gain that pumps with it, as on the hardstyle kicks): the rest of the Utils is still carried."""
+    mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils" and m.get("dest_param") == "kParamLevelOut"]
+    if any(not foldable_source(m, (ctx or {}).get("macros", [])) for m in mods):
+        return ["Utils Level Out moved by an envelope/LFO (the pumping of its volume is not carried)"]
+    return []
+
+
 def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | None, list[str]]:
     """Serum's Utils effect on the master signal as (width factor, mono-below Hz or None, why not). Width is the
     product of every Utils width (100 % = 1); Low Freq Mono is the highest crossover set. Anything moved by an
@@ -1028,7 +1039,7 @@ def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | No
     width, mono, why = 1.0, None, []
     inside = branch_nodes(nodes)
     mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils"]
-    dynamic = any(not foldable_source(m, (ctx or {}).get("macros", [])) for m in mods)
+    dynamic = any(not foldable_source(m, (ctx or {}).get("macros", [])) and m.get("dest_param") in UTILS_STEREO_KEYS for m in mods)       # a Level Out route is a gain: utils_level_why
     for i, n in enumerate(nodes):
         if kind_of(n) != "Utils" or not enabled(n):
             continue
@@ -1823,13 +1834,16 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         notes.append(f"Utils carried as master width {width * 100:.0f} %" + (f" and mono below {mono:.0f} Hz" if mono is not None else ""))
     if uwhy:
         notes.append("Utils not carried: " + "; ".join(sorted(set(uwhy))))
+    notes += utils_level_why(nodes, ctx)
     carried_utils = (width != 1.0 or mono is not None) and not uwhy
     # A Distortion / Comp / Bode / Filter / Utils / Split node with a stored Wet under 1 % and no envelope / LFO / velocity route to its Wet passes the signal untouched
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
     wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros") or [None])}
     # A Bode that stores nothing that shifts, delays or blurs (no Shift, Feedback, Blur, DelayTime, OutputMix or width: a stored LevelOut / Range / sync flag only) is a frequency shift of 0 Hz
-    # through an empty delay: transparent (calibration/probe_bode_default.py, a Bode with no stored params: band differences +-0.1 dB, the render's own floor).
-    bode_idle = lambda x: kind_of(x) == "Bode" and set(plain(x)) <= BODE_IDLE_KEYS
+    # through an empty delay: transparent (calibration/probe_bode_default.py, a Bode with no stored params: band differences +-0.1 dB, the render's own floor). A stored Blur alone, with no
+    # Shift, Feedback or DelayTime to smear, is the same (calibration/probe_bode_blur.py / probe_bode_blur2.py: Blur 99 at Wet 100 changes the level by -0.04 dB; the attack and the faint tail after release,
+    # -57 dB, are those of any Bode node).
+    bode_idle = lambda x: kind_of(x) == "Bode" and set(plain(x)) <= (BODE_IDLE_KEYS | {"kParamBlur"})
     dry = lambda x: kind_of(x) in DRY_KINDS and (float(plain(x).get("kParamWet", 100.0)) < 1.0 or bode_idle(x)) and "FX" + kind_of(x) not in wet_mod
     # A SplitMS whose branches hold nothing but EQs is carried (their bands are the engine's mid / side EQs: map_eq); one with another effect in a branch is not.
     ms_idx = ms_branches(nodes)

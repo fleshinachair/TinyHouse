@@ -1954,6 +1954,27 @@ async function uploadBig(dir, name, bytes, onPart) {
   }
   return n;
 }
+/* A file already on the Move, the same as the one about to be sent, is not sent again (re-importing a pack would otherwise push its big sample
+ * sets up every time). "Same": the manager's download answers HEAD with the exact size and honours Range, so the size and the start, middle and end
+ * of the file are compared. Any doubt (no answer, a different size, a server that ignores Range) counts as different and the file is sent. */
+async function sameOnMove(path, bytes) {
+  try {
+    var url = "/files/download?path=" + encodeURIComponent(path), len = bytes.byteLength;
+    var h = await fetch(url, { method: "HEAD", credentials: "same-origin" });
+    if (!h.ok || Number(h.headers.get("Content-Length")) !== len) return false;
+    var n = Math.min(65536, len), spans = [[0, n]];
+    if (len > 3 * n) { spans.push([Math.floor(len / 2 - n / 2), Math.floor(len / 2 - n / 2) + n]); spans.push([len - n, len]); }
+    for (var i = 0; i < spans.length; i++) {
+      var a = spans[i][0], b = spans[i][1];
+      var r = await fetch(url, { credentials: "same-origin", headers: { "Range": "bytes=" + a + "-" + (b - 1) } });
+      if (r.status !== 206) { if (r.body && r.body.cancel) r.body.cancel(); return false; }
+      var got = new Uint8Array(await r.arrayBuffer());
+      if (got.length !== b - a) return false;
+      for (var k = 0; k < got.length; k++) if (got[k] !== bytes[a + k]) return false;
+    }
+    return true;
+  } catch (e) { return false; }
+}
 /* Delete a bank: its preset folder, and the wavetable and sample folders of the same name (where imports put them). Uses the manager's
  * /files/delete (form field "path"; it removes a folder with everything in it). The loose "User" bank is not a folder and cannot go. */
 async function deleteRemote(path) {
@@ -2188,6 +2209,7 @@ async function runImport() {
     var sendable = list.filter(function (p) { return p.json; });
     var wtPaths = Object.keys(files), smPaths = Object.keys(smpFiles);
     var total = sendable.length + wtPaths.length + smPaths.length, done = 0;
+    IMP.same = 0;
     impStatus("Sending to the Move…", 70);
     var bankDir = await ensurePath(PRESET_ROOT, bank);
     async function step(label, fn) {
@@ -2200,7 +2222,9 @@ async function runImport() {
         var base = "/data/UserData/UserLibrary/Samples";
         var rel = path.substring(base.length + 1).split("/"), name = rel.pop();
         var dir = await ensurePath(base, rel.join("/"));
-        await uploadBig(dir, name, new Uint8Array(smpFiles[path]), function (i, n) { impStatus("Sending to the Move… " + name + " (part " + i + " of " + n + ")", 70 + 25 * done / Math.max(total, 1)); });
+        var sb = new Uint8Array(smpFiles[path]);
+        if (await sameOnMove(path, sb)) { IMP.same = (IMP.same || 0) + 1; delete smpFiles[path]; return; }
+        await uploadBig(dir, name, sb, function (i, n) { impStatus("Sending to the Move… " + name + " (part " + i + " of " + n + ")", 70 + 25 * done / Math.max(total, 1)); });
         delete smpFiles[path];
       }; })(smPaths[sq]));
     }
@@ -2210,7 +2234,9 @@ async function runImport() {
         var base = "/data/UserData/UserLibrary/Wavetables";
         var rel = path.substring(base.length + 1).split("/"), name = rel.pop();
         var dir = await ensurePath(base, rel.join("/"));
-        await uploadRetry(dir, name, new Blob([b64bytes(files[path])], { type: "audio/wav" }));
+        var wb = b64bytes(files[path]);
+        if (await sameOnMove(path, wb)) { IMP.same = (IMP.same || 0) + 1; return; }
+        await uploadRetry(dir, name, new Blob([wb], { type: "audio/wav" }));
       }; })(path));
     }
     var sent = {};
@@ -2264,6 +2290,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
   var tk = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; }).slice(0, 6);
   if (tk.length) el("div", "rep-sub", body, "Most common gaps: " + tk.map(function (k) { return k + " ×" + tally[k]; }).join(" · "));
   if (whole.length) el("div", "rep-line", body, whole.length + " imported with nothing left out.");
+  if (IMP.same) el("div", "rep-sub", body, IMP.same + " wavetable or sample file" + (IMP.same === 1 ? " was" : "s were") + " already on the Move, the same, and not sent again.");
   function group(title, arr, cls, fn) {
     if (!arr.length) return;
     var d = el("details", "rep-g " + cls, body);

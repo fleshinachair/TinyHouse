@@ -27,6 +27,7 @@
 #include "engine.h"
 #include "wt/scanner.h"
 #include "wt/loader.h"
+#include "partjoin.h"
 #include "preset_digest.h"
 
 static const host_api_v1_t *g_host = nullptr;
@@ -1388,6 +1389,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (!strcmp(k, "rescan")) {
         inst->loader.post([inst] {
             if (inst->loader.stopping()) return;
+            tb::PartJoin::joinAll("/data/UserData/UserLibrary/Samples");     /* big sample sets the Import sent in pieces */
             inst->scanner.scan();
             tb_publish_selection(inst);
             scan_store_presets(inst);

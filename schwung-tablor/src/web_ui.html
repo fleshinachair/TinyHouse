@@ -1932,6 +1932,28 @@ async function uploadRemote(dir, name, blob) {
   var r = await fetch("/files/upload", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-CSRF-Token": csrf() } });
   if (!r.ok) throw new Error("upload " + name + " failed (" + r.status + ")");
 }
+/* The manager keeps an upload in memory up to a limit and writes a bigger one to the Move's temp folder, which is on the system partition and
+ * nearly full: a big sample set then never arrives (the connection is cut: "Failed to fetch"). So a file over PART_BYTES goes up in pieces
+ * named <file>.part0002of0010, which the module puts back together when it rescans (src/dsp/partjoin.h). Every upload is tried up to three times. */
+var PART_BYTES = 6 * 1024 * 1024;
+async function uploadRetry(dir, name, blob) {
+  var err = null;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try { await uploadRemote(dir, name, blob); return; }
+    catch (e) { err = e; await sleep(500 * (attempt + 1)); }
+  }
+  throw err;
+}
+function pad4(n) { return ("0000" + n).slice(-4); }
+async function uploadBig(dir, name, bytes, onPart) {
+  var n = Math.max(1, Math.ceil(bytes.byteLength / PART_BYTES));
+  if (n === 1) { await uploadRetry(dir, name, new Blob([bytes], { type: "application/octet-stream" })); return 1; }
+  for (var i = 0; i < n; i++) {
+    if (onPart) onPart(i + 1, n);
+    await uploadRetry(dir, name + ".part" + pad4(i) + "of" + pad4(n), new Blob([bytes.subarray(i * PART_BYTES, Math.min(bytes.byteLength, (i + 1) * PART_BYTES))], { type: "application/octet-stream" }));
+  }
+  return n;
+}
 /* Delete a bank: its preset folder, and the wavetable and sample folders of the same name (where imports put them). Uses the manager's
  * /files/delete (form field "path"; it removes a folder with everything in it). The loose "User" bank is not a folder and cannot go. */
 async function deleteRemote(path) {
@@ -2178,7 +2200,7 @@ async function runImport() {
         var base = "/data/UserData/UserLibrary/Samples";
         var rel = path.substring(base.length + 1).split("/"), name = rel.pop();
         var dir = await ensurePath(base, rel.join("/"));
-        await uploadRemote(dir, name, new Blob([smpFiles[path]], { type: "application/octet-stream" }));
+        await uploadBig(dir, name, new Uint8Array(smpFiles[path]), function (i, n) { impStatus("Sending to the Move… " + name + " (part " + i + " of " + n + ")", 70 + 25 * done / Math.max(total, 1)); });
         delete smpFiles[path];
       }; })(smPaths[sq]));
     }
@@ -2188,14 +2210,14 @@ async function runImport() {
         var base = "/data/UserData/UserLibrary/Wavetables";
         var rel = path.substring(base.length + 1).split("/"), name = rel.pop();
         var dir = await ensurePath(base, rel.join("/"));
-        await uploadRemote(dir, name, new Blob([b64bytes(files[path])], { type: "audio/wav" }));
+        await uploadRetry(dir, name, new Blob([b64bytes(files[path])], { type: "audio/wav" }));
       }; })(path));
     }
     var sent = {};
     for (var s2 = 0; s2 < sendable.length; s2++) {
       var p = sendable[s2];
       await step(p.name, (function (p) { return async function () {
-        await uploadRemote(bankDir, p.name + ".json", new Blob([p.json], { type: "application/json" }));
+        await uploadRetry(bankDir, p.name + ".json", new Blob([p.json], { type: "application/json" }));
         sent[p.file] = 1;
       }; })(p));
     }

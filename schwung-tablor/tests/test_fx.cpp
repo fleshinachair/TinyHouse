@@ -1187,6 +1187,62 @@ int main()
     testFxFilter();
     testModFx();
     testLfo();
+    printf("== distortion Wet route ==\n");
+    {
+        auto wetRun = [&](float mod) {
+            FxSettings s;
+            s.distCal = true; s.distMode = 2; s.distGain = 8.0f; s.distOut = 1.0f; s.distLevel = 1.0f; s.distMix = 0.0f;
+            Fx fx(SR);
+            fx.set(s);
+            fx.setDistWetMod(mod);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * 220.0 * i / SR));
+            run(fx, L, R);
+            return std::vector<float>(L.begin() + n / 2, L.end());
+        };
+        const auto off = wetRun(0.0f), on = wetRun(0.6f);
+        CHECK(goertzelDb(off, 660.0) < goertzelDb(off, 220.0) - 80.0, "a Wet of 0 with no route leaves the sine alone");
+        CHECK(goertzelDb(on, 660.0) > goertzelDb(on, 220.0) - 30.0, "a route that adds 60 %% Wet turns the distortion on (3rd %.1f dB down)", goertzelDb(on, 220.0) - goertzelDb(on, 660.0));
+    }
+
+    printf("== split (distortion in one band) ==\n");
+    {
+        auto splitRun = [&](int band, double f, double amp, bool distortion) {
+            FxSettings s;
+            s.distDrive = distortion ? 0.9f : 0.0f; s.distMix = 1.0f; s.distMode = 2;
+            s.splitBand = band; s.splitStages = band ? 2 : 0; s.splitHz = 250.0f;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (amp * std::sin(6.283185307 * f * i / SR));
+            run(fx, L, R);
+            return std::vector<float>(L.begin() + n / 2, L.end());
+        };
+        const auto lowAll = splitRun(0, 60.0, 0.3, true), lowHighBand = splitRun(2, 60.0, 0.3, true), lowLowBand = splitRun(1, 60.0, 0.3, true);
+        CHECK(goertzelDb(lowAll, 180.0) > goertzelDb(lowAll, 60.0) - 25.0, "a hard-clipped 60 Hz sine has a 3rd harmonic (%.1f dB down)", goertzelDb(lowAll, 60.0) - goertzelDb(lowAll, 180.0));
+        CHECK(goertzelDb(lowHighBand, 180.0) < goertzelDb(lowHighBand, 60.0) - 50.0, "with the distortion in the band above 250 Hz the 60 Hz sine stays clean (%.1f dB down)", goertzelDb(lowHighBand, 60.0) - goertzelDb(lowHighBand, 180.0));
+        CHECK(goertzelDb(lowLowBand, 180.0) > goertzelDb(lowLowBand, 60.0) - 25.0, "with it in the band below 250 Hz the sine is clipped as before");
+        const auto hiHigh = splitRun(2, 2000.0, 0.3, true), hiLow = splitRun(1, 2000.0, 0.3, true);
+        CHECK(goertzelDb(hiHigh, 6000.0) > goertzelDb(hiHigh, 2000.0) - 25.0, "a 2 kHz sine is clipped when the distortion is in the high band");
+        CHECK(goertzelDb(hiLow, 6000.0) < goertzelDb(hiLow, 2000.0) - 50.0, "and stays clean when it is in the low band (%.1f dB down)", goertzelDb(hiLow, 2000.0) - goertzelDb(hiLow, 6000.0));
+        /* a branch that does nothing leaves the level where it was: the two bands of a Linkwitz-Riley split sum flat */
+        const auto a = splitRun(0, 250.0, 0.3, false), b = splitRun(2, 250.0, 0.3, false);
+        double ra = 0, rb = 0;
+        for (size_t i = 0; i < a.size(); i++) { ra += (double) a[i] * a[i]; rb += (double) b[i] * b[i]; }
+        CHECK(std::fabs(10 * std::log10(ra / rb)) < 0.2, "an idle branch is transparent at the crossover (%+.2f dB)", 10 * std::log10(rb / ra));
+        /* SplitMS: a distortion on the Mid leaves a side-only signal alone */
+        FxSettings s; s.distDrive = 0.9f; s.distMix = 1.0f; s.distMode = 2; s.splitBand = 3; s.splitStages = 2;
+        Fx fx(SR); fx.set(s);
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) { L[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * 220.0 * i / SR)); R[(size_t) i] = -L[(size_t) i]; }
+        run(fx, L, R);
+        const std::vector<float> o(L.begin() + n / 2, L.end());
+        CHECK(goertzelDb(o, 660.0) < goertzelDb(o, 220.0) - 60.0, "SplitMS: the distortion on the Mid does not touch a side-only signal (%.1f dB down)", goertzelDb(o, 220.0) - goertzelDb(o, 660.0));
+    }
+
     printf("\n%s (%d failures)\n", g_fail ? "FX TESTS FAILED" : "FX TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

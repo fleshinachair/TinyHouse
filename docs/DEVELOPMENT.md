@@ -64,7 +64,7 @@ built on wavetables.
 Two **FX buses** each hold a full copy of this rack. Sources and filter outputs have per-bus sends (`level^3`, as in Serum); the bus output joins the
 main path ahead of the main rack.
 
-**Not carried:** a second distortion or compressor stage, a second delay, SplitMS branches holding anything but EQs (EQs in the Mid / Side branches are the engine's mid/side EQs), band-split (Split) branches,
+**Not carried:** a second distortion or compressor stage, a second delay, SplitMS branches holding anything but EQs (EQs in the Mid / Side branches are the engine's mid/side EQs), band-split (Split) branches holding anything but a Distortion or Chorus / Flanger / Phaser (those are the engine's band stage),
 Bode frequency shifter, Utils width inside a bus rack, a filter placed before the distortion, sends moved by an LFO or envelope.
 
 ## Repo layout

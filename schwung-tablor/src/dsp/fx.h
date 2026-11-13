@@ -171,6 +171,10 @@ struct FxSettings {
     /* Serum's HyperD ahead of the distortion: voices (1 is off), detune 0..1 (how far each voice's delay moves), rate 0..1 (how fast), wet 0..1. */
     int   hydVoices = 1;
     float hydDetune = 0, hydRate = 0.4f, hydWet = 0;
+    /* Serum's Split / SplitMS: the stages in splitStages (1 HyperD, 2 Distortion, 4 Chorus / Flanger / Phaser) work on one band only: 1 the low band below splitHz, 2 the high band
+     * above it (a 4th-order Linkwitz-Riley crossover), 3 the Mid, 4 the Side. 0 is off. */
+    int   splitBand = 0, splitStages = 0;
+    float splitHz = 250;
 };
 
 namespace fxdetail {
@@ -472,9 +476,13 @@ public:
     void set(const FxSettings &s)
     {
         st = s;
+        distMixBase = s.distMix; distWetModSeen = 0.0f;
         if (s.distPre) distPreBq.c.set(s.distPre == 1 ? EQ_LOPASS : EQ_HIPASS, s.distPreHz, 0.0f, s.distPreQ, sr);
         mod.set(s);
         hyper.set(s);
+        if (s.splitBand == 1 || s.splitBand == 2) {
+            for (int i = 0; i < 2; i++) { spLp[i].set(false, s.splitHz, sr); spHp[i].set(true, s.splitHz, sr); }
+        }
         eqTarget = s.eqEnable ? 1.0f : 0.0f;
         distTarget = s.distCal ? (s.distMix > 0.0f || std::fabs(s.distLevel - 1.0f) > 1e-3f ? 1.0f : 0.0f) : (s.distDrive > 0.0f ? s.distMix : 0.0f);
         compTarget = (s.compRatio > 1.001f || s.compMulti) ? s.compMix : 0.0f;
@@ -521,6 +529,25 @@ public:
      * type is the voice filter's list (LP/HP/BP/notch, 12 and 24 dB). */
     bool filterOn() const { return xfOn; }
 
+    /* A route from an envelope or an LFO to the Distortion's Wet (Serum: the Wet knob, in its percent domain, moves by the route's amount x the source): the calibrated law's smoothstep
+     * s is taken back to the Wet knob it came from, the offset added, and the smoothstep applied again. Called every block by the engine; 0 leaves the pot's mix as it is. */
+    void setDistWetMod(float m)
+    {
+        if (!st.distCal) return;
+        if (m == distWetModSeen) return;
+        distWetModSeen = m;
+        float s = distMixBase;
+        if (m != 0.0f) {
+            const float w0 = 0.5f - std::sin(std::asin(std::min(std::max(1.0f - 2.0f * std::min(std::max(distMixBase, 0.0f), 1.0f), -1.0f), 1.0f)) / 3.0f);
+            const float w = std::min(std::max(w0 + m, 0.0f), 1.0f);
+            s = w * w * (3.0f - 2.0f * w);
+        }
+        st.distMix = s;
+        distTarget = (s > 0.0f || std::fabs(st.distLevel - 1.0f) > 1e-3f) ? 1.0f : 0.0f;
+        baseActive = baseActive || distTarget > 0.0f;
+        anyActive = baseActive || xfOn;
+    }
+
     void setFilter(bool on, int type, float hz, float q)
     {
         if (on) {
@@ -540,14 +567,16 @@ public:
 
     void process(float *L, float *R, int n)
     {
-        if (hyper.active()) hyper.process(L, R, n);
-        if (distTarget > 0.0f || distCur > 0.0f) processDist(L, R, n);
+        const int inBand = st.splitBand ? st.splitStages : 0;                    /* the stages that work on one band only */
+        if (inBand && (((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()))) processBand(L, R, n, inBand);
+        if (!(inBand & 1) && hyper.active()) hyper.process(L, R, n);
+        if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
         if (xfOn) xf.process(L, R, n);
         if (compTarget > 0.0f || compCur > 0.0f) {
             if (st.compMulti) processCompMulti(L, R, n); else processComp(L, R, n);
         } else { compGrDb = 0.0f; compMs = 0.0f; for (int b = 0; b < 3; b++) { mbMs[b] = 0.0f; mbGain[b] = 0.0f; } }
 
-        if (mod.active()) mod.process(L, R, n);
+        if (!(inBand & 4) && mod.active()) mod.process(L, R, n);
 
         if (st.wideMix > 0.0f || wideCur > 0.0f) { processWide(L, R, n); wideRan = true; }
         else if (wideRan) { clearWide(); wideRan = false; }
@@ -687,6 +716,42 @@ private:
             R[i] += w * (R[i] * g - R[i]);
         }
         compCur = compTarget;
+    }
+
+    /* The stages of a Split / SplitMS branch: the band (or Mid / Side) goes through them and joins the rest again. A 4th-order Linkwitz-Riley split (two Butterworth biquads each way) sums
+     * flat, so a branch that changes nothing leaves the signal as it was (calibration/probe_split_band.py: Serum's Split is -6 dB at Freq and 24 dB/octave). */
+    void processBand(float *L, float *R, int n, int stages)
+    {
+        for (int at = 0; at < n; at += 128) processBandChunk(L + at, R + at, std::min(128, n - at), stages);
+    }
+
+    void processBandChunk(float *L, float *R, int n, int stages)
+    {
+        float aL[128], aR[128], oL[128], oR[128];
+        const int band = st.splitBand;
+        for (int i = 0; i < n; i++) {
+            if (band <= 2) {
+                float sel[2], oth[2];
+                for (int c = 0; c < 2; c++) {
+                    const float x = c ? R[i] : L[i];
+                    const float lo = spLp[1].tick(c, spLp[0].tick(c, x)), hi = spHp[1].tick(c, spHp[0].tick(c, x));
+                    sel[c] = band == 1 ? lo : hi; oth[c] = band == 1 ? hi : lo;
+                }
+                aL[i] = sel[0]; aR[i] = sel[1]; oL[i] = oth[0]; oR[i] = oth[1];
+            } else {
+                const float m = 0.5f * (L[i] + R[i]), sd = 0.5f * (L[i] - R[i]);
+                if (band == 3) { aL[i] = aR[i] = m; oL[i] = sd; oR[i] = -sd; }
+                else           { aL[i] = aR[i] = sd; oL[i] = m; oR[i] = m; }
+            }
+        }
+        if ((stages & 1) && hyper.active()) hyper.process(aL, aR, n);
+        if ((stages & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(aL, aR, n);
+        if ((stages & 4) && mod.active()) mod.process(aL, aR, n);
+        for (int i = 0; i < n; i++) {
+            if (band == 4)      { L[i] = oL[i] + aL[i]; R[i] = oR[i] - aL[i]; }
+            else if (band == 3) { L[i] = oL[i] + aL[i]; R[i] = oR[i] + aL[i]; }
+            else                { L[i] = oL[i] + aL[i]; R[i] = oR[i] + aR[i]; }
+        }
     }
 
     /* Distortion. Pre-gain g = 1 + 14 drive^2 (up to +23 dB) into the curve, scaled by 1/sqrt(g) so the level stays near
@@ -982,11 +1047,13 @@ private:
     float revHp[2] = { 0, 0 };
     bool revRan = false;
     float eqCur = 1.0f, eqTarget = 1.0f;
+    float distMixBase = 0.0f, distWetModSeen = 0.0f;          /* the pot's smoothstepped mix, and the last Wet offset a route put on it */
     float distCur = 0.0f, distTarget = 0.0f, distDc[2] = { 0.0f, 0.0f };
     int   dsCount = 0;
     float dsHold[2] = { 0.0f, 0.0f };
     StereoBiquad distPreBq;
     MbBq mbLp2[2], mbHp2[2], mbLp1[2], mbHp1[2], mbApLp[2], mbApHp[2];
+    MbBq spLp[2], spHp[2];                  /* the Split crossover */
     float mbMs[3] = { 0, 0, 0 }, mbGain[3] = { 0, 0, 0 };
     float compCur = 0.0f, compTarget = 0.0f, compGrDb = 0.0f, compAtt = 0.0f, compRel = 0.0f, compMk = 1.0f, compDet = 0.0f, compMs = 0.0f;
 };

@@ -2084,6 +2084,7 @@ function sniffRate(b) {
 }
 /* AIFF / AIFF-C with plain PCM (8, 16, 24, 32 bit; "sowt" is the little-endian kind): browsers do not decode these, so they are read here. Returns the 16-bit result decodeAudio hands over, or null. */
 function decodeAiff(buf) {
+  decodeAiff.why = "";
   var u = new Uint8Array(buf), d = new DataView(buf);
   if (u.length < 12 || String.fromCharCode(u[0], u[1], u[2], u[3]) !== "FORM") return null;
   var comm = null, ssnd = null, o = 12;
@@ -2096,9 +2097,13 @@ function decodeAiff(buf) {
     } else if (id === "SSND") ssnd = { at: o + 16 + d.getUint32(o + 8), end: Math.min(u.length, o + 8 + sz) };
     o += 8 + sz + (sz & 1);
   }
-  if (!comm || !ssnd || comm.ch < 1 || [8, 16, 24, 32].indexOf(comm.bits) < 0) return null;
-  var little = comm.type === "sowt", bytes = comm.bits / 8, ch = Math.min(comm.ch, 2);
-  if (comm.type !== "NONE" && comm.type !== "sowt" && comm.type !== "twos") return null;
+  if (!comm || !ssnd || comm.ch < 1) return null;
+  var T = comm.type, flt = T === "fl32" || T === "FL32" || T === "fl64" || T === "FL64";
+  if (flt) comm.bits = (T === "fl32" || T === "FL32") ? 32 : 64;
+  if (T === "in24" || T === "42ni") comm.bits = 24; else if (T === "in32" || T === "23ni") comm.bits = 32;
+  if ([8, 16, 24, 32, 64].indexOf(comm.bits) < 0) return null;
+  var little = T === "sowt" || T === "42ni" || T === "23ni", bytes = comm.bits / 8, ch = Math.min(comm.ch, 2);
+  if (["NONE", "sowt", "twos", "in24", "in32", "42ni", "23ni"].indexOf(T) < 0 && !flt) { decodeAiff.why = "AIFF compression '" + T + "'"; return null; }
   var n = Math.min(comm.frames, Math.floor((ssnd.end - ssnd.at) / (bytes * comm.ch)));
   if (n < 1) return null;
   var out = new ArrayBuffer(8 + n * ch * 2), dv = new DataView(out), pcm = new Int16Array(out, 8, n * ch);
@@ -2108,6 +2113,7 @@ function decodeAiff(buf) {
     if (bytes === 1) v = (d.getInt8(p)) << 8;
     else if (bytes === 2) v = d.getInt16(p, little);
     else if (bytes === 3) v = little ? ((u[p + 2] << 24 | u[p + 1] << 16 | u[p] << 8) >> 16) : ((u[p] << 24 | u[p + 1] << 16 | u[p + 2] << 8) >> 16);
+    else if (flt) { var fx = bytes === 4 ? d.getFloat32(p, little) : d.getFloat64(p, little); v = Math.round(Math.max(-1, Math.min(1, fx)) * 32767); }
     else v = d.getInt32(p, little) >> 16;
     pcm[i * ch + c] = v;
   }
@@ -2119,7 +2125,9 @@ async function decodeAudio(file) {
   if (aif) return aif;
   if (!(rate >= 8000 && rate <= 96000)) rate = 44100;
   var Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  var ab = await new Ctx(1, 1, rate).decodeAudioData(buf);
+  var ab;
+  try { ab = await new Ctx(1, 1, rate).decodeAudioData(buf); }
+  catch (e) { throw new Error((decodeAiff.why ? decodeAiff.why + " is not supported" : "Unable to decode audio data") + (new Uint8Array(buf, 0, 4).join() === "70,79,82,77" ? " (AIFF)" : "")); }
   var ch = Math.min(ab.numberOfChannels, 2), n = ab.length, out = new ArrayBuffer(8 + n * ch * 2), dv = new DataView(out), pcm = new Int16Array(out, 8, n * ch);
   dv.setUint32(0, Math.round(ab.sampleRate), true); dv.setUint32(4, ch, true);
   for (var c = 0; c < ch; c++) {

@@ -255,7 +255,8 @@ def branch_nodes(nodes: list[dict]) -> set[int]:
     inside, skip = set(), 0
     for i, n in enumerate(nodes):
         if skip > 0:
-            inside.add(i)
+            if not n.get("_hoisted"):                # a module the engine's band stage carries (hoist_branch) is treated as a master one
+                inside.add(i)
             skip -= 1
             continue
         if kind_of(n) in ("Split", "Split3", "SplitMS") and enabled(n):
@@ -280,9 +281,9 @@ def ms_branches(nodes: list[dict]) -> dict[int, str]:
                 continue
             if kind_of(n) == "SplitMS":
                 for j in range(i + 1, i + 1 + c1):
-                    out[j] = "mid"
+                    if not nodes[j].get("_hoisted"): out[j] = "mid"
                 for j in range(i + 1 + c1, i + 1 + c1 + c2):
-                    out[j] = "side"
+                    if not nodes[j].get("_hoisted"): out[j] = "side"
             skip = c1 + c2
     return out
 
@@ -625,6 +626,75 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
     return out, why
 
 
+# Serum's Split / SplitMS branch -> the engine's band stage (fx.h processBand: split_band / split_freq / split_stages). A Split is a 4th-order Linkwitz-Riley crossover, -6 dB at Freq
+# (calibration/probe_split_band.py); the Distortion and the Chorus / Flanger / Phaser stages of ONE branch (the Mid or Side of a SplitMS: the Distortion only) then work on that band
+# alone. The nodes are tagged "_hoisted", which branch_nodes / ms_branches read as "on the master signal", so every master mapping below takes them as it takes a master effect.
+MOD_KINDS = ("Chorus", "Flanger", "Phaser")
+
+
+def hoist_branch(nodes: list[dict]) -> tuple[list[dict], dict]:
+    """(nodes with the engine-carried modules of one branch tagged, {"band": 1 low / 2 high / 3 Mid / 4 Side, "hz": crossover Hz, "idx": [hoisted node indices]}); the branch with the
+    most distortion (then modulation) in it, and only modules the engine's single distortion / modulation stages are free for (none of that kind on the master signal)."""
+    inside = branch_nodes(nodes)
+    master = [x for i, x in enumerate(nodes) if i not in inside and enabled(x)]
+    master_kinds = {kind_of(x) for x in master if float(plain(x).get("kParamWet", 100.0)) >= (0.01 if kind_of(x) in MOD_KINDS else 1.0)}
+    best, best_key = None, None
+    for i, n in enumerate(nodes):
+        if i in inside or kind_of(n) not in ("Split", "SplitMS") or not enabled(n):
+            continue
+        pp = plain(n)
+        c1, c2 = int(round(pp.get("kParamModuleCount1", 0))), int(round(pp.get("kParamModuleCount2", 0)))
+        for b, (lo, hi) in ((1, (i + 1, i + 1 + c1)), (2, (i + 1 + c1, i + 1 + c1 + c2))):
+            if hi <= lo:
+                continue
+            ms = kind_of(n) == "SplitMS"
+            band = (3 if b == 1 else 4) if ms else b
+            kinds_ok = ("Distortion",) if ms else ("Distortion",) + MOD_KINDS
+            mods = [j for j in range(lo, hi) if kind_of(nodes[j]) in kinds_ok and enabled(nodes[j])]
+            dist = [j for j in mods if kind_of(nodes[j]) == "Distortion"]
+            # the engine runs its distortion, then its modulation: a modulation effect ahead of the distortion in the branch stays out
+            if dist:
+                first_d = dist[0]
+                mods = [j for j in mods if kind_of(nodes[j]) == "Distortion" or j > first_d]
+            if "Distortion" in master_kinds:
+                mods = [j for j in mods if kind_of(nodes[j]) != "Distortion"]
+            if master_kinds & set(MOD_KINDS):
+                mods = [j for j in mods if kind_of(nodes[j]) not in MOD_KINDS]
+            if not mods:
+                continue
+            key = (any(kind_of(nodes[j]) == "Distortion" for j in mods), len(mods), -i)
+            if best_key is None or key > best_key:
+                best_key, best = key, (i, band, mods)
+    if best is None:
+        return nodes, {}
+    i, band, mods = best
+    out = list(nodes)
+    for j in mods:
+        out[j] = dict(nodes[j]); out[j]["_hoisted"] = True
+    hz = float(plain(nodes[i]).get("kParamFreq", 250.0)) if band <= 2 else 0.0
+    return out, {"band": band, "hz": hz, "idx": mods, "split": i}
+
+
+def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
+    """The engine's split_* pots for the hoisted modules that were actually carried (a distortion that is off, or a modulation effect with no wet, sets no bit)."""
+    if not hoist:
+        return {}, []
+    # The bits say which stages are IN the band, not whether they are audible at the saved position (a macro that raises a chorus from 0 must not change the stage routing).
+    bits = 0
+    if any(kind_of(nodes[j]) == "Distortion" for j in hoist["idx"]):
+        bits |= 2
+    if any(kind_of(nodes[j]) in MOD_KINDS for j in hoist["idx"]):
+        bits |= 4
+    if not bits:
+        return {}, []
+    hz = min(max(hoist["hz"], 20.0), 20000.0)
+    P = {"split_band": hoist["band"], "split_stages": bits,
+         "split_freq": int(round(min(max(127.0 * math.log(hz / 20.0) / math.log(1000.0), 0.0), 127.0))) if hoist["band"] <= 2 else 64}
+    names = {1: "the low band below", 2: "the high band above", 3: "the Mid of a SplitMS", 4: "the Side of a SplitMS"}[hoist["band"]]
+    what = ", ".join(x for x, bit in (("Distortion", 2), ("modulation effects", 4)) if bits & bit)
+    return P, [f"Split carried: {what} work on {names}" + (f" {hz:.0f} Hz (4th-order Linkwitz-Riley)" if hoist["band"] <= 2 else "")]
+
+
 # The Distortion effect has a filter of its own, before or after the distorting (PrePost 2 is before, 1 is after; 0 and unwritten is off: noise through
 # Overdrive at Drive 100, calibration/probe_dist_prepost.py, and Bass - AVAION, whose bass keeps the harmonics the overdrive makes above its 144 Hz filter), a 12 dB/octave state-variable filter
 # at Freq with BW as its resonance and LPHP morphing from low-pass (0, and unwritten) to high-pass (100). Measured with noise through Drive 0
@@ -643,6 +713,12 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
             continue
         pp = plain(n)
         pre_post = int(round(pp.get("kParamPrePost", 0.0)))
+        if n.get("_hoisted") and pre_post != 2:
+            # the filter after a branch's distortion shapes only that band's wet part; an EQ band on the master signal would not
+            t_, fc_ = float(pp.get("kParamLPHP", 0.0)) / 100.0, serum_filter_hz(float(pp.get("kParamFreq", 0.5)))
+            if pp.get("kParamWet", 100.0) >= 1.0 and pre_post == 1 and not ((t_ <= 0.5 and fc_ > 19000) or (t_ > 0.5 and fc_ < 25)):
+                why.append("Distortion filter after the distortion in a Split branch")
+            continue
         # A filter before the distorting is the engine's own pre-filter when this is the node the engine's distortion carries (dist_params); a drive-0 node distorts
         # nothing, so its filter is the same filter before or after and goes to the EQ like the one after; any other node with drive is not carried.
         pre_engine = pre_post == 2 and float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) > 0.5
@@ -714,10 +790,38 @@ def dist_candidates(nodes: list[dict]) -> list:
             continue
         pp = plain(n)
         wet = float(pp.get("kParamWet", 100.0))
-        if wet < 1.0:
+        dyn = float(n.get("_dynwet", 0.0))                       # percent of Wet an envelope / LFO route adds (tag_dynamic_wet)
+        if wet < 1.0 and dyn <= 0.0:
             continue
-        cands.append((wet / 100.0 * float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) / 100.0, -i, n))
+        cands.append(((wet + dyn) / 100.0 * float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) / 100.0, -i, n))
     return cands
+
+
+def tag_dynamic_wet(nodes: list[dict], ctx: dict | None) -> list[dict]:
+    """Tag ("_dynwet" = the route depth in percent) every Distortion whose Wet an envelope or an LFO moves (source ids 2..5 Env1..4 and 6..15 LFO1..10; a bipolar envelope route is left out:
+    the engine's envelopes are unipolar). Macro routes are folded at their saved position (fold_macro_wets) and are not in here. The engine carries these as a Dist Wet route (voice.h
+    MD_DIST_WET) on top of the pot's own Wet."""
+    out, depth = list(nodes), {}
+    for m in (ctx or {}).get("mods", []):
+        src = m.get("source")
+        if m.get("dest_type") != "FXDistortion" or m.get("dest_param") != "kParamWet" or not isinstance(src, int) or not 2 <= src <= 15:
+            continue
+        if src <= 5 and m.get("bipolar"):
+            continue
+        depth[m.get("dest_id")] = depth.get(m.get("dest_id"), 0.0) + abs(float(m.get("amount_pct", 0.0)))
+    for i, d in depth.items():
+        if isinstance(i, int) and 0 <= i < len(out) and kind_of(out[i]) == "Distortion" and enabled(out[i]):
+            out[i] = dict(out[i]); out[i]["_dynwet"] = d
+    return out
+
+
+def dist_dynamic(nodes: list[dict], ctx: dict | None) -> int | None:
+    """The index of the Distortion the engine's stage carries when an envelope / LFO moves its Wet (the converter then routes the modulators to the engine's Dist Wet destination)."""
+    nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    nodes = fold_macro_knobs(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    nodes, _ = hoist_branch(tag_dynamic_wet(nodes, ctx))
+    i = dist_chosen(nodes)
+    return i if i is not None and nodes[i].get("_dynwet") else None
 
 
 def dist_chosen(nodes: list[dict]) -> int | None:
@@ -1574,7 +1678,7 @@ def fx_defaults() -> dict:
               "flan_on": 0, "flan_mix": 0, "flan_rate": 37, "flan_depth": 64, "flan_fb": 0, "flan_phase": 0,
               "phas_on": 0, "phas_mix": 0, "phas_rate": 37, "phas_depth": 64, "phas_depth2": 0, "phas_freq": 50, "phas_fb": 0, "phas_phase": 0, "phas_poles": 4,
               "fxf_on": 0, "fxf_type": 0, "fxf_freq": 127, "fxf_res": 0, "fxf_env": 64,
-              "hyd_uni": 1, "hyd_det": 0, "hyd_rate": 40, "hyd_wet": 0})
+              "hyd_uni": 1, "hyd_det": 0, "hyd_rate": 40, "hyd_wet": 0, "split_band": 0, "split_freq": 64, "split_stages": 0})
     return P
 
 
@@ -1586,6 +1690,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         _cache = json.loads(TABLOR_CACHE.read_text(encoding="utf-8")) if TABLOR_CACHE.exists() else {}
     nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
     nodes = fold_macro_knobs(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    nodes, hoist = hoist_branch(tag_dynamic_wet(nodes, ctx))
     fp = fingerprint_for(name)
     # A fingerprint is keyed by preset name, so it must not outlive its effects: a rack with no
     # reverb (or width effect) gets none, whatever was measured for the name.
@@ -1640,6 +1745,8 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     P.update(mp); notes += mn
     dp, dn = dist_params(nodes)
     P.update(dp); notes += [x for x in dn if x.startswith("Distortion carried")]
+    sp, sn = split_pots(nodes, hoist)
+    P.update(sp); notes += sn
     if any(not x.startswith("Distortion carried") for x in dn):
         notes.append("Distortion not carried: " + "; ".join(x for x in dn if not x.startswith("Distortion carried")))
     hy, hn = hyperd_params(nodes)
@@ -1675,7 +1782,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     def split_clear(i, x):
         pp = plain(x)
         k = sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3))
-        return all(not enabled(nodes[j]) or dry(nodes[j]) for j in range(i + 1, min(i + 1 + k, len(nodes))))
+        return all(nodes[j].get("_hoisted") or not enabled(nodes[j]) or dry(nodes[j]) for j in range(i + 1, min(i + 1 + k, len(nodes))))
     ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "Split3", "SplitMS", "Utils") and enabled(x) and not dry(x)
                       and not (kind_of(x) == "Utils" and utils_ok(i, x)) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
                       and not (kind_of(x) == "SplitMS" and ms_plain) and not (kind_of(x) in ("Split", "Split3", "SplitMS") and split_clear(i, x))})

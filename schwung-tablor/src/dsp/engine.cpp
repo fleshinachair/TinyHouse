@@ -759,6 +759,9 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.distPreHz = 20.0f * std::pow(1000.0f, pots[TB_P_DIST_PRE_FREQ] / 127.0f);
         s.distPreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST_PRE_Q] / 127.0f);
     }
+    s.splitBand = all ? std::clamp((int) pots[TB_P_SPLIT_BAND], 0, 4) : 0;
+    s.splitStages = (int) pots[TB_P_SPLIT_STAGES] & 7;
+    s.splitHz = 20.0f * std::pow(1000.0f, pots[TB_P_SPLIT_FREQ] / 127.0f);
     s.compMix = all && pots[TB_P_COMP_ON] >= 1.0f ? pot01(pots[TB_P_COMP_MIX]) : 0.0f;
     s.compThreshDb = -90.0f + 120.0f * pot01(pots[TB_P_COMP_THRESH]);      /* a level at the stage's input, before the master gain */
     s.compRatio = std::pow(100.0f, pot01(pots[TB_P_COMP_RATIO]));
@@ -856,7 +859,7 @@ void Engine::refreshFx()
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
         std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 &&
-        std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX]) return;
+        std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX] && std::memcmp(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen) == 0) return;
     convSeen = pots[TB_P_CONV_MIX];
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
@@ -867,6 +870,7 @@ void Engine::refreshFx()
     std::memcpy(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen);
     std::memcpy(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen);
     std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
+    std::memcpy(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen);
     fxSeenValid = true;
     fx.set(fxSettings(pots));
 }
@@ -980,6 +984,13 @@ void Engine::renderBlock(int16_t *out, int frames)
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
             fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f));
+            {                                           /* an envelope / LFO route to the Distortion's Wet: the newest voice's, like the Filter FX cutoff above */
+                float dm = 0.0f;
+                uint32_t newestD = 0;
+                for (auto &v : voices)
+                    if (v.isActive() && v.serialNumber() >= newestD) { newestD = v.serialNumber(); dm = v.distWetMod(); }
+                fx.setDistWetMod(dm);
+            }
             /* The buses' racks have the same Filter FX (the "b1.fxf_*" / "b2.fxf_*" keys), moved by the same envelope: Lead - Other Side's bus 1 filters
              * its distortion and the EQs behind it boost the highs it takes away. */
             for (int b = 0; b < 2; b++) {

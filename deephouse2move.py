@@ -554,7 +554,7 @@ def noise_type_for(sample: str | None) -> tuple[int, str | None]:
 
 ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune": 5, "WT2 Tune": 6, "WT1 Pan": 11, "WT2 Pan": 12,
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
-          "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24}
+          "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25}
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -1094,6 +1094,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         slot = slot_of.get(key[2])
         if key[0] == "FXFilter" and key[1] == "kParamFreq":              # the effects block's Filter FX (fxmap.dynamic_filter): same cutoff units as the voice filter
             return "FX Filter Freq", CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
+        if key[0] == "FXDistortion" and key[1] == "kParamWet":           # the effects block's Distortion Wet (fxmap.dist_dynamic): Serum's route moves the Wet knob, 1.0 x the depth
+            return "Dist Wet", 1.0
         if key[0] == "VoiceFilter" and key[1] == "kParamFreq":
             return ("Filter 2 Freq" if key[2] == 1 else "Filter Freq"), CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "WTOsc" and key[1] == "kParamTablePos" and slot:
@@ -1304,9 +1306,16 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     mod_wheel_idle = 0
     bip_env = 0
     fxf_dyn = fxmap.dynamic_filter(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
+    dyn_dist = fxmap.dist_dynamic(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     for m in ph["mods"]:
         src, a = m["source"], m["amount_pct"] / 100.0
         key = (m["dest_type"], m["dest_param"], m["dest_id"])
+        if dyn_dist is not None and m["dest_type"] == "FXDistortion" and m["dest_param"] == "kParamWet" and m["dest_id"] == dyn_dist and isinstance(src, int) and 2 <= src <= 15                 and not (src <= 5 and m.get("bipolar")):
+            if src <= 5:
+                routes.append((src - 2, ("FXDistortion", "kParamWet", 0), a))
+            else:
+                other.append((src, ("FXDistortion", "kParamWet", 0), a, bool(m.get("bipolar"))))
+            continue
         if fxf_dyn and fxf_dyn["lfos"] and m["dest_type"] == "FXFilter" and m["dest_param"] == "kParamFreq" and 6 <= src <= 15:
             other.append((src, ("FXFilter", "kParamFreq", 0), a, bool(m.get("bipolar"))))
             continue
@@ -1739,6 +1748,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = f"WT{slot} Sync"
         elif key[0] == "Oscillator" and key[1] == "kParamVolume":
             dest = f"WT{slot} Level" if slot else {3: "Noise Level", 4: "Sub Level"}.get(key[2])
+        elif key[0] == "FXDistortion" and key[1] == "kParamWet":
+            dest = "Dist Wet"
         if dest:
             mod_routes.append((abs(a), e, dest, a))
         elif key not in (("VoiceFilter", "kParamFreq", 0), ("VoiceFilter", "kParamFreq", 1)):

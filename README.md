@@ -112,8 +112,10 @@ On top of that there are **two FX buses**, each a full copy of the rack. Oscilla
 - FM, ring-mod and phase-distortion warps driven by the noise or by Filter 1 (the Sub- and oscillator-driven ones are carried), DLM, spectral tables, Sync Var.
 - Formant, comb, flange, phase and reverb filter models (no engine equivalent yet).
 - The granular oscillator (left silent).
-- A second distortion, compressor or delay; band-split (Split) branches; the Bode frequency shifter; a filter placed before the distortion; sends moved by an
-  LFO or envelope.
+- A second distortion, compressor or delay; the Bode frequency shifter; a filter placed before the distortion; sends moved by an
+  LFO or envelope (the Distortion's Wet is the exception, it follows an envelope or LFO).
+- Split and SplitMS branches carry the Distortion and the Chorus / Flanger / Phaser (the Distortion only, for a SplitMS) of one branch; a HyperD, Delay, EQ, Comp or Bode in a Split branch,
+  and the Distortion's own filter after the distortion in a branch, are not carried.
 - Tempo-synced LFOs are read as plain rates in Hz.
 - Serum 1 presets. Serum 2 only.
 

@@ -261,6 +261,13 @@ CONV = dict(
     set = wtfile("conv_set", "CNVS", "Conv IR Set"),
     mix = pot("conv_mix", "CNVM", "Conv Mix", 0),
 )
+# Serum's Split / SplitMS: the stages named in Stages (HyperD 1, Distortion 2, Chorus / Flanger / Phaser 4) work on one band only. Band 1 is the low band below Freq, 2 the high band
+# above it (a 4th-order Linkwitz-Riley crossover, measured: calibration/probe_split_band.py), 3 the Mid and 4 the Side of a SplitMS. Freq is 20 Hz .. 20 kHz (log). Off by default.
+SPLITFX = dict(
+    band  = enum("split_band",  "SPLB", "Split Band", ["Off", "Low", "High", "Mid", "Side"], 0),
+    freq  = pot("split_freq",   "SPLF", "Split Freq", 64),
+    stages = num("split_stages", "SPLS", "Split Stages", 0, 7, 0),
+)
 SAMPLE3 = dict(
     set   = wtfile("smp3_set", "SMRS", "Sample 3 Set"),
     level = pot("smp3_level", "SMRL", "Sample 3 Level", 0),
@@ -318,7 +325,7 @@ MOD_DST = ["None",
            "WT1 Bend", "WT2 Bend", "WT1 Formant", "WT2 Formant", "WT1 Pan", "WT2 Pan",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
            # Appended, never inserted: presets store the INDEX.
-           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq"]
+           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq", "Dist Wet"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -630,6 +637,8 @@ BANKS = [
                       row(O3["xw"], O3["xa"], O3["xs"], O3["xw2"], O3["xa2"], O3["xs2"])]),
     # After the Warps, for the same reason. Set by the converter; no page on the device.
     ("Conv", False, [row(CONV["set"], CONV["mix"])]),
+    # After the Conv, for the same reason. Set by the converter; no page on the device.
+    ("Split", False, [row(SPLITFX["band"], SPLITFX["freq"], SPLITFX["stages"])]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

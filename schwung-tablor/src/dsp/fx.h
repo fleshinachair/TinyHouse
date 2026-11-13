@@ -477,6 +477,7 @@ public:
     {
         st = s;
         distMixBase = s.distMix; distWetModSeen = 0.0f;
+        compMixBase = s.compMix; compWetModSeen = 0.0f;
         if (s.distPre) distPreBq.c.set(s.distPre == 1 ? EQ_LOPASS : EQ_HIPASS, s.distPreHz, 0.0f, s.distPreQ, sr);
         mod.set(s);
         hyper.set(s);
@@ -518,6 +519,8 @@ public:
                     msEq[k][b].clear();
                 }
             }
+        bandEq = (s.splitBand == 1 || s.splitBand == 2) && (s.splitStages & 16) && msAny;      /* the Mid-EQ bands are the Split band's own EQ (split_stages bit 16) */
+        msMaster = msAny && !bandEq;
         eqAny = eqAny || msAny;
         /* A stage still fading out has to keep running, or it would cut off. */
         baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.delay2Mix > 0.0f || s.revMix > 0.0f ||
@@ -548,6 +551,17 @@ public:
         anyActive = baseActive || xfOn;
     }
 
+    /* A route from an envelope or an LFO to the Comp's Wet (its parallel mix, linear in Serum's percent): added to the pot's mix. */
+    void setCompWetMod(float m)
+    {
+        if (m == compWetModSeen) return;
+        compWetModSeen = m;
+        st.compMix = std::min(std::max(compMixBase + m, 0.0f), 1.0f);
+        compTarget = (st.compRatio > 1.001f || st.compMulti) ? st.compMix : 0.0f;
+        baseActive = baseActive || compTarget > 0.0f;
+        anyActive = baseActive || xfOn;
+    }
+
     void setFilter(bool on, int type, float hz, float q)
     {
         if (on) {
@@ -568,7 +582,7 @@ public:
     void process(float *L, float *R, int n)
     {
         const int inBand = st.splitBand ? st.splitStages : 0;                    /* the stages that work on one band only */
-        if (inBand && (((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()))) processBand(L, R, n, inBand);
+        if (inBand && (((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq))) processBand(L, R, n, inBand);
         if (!(inBand & 1) && hyper.active()) hyper.process(L, R, n);
         if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
         if (xfOn) xf.process(L, R, n);
@@ -614,7 +628,7 @@ public:
                 l = eq[b].tick(0, l);
                 r = eq[b].tick(1, r);
             }
-            if (msAny) {                       /* the SplitMS branches: Mid and Side each through their own bands (a split on its own is transparent) */
+            if (msMaster) {                    /* the SplitMS branches: Mid and Side each through their own bands (a split on its own is transparent) */
                 float m = 0.5f * (l + r), sd = 0.5f * (l - r);
                 for (int b = 0; b < 4; b++) {
                     if (msOn[0][b]) m = msEq[0][b].tick(0, m);
@@ -744,9 +758,17 @@ private:
                 else           { aL[i] = aR[i] = sd; oL[i] = m; oR[i] = m; }
             }
         }
+        const bool modFirst = (stages & 8) != 0;                                  /* the branch has its Chorus / Flanger / Phaser ahead of its Distortion */
         if ((stages & 1) && hyper.active()) hyper.process(aL, aR, n);
+        if (modFirst && (stages & 4) && mod.active()) mod.process(aL, aR, n);
         if ((stages & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(aL, aR, n);
-        if ((stages & 4) && mod.active()) mod.process(aL, aR, n);
+        if (!modFirst && (stages & 4) && mod.active()) mod.process(aL, aR, n);
+        if ((stages & 16) && bandEq) {                                           /* the EQ modules of the branch (after its other stages) */
+            for (int b = 0; b < 4; b++) {
+                if (!msOn[0][b]) continue;
+                for (int i = 0; i < n; i++) { aL[i] = msEq[0][b].tick(0, aL[i]); aR[i] = msEq[0][b].tick(1, aR[i]); }
+            }
+        }
         for (int i = 0; i < n; i++) {
             if (band == 4)      { L[i] = oL[i] + aL[i]; R[i] = oR[i] - aL[i]; }
             else if (band == 3) { L[i] = oL[i] + aL[i]; R[i] = oR[i] + aL[i]; }
@@ -1027,6 +1049,7 @@ private:
     StereoBiquad msEq[2][4];
     bool msOn[2][4] = {};
     bool msAny = false;
+    bool bandEq = false, msMaster = false;                   /* a Split band's EQ (the Mid slots) / the Mid-Side EQ on the whole signal */
 
     std::vector<float> chorusBuf;
     int chorusPos = 0;
@@ -1047,6 +1070,7 @@ private:
     float revHp[2] = { 0, 0 };
     bool revRan = false;
     float eqCur = 1.0f, eqTarget = 1.0f;
+    float compMixBase = 0.0f, compWetModSeen = 0.0f;           /* the pot's Comp mix, and the last Wet offset a route put on it */
     float distMixBase = 0.0f, distWetModSeen = 0.0f;          /* the pot's smoothstepped mix, and the last Wet offset a route put on it */
     float distCur = 0.0f, distTarget = 0.0f, distDc[2] = { 0.0f, 0.0f };
     int   dsCount = 0;

@@ -114,8 +114,8 @@ On top of that there are **two FX buses**, each a full copy of the rack. Oscilla
 - The granular oscillator (left silent).
 - A second distortion, compressor or delay; the Bode frequency shifter; a filter placed before the distortion; sends moved by an
   LFO or envelope (the Distortion's Wet is the exception, it follows an envelope or LFO).
-- Split and SplitMS branches carry the Distortion and the Chorus / Flanger / Phaser (the Distortion only, for a SplitMS) of one branch; a HyperD, Delay, EQ, Comp or Bode in a Split branch,
-  and the Distortion's own filter after the distortion in a branch, are not carried.
+- Split and SplitMS branches carry the Distortion and the Chorus / Flanger / Phaser (the Distortion only, for a SplitMS) of one branch, with the EQ after them and the Distortion's own filter after the distorting; a HyperD, Delay, Comp or Bode in a Split
+  branch, and an EQ ahead of the distortion in a branch, are not carried.
 - Tempo-synced LFOs are read as plain rates in Hz.
 - Serum 1 presets. Serum 2 only.
 

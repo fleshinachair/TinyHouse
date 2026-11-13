@@ -760,7 +760,7 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.distPreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST_PRE_Q] / 127.0f);
     }
     s.splitBand = all ? std::clamp((int) pots[TB_P_SPLIT_BAND], 0, 4) : 0;
-    s.splitStages = (int) pots[TB_P_SPLIT_STAGES] & 7;
+    s.splitStages = (int) pots[TB_P_SPLIT_STAGES] & 31;
     s.splitHz = 20.0f * std::pow(1000.0f, pots[TB_P_SPLIT_FREQ] / 127.0f);
     s.compMix = all && pots[TB_P_COMP_ON] >= 1.0f ? pot01(pots[TB_P_COMP_MIX]) : 0.0f;
     s.compThreshDb = -90.0f + 120.0f * pot01(pots[TB_P_COMP_THRESH]);      /* a level at the stage's input, before the master gain */
@@ -990,6 +990,11 @@ void Engine::renderBlock(int16_t *out, int frames)
                 for (auto &v : voices)
                     if (v.isActive() && v.serialNumber() >= newestD) { newestD = v.serialNumber(); dm = v.distWetMod(); }
                 fx.setDistWetMod(dm);
+                float cm = 0.0f;
+                uint32_t newestC = 0;
+                for (auto &v : voices)
+                    if (v.isActive() && v.serialNumber() >= newestC) { newestC = v.serialNumber(); cm = v.compWetMod(); }
+                fx.setCompWetMod(cm);
             }
             /* The buses' racks have the same Filter FX (the "b1.fxf_*" / "b2.fxf_*" keys), moved by the same envelope: Lead - Other Side's bus 1 filters
              * its distortion and the EQs behind it boost the highs it takes away. */

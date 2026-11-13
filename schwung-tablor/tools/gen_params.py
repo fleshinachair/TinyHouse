@@ -266,7 +266,7 @@ CONV = dict(
 SPLITFX = dict(
     band  = enum("split_band",  "SPLB", "Split Band", ["Off", "Low", "High", "Mid", "Side"], 0),
     freq  = pot("split_freq",   "SPLF", "Split Freq", 64),
-    stages = num("split_stages", "SPLS", "Split Stages", 0, 7, 0),
+    stages = num("split_stages", "SPLS", "Split Stages", 0, 31, 0),
 )
 SAMPLE3 = dict(
     set   = wtfile("smp3_set", "SMRS", "Sample 3 Set"),
@@ -325,7 +325,7 @@ MOD_DST = ["None",
            "WT1 Bend", "WT2 Bend", "WT1 Formant", "WT2 Formant", "WT1 Pan", "WT2 Pan",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
            # Appended, never inserted: presets store the INDEX.
-           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq", "Dist Wet"]
+           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq", "Dist Wet", "Comp Wet"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,

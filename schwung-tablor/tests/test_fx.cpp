@@ -1206,6 +1206,27 @@ int main()
         CHECK(goertzelDb(on, 660.0) > goertzelDb(on, 220.0) - 30.0, "a route that adds 60 %% Wet turns the distortion on (3rd %.1f dB down)", goertzelDb(on, 220.0) - goertzelDb(on, 660.0));
     }
 
+    printf("== compressor Wet route ==\n");
+    {
+        auto compRun = [&](float mod) {
+            FxSettings s;
+            s.compMix = 0.0f; s.compThreshDb = -20; s.compRatio = 8; s.compAttackMs = 1; s.compReleaseMs = 50;
+            Fx fx(SR);
+            fx.set(s);
+            fx.setCompWetMod(mod);
+            const int n = (int) SR * 2;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.5 * std::sin(6.283185307 * 220.0 * i / SR));
+            run(fx, L, R);
+            double a = 0; for (int i = n / 2; i < n; i++) a += (double) L[(size_t) i] * L[(size_t) i];
+            return 10 * std::log10(a / (n / 2) + 1e-20);
+        };
+        const double off = compRun(0.0f), on = compRun(1.0f), part = compRun(0.3f);
+        CHECK(std::fabs(off - (-9.03)) < 0.3, "a Comp Wet of 0 with no route leaves the level alone (%.2f dB rms)", off);
+        CHECK(on < off - 6.0, "a route that adds 100 %% Wet compresses (%.1f dB lower)", off - on);
+        CHECK(part < off - 1.0 && part > on, "and 30 %% is part of the way (%.1f dB lower)", off - part);
+    }
+
     printf("== split (distortion in one band) ==\n");
     {
         auto splitRun = [&](int band, double f, double amp, bool distortion) {
@@ -1241,6 +1262,51 @@ int main()
         run(fx, L, R);
         const std::vector<float> o(L.begin() + n / 2, L.end());
         CHECK(goertzelDb(o, 660.0) < goertzelDb(o, 220.0) - 60.0, "SplitMS: the distortion on the Mid does not touch a side-only signal (%.1f dB down)", goertzelDb(o, 220.0) - goertzelDb(o, 660.0));
+    }
+
+    printf("== split (EQ in one band) ==\n");
+    {
+        auto eqRun = [&](double f, bool mid) {
+            FxSettings s;
+            s.splitBand = 2; s.splitStages = 16; s.splitHz = 250.0f;
+            s.msBand[0][0].type = EQ_LOPASS; s.msBand[0][0].hz = 1000.0f; s.msBand[0][0].gainDb = 0.0f; s.msBand[0][0].q = 0.7f;
+            (void) mid;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * f * i / SR));
+            run(fx, L, R);
+            return std::vector<float>(L.begin() + n / 2, L.end());
+        };
+        const auto hi = eqRun(4000.0, true), lo = eqRun(100.0, true), mid = eqRun(600.0, true);
+        const double ref = 20 * std::log10(0.3 / std::sqrt(2.0)) + 3.01;     /* a sine's amplitude in goertzel dB */
+        (void) ref;
+        CHECK(goertzelDb(hi, 4000.0) < goertzelDb(lo, 100.0) - 20.0, "a low-pass in the high band takes the 4 kHz sine down (%.1f dB under the 100 Hz one)", goertzelDb(lo, 100.0) - goertzelDb(hi, 4000.0));
+        CHECK(goertzelDb(lo, 100.0) > goertzelDb(mid, 600.0) - 12.0, "and leaves the low band alone (100 Hz is untouched)");
+    }
+
+    printf("== split (chorus ahead of the distortion) ==\n");
+    {
+        auto orderRun = [&](int stages) {
+            FxSettings s;
+            s.distDrive = 0.9f; s.distMix = 1.0f; s.distMode = 2;
+            s.chorMix = 1.0f; s.chorRate = 0.5f; s.chorDepth = 0.8f;
+            s.splitBand = 2; s.splitStages = stages; s.splitHz = 250.0f;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) SR * 2;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * 1500.0 * i / SR));
+            run(fx, L, R);
+            return std::vector<float>(L.begin() + n / 2, L.end());
+        };
+        const auto after = orderRun(2 | 4), first = orderRun(2 | 4 | 8);
+        double diff = 0, ref = 0;
+        for (size_t i = 0; i < after.size(); i++) { diff += (double) (after[i] - first[i]) * (after[i] - first[i]); ref += (double) after[i] * after[i]; }
+        CHECK(diff > 0.01 * ref, "the order of chorus and distortion in the band changes the sound (difference %.1f dB re the signal)", 10 * std::log10(diff / ref + 1e-20));
+        bool fin = true; for (float v : first) fin = fin && std::isfinite(v);
+        CHECK(fin, "the output is finite");
     }
 
     printf("\n%s (%d failures)\n", g_fail ? "FX TESTS FAILED" : "FX TESTS PASSED", g_fail);

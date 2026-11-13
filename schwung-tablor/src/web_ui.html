@@ -265,6 +265,9 @@ canvas.gr.drag{cursor:crosshair}
 #imp .rep-p{padding:4px 12px 6px; border-top:1px solid var(--line)}
 #imp .rep-p .nm{color:var(--hi)}
 #imp .rep-p .gap{color:var(--faint); font-size:11px; padding-left:12px}
+#imp .rep-p .gap.snd{color:#e5b45b}
+#imp .imp-opt{display:flex; gap:8px; align-items:flex-start; margin:10px 0 4px; color:var(--txt); font-size:12px; cursor:pointer}
+#imp .imp-opt input{margin-top:2px}
 </style>
 </head>
 <body>
@@ -2292,7 +2295,8 @@ async function runImport() {
     var smpFiles = await impCall("getsamples", {});
 
     var list = Object.keys(results).map(function (n) { return results[n]; });
-    var sendable = list.filter(function (p) { return p.json; });
+    list.forEach(function (p) { p.skipped = !!(IMP.onlyComplete && p.json && impLines(p).length); });
+    var sendable = list.filter(function (p) { return p.json && !p.skipped; });
     var wtPaths = Object.keys(files), smPaths = Object.keys(smpFiles);
     var total = sendable.length + wtPaths.length + smPaths.length, done = 0;
     IMP.same = 0;
@@ -2354,19 +2358,30 @@ async function runImport() {
 }
 
 /* ---- the report ---- */
+/* What one preset has that did not come across, one line each. */
+function impLines(p) {
+  var out = p.gaps.map(function (g) { return g; });
+  p.not_carried.forEach(function (g) { out.push(/not carried|not imported/.test(g) ? g : g + " not carried"); });
+  p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
+  p.missing_samples.forEach(function (t) {
+    var own = !/(^|\/)Packs\//i.test(t);          /* a file of Serum's own library, which a pack leaves out because every Serum owner has it */
+    out.push("Sample not found: " + t + (IMP.smps.length ? " (that oscillator stays silent" + (own ? "; it is one of Serum's own sample files and was not found in the folder you chose" : "") + ")"
+      : " (" + (own ? "a file of Serum's own library, not in the pack: " : "") + "no Samples folder has been chosen: pick your Serum 2 folder, not only its Presets folder, then import again; that oscillator stays silent)"));
+  });
+  return out;
+}
+/* A gap in the sound itself (an oscillator that is silent or plays the wrong table) as against an effect left out. */
+function impIsSound(l) { return /^Oscillator|^Sample not found|^Wavetable not found|oscillators are not imported|sample was not carried/.test(l); }
+function impSound(p) { return impLines(p).filter(impIsSound).length; }
 function impReport(bank, list, sent, failed, landed, existed) {
   var body = IMP.bodyEl; body.textContent = "";
   var ok = list.filter(function (p) { return p.json && sent[p.file]; });
-  var bad = list.filter(function (p) { return !p.json || !sent[p.file]; });
-  function lines(p) {
-    var out = p.gaps.map(function (g) { return g; });
-    p.not_carried.forEach(function (g) { out.push(/not carried|not imported/.test(g) ? g : g + " not carried"); });
-    p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
-    p.missing_samples.forEach(function (t) { out.push("Sample not found: " + t + (IMP.smps.length ? " (that oscillator stays silent)" : " (no Samples folder has been chosen: pick your Serum 2 folder, not only its Presets folder, then import again; that oscillator stays silent)")); });
-    return out;
-  }
+  var skipped = list.filter(function (p) { return p.json && p.skipped; });
+  var bad = list.filter(function (p) { return !p.skipped && (!p.json || !sent[p.file]); });
+  var lines = impLines;
   var whole = ok.filter(function (p) { return !lines(p).length; });
   var part = ok.filter(function (p) { return lines(p).length; });
+  part.sort(function (a, b) { return impSound(b) - impSound(a); });          /* the presets whose sound is changed come first */
   var head = el("div", "rep-head", body);
   el("b", null, head, "Imported " + ok.length + " of " + list.length + (list.length === 1 ? " preset" : " presets"));
   head.appendChild(document.createTextNode(" into the bank “" + bank + "”" + (existed ? " (presets with the same name were replaced)" : "") + "."));
@@ -2375,7 +2390,10 @@ function impReport(bank, list, sent, failed, landed, existed) {
   part.forEach(function (p) { lines(p).forEach(function (l) { var k = l.replace(/^Wavetable not found:.*/, "Wavetable not found").replace(/^Sample not found:.*/, "Sample not found").replace(/^Oscillator [ABC]: /, "Oscillator: ").replace(/ \(.*\)$/, ""); tally[k] = (tally[k] || 0) + 1; }); });
   var tk = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; }).slice(0, 6);
   if (tk.length) el("div", "rep-sub", body, "Most common gaps: " + tk.map(function (k) { return k + " ×" + tally[k]; }).join(" · "));
+  var nSound = part.filter(function (p) { return impSound(p) > 0; }).length;
   if (whole.length) el("div", "rep-line", body, whole.length + " imported with nothing left out.");
+  if (part.length) el("div", "rep-line", body, nSound + " will sound different, an oscillator is silent or plays another wavetable (listed first, in amber). " + (part.length - nSound) + " only miss an effect: the sound is the same, with less of that effect.");
+  if (skipped.length) el("div", "rep-line", body, skipped.length + " not imported because “only presets with nothing missing” was chosen. Import again without that choice to get them.");
   if (IMP.same) el("div", "rep-sub", body, IMP.same + " wavetable or sample file" + (IMP.same === 1 ? " was" : "s were") + " already on the Move, the same, and not sent again.");
   function group(title, arr, cls, fn) {
     if (!arr.length) return;
@@ -2384,11 +2402,12 @@ function impReport(bank, list, sent, failed, landed, existed) {
     el("summary", null, d, title + " (" + arr.length + ")");
     arr.forEach(function (p) {
       var row = el("div", "rep-p", d); el("div", "nm", row, p.name);
-      fn(p).forEach(function (l) { el("div", "gap", row, l); });
+      fn(p).forEach(function (l) { el("div", "gap" + (impIsSound(l) ? " snd" : ""), row, l); });
     });
   }
   group("Imported, with parts missing", part, "part", lines);
   group("Imported complete", whole, "ok", function () { return []; });
+  group("Left out (not complete)", skipped, "bad", lines);
   group("Not imported", bad, "bad", function (p) { return [p.error || "Could not be sent to the Move"]; });
   if (failed.length) group("Upload problems", [{ name: "Files that did not reach the Move", f: failed }], "bad", function (p) { return p.f; });
   el("div", "rep-note", body, "Loudness, reverb and width are set by general rules, not matched to Serum (that needs Serum to measure): set Volume and the effects to taste. Granular oscillators are left silent, and Sample oscillators too unless you chose the Samples folders.");
@@ -2443,6 +2462,9 @@ function impBuildForm() {
   IMP.bankEl = el("input", "imp-name", body); IMP.bankEl.type = "text"; IMP.bankEl.maxLength = 40; IMP.bankEl.value = "Imports";
   IMP.bankEl.addEventListener("input", function () { IMP.bankTouched = true; });
   el("div", "imp-note", body, "Loose presets go to “Imports”; a folder or pack gets a bank of its own name. A preset with the same name already in the bank is replaced.");
+  var oc = el("label", "imp-opt", body), ocb = el("input", null, oc); ocb.type = "checkbox"; ocb.checked = !!IMP.onlyComplete;
+  ocb.addEventListener("change", function () { IMP.onlyComplete = ocb.checked; });
+  oc.appendChild(document.createTextNode("Only import presets with nothing missing (leave out any preset with a silent oscillator, a missing wavetable or sample, or an effect that is not carried)"));
   IMP.goEl = el("button", "imp-go", body, "Import");
   IMP.goEl.addEventListener("click", runImport);
   IMP.barWrap = el("div", "imp-bar", body); IMP.barEl = el("i", null, IMP.barWrap); IMP.barWrap.style.display = "none";

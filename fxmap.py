@@ -289,12 +289,12 @@ def ms_branches(nodes: list[dict]) -> dict[int, str]:
 
 
 def eq_bands(nodes: list[dict], which: str | None = None) -> list[dict]:
-    """Every audible band of every master-signal rack-0 EQ, from Serum's stored values; with which = "mid" or "side", of the EQs in that branch of a SplitMS instead."""
+    """Every audible band of every master-signal rack-0 EQ, from Serum's stored values; with which = "mid" or "side", of the EQs in that branch of a SplitMS instead; "band": of the EQs in the Split branch the engine's band stage carries (tagged _bandeq)."""
     out = []
     inside = branch_nodes(nodes)
     ms = ms_branches(nodes)
     for i, n in enumerate(nodes):
-        if kind_of(n) != "EQ" or not enabled(n) or (i in inside if which is None else ms.get(i) != which):
+        if kind_of(n) != "EQ" or not enabled(n) or (i in inside if which is None else (not n.get("_bandeq") if which == "band" else ms.get(i) != which)):
             continue
         pp = plain(n)
         for b in (1, 2):
@@ -652,10 +652,16 @@ def hoist_branch(nodes: list[dict]) -> tuple[list[dict], dict]:
             kinds_ok = ("Distortion",) if ms else ("Distortion",) + MOD_KINDS
             mods = [j for j in range(lo, hi) if kind_of(nodes[j]) in kinds_ok and enabled(nodes[j])]
             dist = [j for j in mods if kind_of(nodes[j]) == "Distortion"]
-            # the engine runs its distortion, then its modulation: a modulation effect ahead of the distortion in the branch stays out
+            # the engine runs its distortion, then its modulation, unless the branch's modulation sits ahead of its distortion and nothing of it follows (bit 8: modulation first)
+            mod_first = False
             if dist:
                 first_d = dist[0]
-                mods = [j for j in mods if kind_of(nodes[j]) == "Distortion" or j > first_d]
+                after = [j for j in mods if kind_of(nodes[j]) != "Distortion" and j > first_d]
+                before = [j for j in mods if kind_of(nodes[j]) != "Distortion" and j < first_d]
+                if before and not after:
+                    mod_first = True
+                else:
+                    mods = [j for j in mods if kind_of(nodes[j]) == "Distortion" or j > first_d]
             if "Distortion" in master_kinds:
                 mods = [j for j in mods if kind_of(nodes[j]) != "Distortion"]
             if master_kinds & set(MOD_KINDS):
@@ -664,15 +670,28 @@ def hoist_branch(nodes: list[dict]) -> tuple[list[dict], dict]:
                 continue
             key = (any(kind_of(nodes[j]) == "Distortion" for j in mods), len(mods), -i)
             if best_key is None or key > best_key:
-                best_key, best = key, (i, band, mods)
+                best_key, best = key, (i, band, mods, mod_first, lo, hi)
     if best is None:
         return nodes, {}
-    i, band, mods = best
+    i, band, mods, mod_first, lo, hi = best
     out = list(nodes)
     for j in mods:
         out[j] = dict(nodes[j]); out[j]["_hoisted"] = True
+    # A Split band (not a SplitMS Mid / Side) also has a band EQ: the EQ modules after its last distortion, and the post-filter of its distortions (the engine's Mid-EQ slots, bit 16 of split_stages),
+    # when the preset has no SplitMS EQ of its own to use them.
+    ms_eq = any(kind_of(nodes[j]) == "EQ" and enabled(nodes[j]) for j in ms_branches(nodes))
+    # (A SplitMS Mid / Side branch keeps its post-filter bands in the Mid / Side EQ slots the master path already runs: no bit needed.)
+    if band <= 2 and not ms_eq:
+        last_d = max([j for j in mods if kind_of(nodes[j]) == "Distortion"], default=-1)
+        for j in range(lo, hi):
+            if kind_of(nodes[j]) == "EQ" and enabled(nodes[j]) and j > last_d:
+                out[j] = dict(nodes[j]); out[j]["_bandeq"] = True
+    if band > 2 or not ms_eq:
+        for j in mods:
+            if kind_of(nodes[j]) == "Distortion":
+                out[j]["_bandpost"] = band
     hz = float(plain(nodes[i]).get("kParamFreq", 250.0)) if band <= 2 else 0.0
-    return out, {"band": band, "hz": hz, "idx": mods, "split": i}
+    return out, {"band": band, "hz": hz, "idx": mods, "split": i, "mod_first": mod_first}
 
 
 def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
@@ -687,6 +706,10 @@ def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
         bits |= 4
     if not bits:
         return {}, []
+    if bits & 4 and hoist.get("mod_first"):
+        bits |= 8
+    if hoist["band"] <= 2 and (eq_bands(nodes, "band") or dist_band_filters(nodes, (1, 2))):
+        bits |= 16
     hz = min(max(hoist["hz"], 20.0), 20000.0)
     P = {"split_band": hoist["band"], "split_stages": bits,
          "split_freq": int(round(min(max(127.0 * math.log(hz / 20.0) / math.log(1000.0), 0.0), 127.0))) if hoist["band"] <= 2 else 64}
@@ -705,6 +728,16 @@ DIST_FILTER_Q_BASE, DIST_FILTER_Q_PER_BW, DIST_FILTER_BW_DEFAULT = 0.5, 0.55, 2.
 DIST_MORPH_EDGE = 0.03                    # an LPHP this close to an end is that end
 
 
+def dist_band_filters(nodes: list[dict], bands: tuple = (1, 2, 3, 4)) -> list[dict]:
+    """The filter after the distortion of a hoisted Distortion (in the Split band numbers `bands`: 1 low, 2 high, 3 Mid, 4 Side), as EQ bands for that band's own EQ: the master path's fit, of the node taken alone."""
+    out = []
+    for n in nodes:
+        if kind_of(n) == "Distortion" and enabled(n) and n.get("_hoisted") and n.get("_bandpost") in bands:
+            solo = {k: v for k, v in n.items() if k not in ("_hoisted", "_bandpost")}
+            out += dist_filter_bands([solo])[0]
+    return out
+
+
 def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
     out, why = [], []
     inside = branch_nodes(nodes)
@@ -714,6 +747,8 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
         pp = plain(n)
         pre_post = int(round(pp.get("kParamPrePost", 0.0)))
         if n.get("_hoisted") and pre_post != 2:
+            if n.get("_bandpost"):
+                continue                                              # carried by dist_band_filters, as the band's own EQ
             # the filter after a branch's distortion shapes only that band's wet part; an EQ band on the master signal would not
             t_, fc_ = float(pp.get("kParamLPHP", 0.0)) / 100.0, serum_filter_hz(float(pp.get("kParamFreq", 0.5)))
             if pp.get("kParamWet", 100.0) >= 1.0 and pre_post == 1 and not ((t_ <= 0.5 and fc_ > 19000) or (t_ > 0.5 and fc_ < 25)):
@@ -909,8 +944,30 @@ COMP_ATTACK_K, COMP_RELEASE_K = 0.75, 0.45                # fitted on the gain-r
 COMP_ATTACK_LAG_MS = 15.0                                     # the engine's 20 ms detector adds its own lag                    # Serum's Attack / Release setting (ms) -> the engine's time constant
 
 
-def comp_params(nodes: list[dict]) -> tuple[dict, list[str]]:
-    """The first single-band Comp on the master signal as the engine's compressor stage."""
+def comp_wet_dynamic(nodes: list[dict], ctx: dict | None) -> int | None:
+    """The index of the master Comp (nodes already macro-folded) whose Wet an envelope / LFO moves: the engine carries it as a Comp Wet route on top of the pot's own mix."""
+    inside = branch_nodes(nodes)
+    for i, n in enumerate(nodes):
+        if kind_of(n) != "Comp" or not enabled(n) or i in inside:
+            continue
+        macros = (ctx or {}).get("macros") or [None]
+        if any(m.get("dest_type") == "FXComp" and m.get("dest_param") == "kParamWet" and m.get("dest_id") == i and not foldable_source(m, macros)
+               and isinstance(m.get("source"), int) and 2 <= m["source"] <= 15 and not (m["source"] <= 5 and m.get("bipolar"))
+               for m in (ctx or {}).get("mods", [])):
+            return i
+        return None
+    return None
+
+
+def comp_dynamic(nodes: list[dict], ctx: dict | None) -> int | None:
+    """comp_wet_dynamic on the preset's own nodes (the converter's route loop calls this: it folds the macros first, as map_fx does)."""
+    nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    nodes = fold_macro_knobs(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    return comp_wet_dynamic(nodes, ctx)
+
+
+def comp_params(nodes: list[dict], dyn_i: int | None = None) -> tuple[dict, list[str]]:
+    """The first single-band Comp on the master signal as the engine's compressor stage (a Wet an envelope / LFO moves, dyn_i, is carried at its stored value plus a Comp Wet route)."""
     inside = branch_nodes(nodes)
     for i, n in enumerate(nodes):
         if kind_of(n) != "Comp" or not enabled(n) or i in inside:
@@ -918,7 +975,7 @@ def comp_params(nodes: list[dict]) -> tuple[dict, list[str]]:
         pp = plain(n)
         multi = float(pp.get("kParamMultiband", 0.0)) >= 0.5
         wet = float(pp.get("kParamWet", 100.0))
-        if wet < 1.0:
+        if wet < 1.0 and i != dyn_i:
             return {}, []
         thresh = float(pp.get("kParamThresh", 0.5))
         ratio = float(pp.get("kParamRatio", 4.0))
@@ -1308,11 +1365,15 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
         notes.append("Filter FX not carried: " + "; ".join(sorted(set(fwhy))))
     inside = branch_nodes(nodes)
     ms = ms_branches(nodes)
-    branch_eqs = sum(1 for i in inside if kind_of(nodes[i]) == "EQ" and enabled(nodes[i]) and i not in ms)
+    branch_eqs = sum(1 for i in inside if kind_of(nodes[i]) == "EQ" and enabled(nodes[i]) and i not in ms and not nodes[i].get("_bandeq"))
     if branch_eqs:
         notes.append(f"EQ: {branch_eqs} in a Split branch, which only shapes half the signal, not carried")
     for side, tag in (("mid", "m"), ("side", "s")):
         sb = eq_bands(nodes, side)
+        if side == "mid":
+            sb = sb + eq_bands(nodes, "band") + dist_band_filters(nodes, (1, 2, 3))          # a Split band's own EQ uses the Mid slots (split_stages bit 16; the converter never uses both)
+        else:
+            sb = sb + dist_band_filters(nodes, (4,))
         for n in range(1, EQ_SLOTS + 1):
             P.update({f"eq{tag}{n}_type": EQ_OFF, f"eq{tag}{n}_freq": 64, f"eq{tag}{n}_gain": 64, f"eq{tag}{n}_q": 64})
         if not sb:
@@ -1751,7 +1812,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         notes.append("Distortion not carried: " + "; ".join(x for x in dn if not x.startswith("Distortion carried")))
     hy, hn = hyperd_params(nodes)
     P.update(hy); notes += hn
-    cp, cn = comp_params(nodes)
+    cp, cn = comp_params(nodes, comp_wet_dynamic(nodes, ctx))
     P.update(cp); notes += [x for x in cn if x.startswith("Comp carried")]
     if any(not x.startswith("Comp carried") for x in cn):
         notes.append("Comp not carried: " + "; ".join(x for x in cn if not x.startswith("Comp carried")))

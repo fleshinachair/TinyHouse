@@ -91,6 +91,16 @@ BODE_IDLE_KEYS = {"kParamWet", "kParamLevelOut", "kParamRange", "kParamSwapAB", 
 DRY_KINDS = ("Distortion", "Comp", "Bode", "Filter", "Utils", "Split", "Split3", "SplitMS")      # effects whose Wet 0 is bypass (not Chorus / Flanger / Phaser: those still add)
 
 
+def idle_effect(x: dict) -> bool:
+    """A Delay or HyperD that does nothing: Wet under 1 % (a HyperD also no Dimension Wet; an unwritten Dimension Wet is 0), and no Level Out (an unwritten one is 0.5, no gain).
+    calibration/probe_split_dry_wet0.py: a saw through a Delay at Wet 0 (Time, Feedback, Freq and BW stored or not) or a HyperD at Wet 0 (Detune, Unison, Dimension Size stored) leaves the
+    Mid at +-0.07 dB and the Side inside the source's own spread; a Delay at Wet 0 with Level Out 0.576 was +2.4 dB louder, and a Dimension Wet of 45 % added 4 to 14 dB of Side."""
+    k, pp = kind_of(x), plain(x)
+    if k not in ("Delay", "HyperD") or abs(float(pp.get("kParamLevelOut", 0.5)) - 0.5) >= 0.02:
+        return False
+    return float(pp.get("kParamWet", 25.0)) < 1.0 and (k == "Delay" or float(pp.get("kParamDimEWet", 0.0)) < 1.0)
+
+
 def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) -> list[dict]:
     """The rack with every macro that drives an effect's Wet applied at its saved position (Serum adds amount x macro, in
     percentage points of Wet; a Distortion / Comp / Bode / Filter / Utils / Split that stores no Wet is fully wet, which a -100 % route at macro 0 leaves at 100: ARP - Aardvark,
@@ -285,6 +295,24 @@ def ms_branches(nodes: list[dict]) -> dict[int, str]:
                 for j in range(i + 1 + c1, i + 1 + c1 + c2):
                     if not nodes[j].get("_hoisted"): out[j] = "side"
             skip = c1 + c2
+    return out
+
+
+def branch_of(nodes: list[dict]) -> dict[int, tuple[int, int]]:
+    """{node index: (index of its Split / Split3 / SplitMS node, branch 1..3)} for every module inside a branch (hoisted ones too)."""
+    out, i = {}, 0
+    while i < len(nodes):
+        n = nodes[i]
+        if kind_of(n) in ("Split", "Split3", "SplitMS") and enabled(n):
+            pp, j = plain(n), i + 1
+            for b in (1, 2, 3):
+                for _ in range(int(round(pp.get(f"kParamModuleCount{b}", 0)))):
+                    if j < len(nodes):
+                        out[j] = (i, b)
+                    j += 1
+            i = j
+        else:
+            i += 1
     return out
 
 
@@ -638,6 +666,7 @@ def hoist_branch(nodes: list[dict]) -> tuple[list[dict], dict]:
     inside = branch_nodes(nodes)
     master = [x for i, x in enumerate(nodes) if i not in inside and enabled(x)]
     master_kinds = {kind_of(x) for x in master if float(plain(x).get("kParamWet", 100.0)) >= (0.01 if kind_of(x) in MOD_KINDS else 1.0)}
+    master_wide = any(kind_of(x) == "HyperD" and not idle_effect(x) for x in master)            # the engine's one width stage is already the master HyperD's
     best, best_key = None, None
     for i, n in enumerate(nodes):
         if i in inside or kind_of(n) not in ("Split", "SplitMS") or not enabled(n):
@@ -666,6 +695,9 @@ def hoist_branch(nodes: list[dict]) -> tuple[list[dict], dict]:
                 mods = [j for j in mods if kind_of(nodes[j]) != "Distortion"]
             if master_kinds & set(MOD_KINDS):
                 mods = [j for j in mods if kind_of(nodes[j]) not in MOD_KINDS]
+            # A HyperD that widens (a Dimension Wet, or a Wet) works on the band as the engine's width stage, after the band's other stages: its place among them is not kept.
+            if not ms and not master_wide:
+                mods = mods + [j for j in range(lo, hi) if kind_of(nodes[j]) == "HyperD" and enabled(nodes[j]) and not idle_effect(nodes[j])]
             if not mods:
                 continue
             key = (any(kind_of(nodes[j]) == "Distortion" for j in mods), len(mods), -i)
@@ -704,6 +736,8 @@ def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
         bits |= 2
     if any(kind_of(nodes[j]) in MOD_KINDS for j in hoist["idx"]):
         bits |= 4
+    if any(kind_of(nodes[j]) == "HyperD" for j in hoist["idx"]):
+        bits |= 32
     if not bits:
         return {}, []
     if bits & 4 and hoist.get("mod_first"):
@@ -714,7 +748,7 @@ def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
     P = {"split_band": hoist["band"], "split_stages": bits,
          "split_freq": int(round(min(max(127.0 * math.log(hz / 20.0) / math.log(1000.0), 0.0), 127.0))) if hoist["band"] <= 2 else 64}
     names = {1: "the low band below", 2: "the high band above", 3: "the Mid of a SplitMS", 4: "the Side of a SplitMS"}[hoist["band"]]
-    what = ", ".join(x for x, bit in (("Distortion", 2), ("modulation effects", 4)) if bits & bit)
+    what = ", ".join(x for x, bit in (("Distortion", 2), ("modulation effects", 4), ("width (HyperD Dimension)", 32)) if bits & bit)
     return P, [f"Split carried: {what} work on {names}" + (f" {hz:.0f} Hz (4th-order Linkwitz-Riley)" if hoist["band"] <= 2 else "")]
 
 
@@ -1411,16 +1445,35 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
 
 
 # ------------------------------------------------------------------------------ delay
+def branch_delay_ok(nodes: list[dict], i: int, where: dict) -> bool:
+    """A Delay in the high band of a plain Split can be the engine's master delay when its own high-pass (the Delay's Freq and BW) starts at least twice the crossover up: what it
+    adds is then high-band material anyway, and the lows it would also have delayed are not in its wet."""
+    s, b = where.get(i, (None, 0))
+    if s is None or kind_of(nodes[s]) != "Split" or b != 2:
+        return False
+    pp = plain(nodes[i])
+    lo = float(pp.get("kParamFreq", DELAY_DEFAULT["freq"])) / 2 ** (float(pp.get("kParamBW", DELAY_DEFAULT["bw"])) * DELAY_BW_SCALE / 2)
+    return lo >= 2.0 * float(plain(nodes[s]).get("kParamFreq", 250.0))
+
+
 def map_delay(nodes: list[dict], fp: dict | None) -> tuple[dict, list[str], dict]:
     P = {"dly_mix": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50, "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly_sync": 0,
          "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0}
-    ds = [n for n in nodes if kind_of(n) == "Delay" and enabled(n)]
+    inside, where = branch_nodes(nodes), branch_of(nodes)
+    ds = [n for i, n in enumerate(nodes) if kind_of(n) == "Delay" and enabled(n) and (i not in inside or branch_delay_ok(nodes, i, where))]
+    left = [n for i, n in enumerate(nodes) if kind_of(n) == "Delay" and enabled(n) and i in inside and not idle_effect(n) and not branch_delay_ok(nodes, i, where)]
+    carried_in_band = [n for i, n in enumerate(nodes) if kind_of(n) == "Delay" and enabled(n) and i in inside and branch_delay_ok(nodes, i, where) and not idle_effect(n)]
+    pre_notes = []
+    if left:
+        pre_notes.append("Delay in a Split branch (one frequency band only) not carried")
+    if carried_in_band:
+        pre_notes.append("Delay in the high band of a Split carried on the whole signal (its own high-pass starts well above the crossover)")
     if not ds:
-        return P, [], {}
+        return P, pre_notes, {}
     # Two delays are carried (the engine has two, one after the other): the two with the most wet, in the rack's order
     keep = sorted(sorted(ds, key=lambda n: -plain(n).get("kParamWet", 0.0))[:2], key=ds.index)
     d = DELAY_DEFAULT
-    notes, info = [], {"delay_ms": [], "delay_wet": []}
+    notes, info = list(pre_notes), {"delay_ms": [], "delay_wet": []}
     pot_ms = lambda ms: int(round(min(max(127 * math.log(max(ms, 1.0)) / math.log(1500.0), 0), 127)))
     for n, node in enumerate(keep):
         pre = "dly_" if n == 0 else "dly2_"
@@ -1768,7 +1821,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # reverb (or width effect) gets none, whatever was measured for the name.
     inside = branch_nodes(nodes)
     kinds = {kind_of(x) for i, x in enumerate(nodes) if i not in inside}      # an effect in a Split branch works on one band, not the master signal
-    stray = sorted({kind_of(nodes[i]) for i in inside if kind_of(nodes[i]) in ("Reverb", "Conv", "HyperD", "Chorus", "Flanger", "Phaser") and enabled(nodes[i])} - kinds)
+    stray = sorted({kind_of(nodes[i]) for i in inside if kind_of(nodes[i]) in ("Reverb", "Conv", "HyperD", "Chorus", "Flanger", "Phaser") and enabled(nodes[i]) and not idle_effect(nodes[i])} - kinds)
     # (No rule on the stored Wet here: each effect kind is measured on its own, so one that does nothing measures as doing nothing, and Wet 0 does
     # not mean off for a flanger: Keys - Loop's, at Wet 0, still adds -15 dB of side.)
     if fp:
@@ -1813,6 +1866,10 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         p, n, i = map_wide(fp, _cache, cli)
         P.update(p); notes += n; info.update(i)
         TABLOR_CACHE.write_text(json.dumps(_cache, indent=1), encoding="utf-8")
+    hyp = [x for x in nodes if x.get("_hoisted") and kind_of(x) == "HyperD"]
+    if hyp and not P.get("fx_wide"):                 # a HyperD in a Split band: the width its settings give, on the band only (split_stages bit 32); the fingerprint holds no branch effects
+        p, n = map_wide_static(hyp)
+        P.update(p); notes += n
     mp, mn = modfx_params(nodes)
     P.update(mp); notes += mn
     dp, dn = dist_params(nodes)
@@ -1838,13 +1895,13 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     carried_utils = (width != 1.0 or mono is not None) and not uwhy
     # A Distortion / Comp / Bode / Filter / Utils / Split node with a stored Wet under 1 % and no envelope / LFO / velocity route to its Wet passes the signal untouched
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
-    wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros") or [None])}
+    wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if (m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros") or [None])) or m.get("dest_param") == "kParamDimEWet"}
     # A Bode that stores nothing that shifts, delays or blurs (no Shift, Feedback, Blur, DelayTime, OutputMix or width: a stored LevelOut / Range / sync flag only) is a frequency shift of 0 Hz
     # through an empty delay: transparent (calibration/probe_bode_default.py, a Bode with no stored params: band differences +-0.1 dB, the render's own floor). A stored Blur alone, with no
     # Shift, Feedback or DelayTime to smear, is the same (calibration/probe_bode_blur.py / probe_bode_blur2.py: Blur 99 at Wet 100 changes the level by -0.04 dB; the attack and the faint tail after release,
     # -57 dB, are those of any Bode node).
     bode_idle = lambda x: kind_of(x) == "Bode" and set(plain(x)) <= (BODE_IDLE_KEYS | {"kParamBlur"})
-    dry = lambda x: kind_of(x) in DRY_KINDS and (float(plain(x).get("kParamWet", 100.0)) < 1.0 or bode_idle(x)) and "FX" + kind_of(x) not in wet_mod
+    dry = lambda x: ((kind_of(x) in DRY_KINDS and (float(plain(x).get("kParamWet", 100.0)) < 1.0 or bode_idle(x))) or idle_effect(x)) and "FX" + kind_of(x) not in wet_mod
     # A SplitMS whose branches hold nothing but EQs is carried (their bands are the engine's mid / side EQs: map_eq); one with another effect in a branch is not.
     ms_idx = ms_branches(nodes)
     ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) or dry(nodes[j]) for j in ms_idx) and all(
@@ -1857,7 +1914,8 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     def split_clear(i, x):
         pp = plain(x)
         k = sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3))
-        return all(nodes[j].get("_hoisted") or not enabled(nodes[j]) or dry(nodes[j]) for j in range(i + 1, min(i + 1 + k, len(nodes))))
+        return all(nodes[j].get("_hoisted") or not enabled(nodes[j]) or dry(nodes[j]) or (kind_of(nodes[j]) == "Delay" and branch_delay_ok(nodes, j, branch_of(nodes)))
+                   for j in range(i + 1, min(i + 1 + k, len(nodes))))
     ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "Split3", "SplitMS", "Utils") and enabled(x) and not dry(x)
                       and not (kind_of(x) == "Utils" and utils_ok(i, x)) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
                       and not (kind_of(x) == "SplitMS" and ms_plain) and not (kind_of(x) in ("Split", "Split3", "SplitMS") and split_clear(i, x))})

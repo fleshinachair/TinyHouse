@@ -1309,6 +1309,30 @@ int main()
         CHECK(fin, "the output is finite");
     }
 
+    printf("== split (width in one band) ==\n");
+    {
+        auto sideRun = [&](int band, int stages, double f) {
+            FxSettings s;
+            s.wideMix = 1.0f; s.wideRate = 0.5f; s.wideDepth = 0.5f;
+            s.splitBand = band; s.splitStages = stages; s.splitHz = 250.0f;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) SR * 2;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * f * i / SR));
+            run(fx, L, R);
+            std::vector<float> sd((size_t) n / 2), md((size_t) n / 2);
+            for (int i = 0; i < n / 2; i++) { sd[(size_t) i] = 0.5f * (L[(size_t) (n / 2 + i)] - R[(size_t) (n / 2 + i)]); md[(size_t) i] = 0.5f * (L[(size_t) (n / 2 + i)] + R[(size_t) (n / 2 + i)]); }
+            return std::make_pair(goertzelDb(sd, f), goertzelDb(md, f));
+        };
+        const auto lowAll = sideRun(0, 0, 80.0), lowBand = sideRun(2, 32, 80.0), hiAll = sideRun(0, 0, 3000.0), hiBand = sideRun(2, 32, 3000.0), hiLowBand = sideRun(1, 32, 3000.0);
+        CHECK(lowAll.first > lowAll.second - 25.0, "the master width puts side on an 80 Hz sine (%.1f dB under the mid)", lowAll.second - lowAll.first);
+        CHECK(lowBand.first < lowAll.first - 30.0, "with the width in the band above 250 Hz the 80 Hz sine stays mono (%.1f dB less side)", lowAll.first - lowBand.first);
+        CHECK(std::fabs(hiBand.first - hiAll.first) < 1.0, "and a 3 kHz sine gets the same side as with the master width (%+.2f dB)", hiBand.first - hiAll.first);
+        CHECK(hiLowBand.first < hiAll.first - 30.0, "the width in the band below 250 Hz leaves a 3 kHz sine mono (%.1f dB less side)", hiAll.first - hiLowBand.first);
+        CHECK(std::fabs(hiBand.second - hiAll.second) < 0.5, "the mid is untouched either way");
+    }
+
     printf("\n%s (%d failures)\n", g_fail ? "FX TESTS FAILED" : "FX TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

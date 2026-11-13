@@ -261,12 +261,12 @@ CONV = dict(
     set = wtfile("conv_set", "CNVS", "Conv IR Set"),
     mix = pot("conv_mix", "CNVM", "Conv Mix", 0),
 )
-# Serum's Split / SplitMS: the stages named in Stages (HyperD 1, Distortion 2, Chorus / Flanger / Phaser 4) work on one band only. Band 1 is the low band below Freq, 2 the high band
+# Serum's Split / SplitMS: the stages named in Stages (HyperD 1, Distortion 2, Chorus / Flanger / Phaser 4, Width 32) work on one band only. Band 1 is the low band below Freq, 2 the high band
 # above it (a 4th-order Linkwitz-Riley crossover, measured: calibration/probe_split_band.py), 3 the Mid and 4 the Side of a SplitMS. Freq is 20 Hz .. 20 kHz (log). Off by default.
 SPLITFX = dict(
     band  = enum("split_band",  "SPLB", "Split Band", ["Off", "Low", "High", "Mid", "Side"], 0),
     freq  = pot("split_freq",   "SPLF", "Split Freq", 64),
-    stages = num("split_stages", "SPLS", "Split Stages", 0, 31, 0),
+    stages = num("split_stages", "SPLS", "Split Stages", 0, 63, 0),
 )
 SAMPLE3 = dict(
     set   = wtfile("smp3_set", "SMRS", "Sample 3 Set"),

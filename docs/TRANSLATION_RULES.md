@@ -609,3 +609,15 @@ Measured in Serum with a saw on note 48 (`calibration/probe_bode_shift.py`, `pro
 - **Shift** is Shift/100 x Range **Hz**, Range a linear Hz span (10.68, 43.45 and 100 all read back exactly). With the width unstored (100) the left channel is shifted down and the right up, one sideband each; OutputWidth 0 puts both sidebands in both channels at about -6 dB each.
 - **Blur alone** (PL - Envoker: Blur 99.21, nothing else stored) changes the level by -0.04 dB and leaves the attack and the -57 dB tail after release as any Bode node has them: transparent, so `bode_idle` now also accepts a stored Blur. Envoker's Bode is no longer reported.
 - **Not built: a frequency-shifter stage.** Every other Bode in the four packs has a Shift or Range moved by an envelope, LFO or macro (Simple Crash Transition: Env 2 on Range; Sombre: Range, Shift and Wet; Khuur: Wet, with a beat-synced delay and 15 % feedback; Riser 6: four routes), or a static shift of 1.1 Hz (Floating Point, Wet 15 %) that only beats the dry copy slowly. A static shifter would complete none of them on its own; the ones with the shifter as the only gap are moved by modulators. Bode in an FX bus rack (ARP - Ode To Bode, Sine Heaven) falls under the bus racks, which are not carried at all.
+
+## Added 2026-11-13 (night): HyperD and Delay in a Split branch
+
+- **A Delay or HyperD that does nothing is dry** (`fxmap.idle_effect`; `calibration/probe_split_dry_wet0.py`). A Delay at Wet 0 (Time, Feedback, Freq, BW stored or not) and a HyperD at Wet 0 with
+  no Dimension Wet (Detune, Unison, Dimension Size stored or not) leave the Mid within 0.07 dB and the Side inside the source's own spread. A Delay at Wet 0 with a Level Out of 0.576 was 2.4 dB louder,
+  so a Level Out away from 0.5 is not dry; a Dimension Wet of 45 % added 4 to 14 dB of Side. This is what stopped 9 presets being reported "Split not carried" when the branch held only these.
+- **A HyperD that widens, in a Split band, is the engine's width stage on that band** (bit 32 of `split_stages`, range now 0..63). The width comes from the HyperD's own Wet and Dimension Wet through
+  the same law as a master one (`map_wide_static`). Checked on three presets against Serum with the HyperD switched off in both: the side the HyperD adds in the band is within 1 to 3 dB of Serum's, and
+  both stay quiet below the crossover. Only for a plain Split (not a SplitMS), and only when no master HyperD already uses the width stage. Where it sits among the branch's other stages is not kept
+  (the width runs last in the band).
+- **A Delay in a Split branch**: carried as the master delay only when it sits in the high band of a plain Split and its own high-pass (Freq, BW) starts at least twice the crossover up (then what it
+  adds is high-band material anyway). Any other Delay in a branch is reported "not carried"; before, it was silently carried on the whole signal.

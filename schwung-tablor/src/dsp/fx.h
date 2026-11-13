@@ -171,7 +171,7 @@ struct FxSettings {
     /* Serum's HyperD ahead of the distortion: voices (1 is off), detune 0..1 (how far each voice's delay moves), rate 0..1 (how fast), wet 0..1. */
     int   hydVoices = 1;
     float hydDetune = 0, hydRate = 0.4f, hydWet = 0;
-    /* Serum's Split / SplitMS: the stages in splitStages (1 HyperD, 2 Distortion, 4 Chorus / Flanger / Phaser) work on one band only: 1 the low band below splitHz, 2 the high band
+    /* Serum's Split / SplitMS: the stages in splitStages (1 HyperD, 2 Distortion, 4 Chorus / Flanger / Phaser, 32 Width) work on one band only: 1 the low band below splitHz, 2 the high band
      * above it (a 4th-order Linkwitz-Riley crossover), 3 the Mid, 4 the Side. 0 is off. */
     int   splitBand = 0, splitStages = 0;
     float splitHz = 250;
@@ -582,7 +582,7 @@ public:
     void process(float *L, float *R, int n)
     {
         const int inBand = st.splitBand ? st.splitStages : 0;                    /* the stages that work on one band only */
-        if (inBand && (((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq))) processBand(L, R, n, inBand);
+        if (inBand && (((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq) || ((inBand & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)))) processBand(L, R, n, inBand);
         if (!(inBand & 1) && hyper.active()) hyper.process(L, R, n);
         if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
         if (xfOn) xf.process(L, R, n);
@@ -592,8 +592,9 @@ public:
 
         if (!(inBand & 4) && mod.active()) mod.process(L, R, n);
 
-        if (st.wideMix > 0.0f || wideCur > 0.0f) { processWide(L, R, n); wideRan = true; }
-        else if (wideRan) { clearWide(); wideRan = false; }
+        const bool wideNow = st.wideMix > 0.0f || wideCur > 0.0f;
+        if (wideNow && !(inBand & 32)) { processWide(L, R, n); wideRan = true; }               /* (with bit 32 the width works on the Split band, in processBandChunk) */
+        else if (!wideNow && wideRan) { clearWide(); wideRan = false; }
 
         {
             const DelayPrm q[2] = { { st.delayMix, st.delayMs, st.delayRMs, st.delayFb, st.delayLoHz, st.delayHiHz, st.delayPing },
@@ -763,6 +764,7 @@ private:
         if (modFirst && (stages & 4) && mod.active()) mod.process(aL, aR, n);
         if ((stages & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(aL, aR, n);
         if (!modFirst && (stages & 4) && mod.active()) mod.process(aL, aR, n);
+        if ((stages & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)) { processWide(aL, aR, n); wideRan = true; }      /* a HyperD's Dimension in the branch */
         if ((stages & 16) && bandEq) {                                           /* the EQ modules of the branch (after its other stages) */
             for (int b = 0; b < 4; b++) {
                 if (!msOn[0][b]) continue;

@@ -760,7 +760,7 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.distPreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST_PRE_Q] / 127.0f);
     }
     s.splitBand = all ? std::clamp((int) pots[TB_P_SPLIT_BAND], 0, 4) : 0;
-    s.splitStages = (int) pots[TB_P_SPLIT_STAGES] & 31;
+    s.splitStages = (int) pots[TB_P_SPLIT_STAGES] & 63;
     s.splitHz = 20.0f * std::pow(1000.0f, pots[TB_P_SPLIT_FREQ] / 127.0f);
     s.compMix = all && pots[TB_P_COMP_ON] >= 1.0f ? pot01(pots[TB_P_COMP_MIX]) : 0.0f;
     s.compThreshDb = -90.0f + 120.0f * pot01(pots[TB_P_COMP_THRESH]);      /* a level at the stage's input, before the master gain */

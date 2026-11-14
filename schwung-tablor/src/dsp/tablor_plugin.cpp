@@ -1040,6 +1040,7 @@ static void tb_publish_selection(tablor_instance *inst)
     /* ORDER MATTERS. The manager's initial value fetch sends in batches of 8 and flushes the last partial batch only when the LAST declared key
      * reads back fine: if it does not, the tail of the list is dropped. So the list ends on a key that always reads (preset_now); `preset` moved up with the other keys the Move turns (see `hand`). */
     out += ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}"
+           ",{\"key\":\"macro_edit\",\"name\":\"Macro Edit\",\"type\":\"string\"}"
            ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}";
     hand += ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
@@ -1353,6 +1354,88 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
 /* ------------------------------------------------------------------ */
 
 
+/* The remote UI's macro editing (right-click a knob): "add|macro|key|travel|name", "del|macro|key", "travel|macro|key|travel", "name|macro|text", "clear|macro", macro 1..8, travel in the
+ * key's own steps over the macro's whole range. It edits the same two strings a preset's state carries (mac: "macro:key:travel,...", macn: eight names between bars), so the routes
+ * are live at once, are saved with the slot, and the Move shows the names. Only plain-number parameters can be routed. */
+static std::string macro_clean(const std::string &s)
+{
+    std::string o;
+    for (char c : s) o += (c == '|' || c == ',' || c == ':' || c == ';' || c == '=' || (unsigned char) c < 32) ? ' ' : c;
+    while (!o.empty() && o.back() == ' ') o.pop_back();
+    while (!o.empty() && o.front() == ' ') o.erase(o.begin());
+    return o.substr(0, 24);
+}
+
+static void macro_edit(tablor_instance *inst, const char *val)
+{
+    std::vector<std::string> f;
+    for (const char *p = val;;) {
+        const char *bar = strchr(p, '|');
+        f.emplace_back(p, bar ? (size_t) (bar - p) : strlen(p));
+        if (!bar) break;
+        p = bar + 1;
+    }
+    if (f.size() < 2) return;
+    const std::string &op = f[0];
+    const int m = atoi(f[1].c_str());
+    if (m < 1 || m > 8) return;
+    struct R { int m; std::string key, travel; };
+    std::vector<R> routes;
+    for (const char *p = inst->mac_str; *p;) {
+        const char *comma = strchr(p, ',');
+        const std::string t(p, comma ? (size_t) (comma - p) : strlen(p));
+        const size_t a = t.find(':'), b = a == std::string::npos ? a : t.find(':', a + 1);
+        if (a != std::string::npos && b != std::string::npos) routes.push_back({ atoi(t.substr(0, a).c_str()), t.substr(a + 1, b - a - 1), t.substr(b + 1) });
+        if (!comma) break;
+        p = comma + 1;
+    }
+    std::vector<std::string> names;
+    for (const char *p = inst->macn_str;;) {
+        const char *bar = strchr(p, '|');
+        names.emplace_back(p, bar ? (size_t) (bar - p) : strlen(p));
+        if (!bar) break;
+        p = bar + 1;
+    }
+    names.resize(8);
+    auto find = [&](const std::string &key) { for (size_t i = 0; i < routes.size(); i++) if (routes[i].m == m && routes[i].key == key) return (int) i; return -1; };
+    auto travelStr = [](float t) { char b[32]; snprintf(b, sizeof b, "%g", (double) std::lround(t * 100.0f) / 100.0); return std::string(b); };
+    if (op == "add" || op == "travel") {
+        if (f.size() < 4) return;
+        const int idx = param_index(f[2].c_str());
+        if (idx < 0 || tb_params[idx].type != TB_INT) return;
+        const float span = tb_params[idx].max - tb_params[idx].min;
+        const float t = std::clamp(strtof(f[3].c_str(), nullptr), -span, span);
+        const int at = find(f[2]);
+        if (at >= 0) routes[(size_t) at].travel = travelStr(t);
+        else if (op == "add") routes.push_back({ m, f[2], travelStr(t) });
+        if (op == "add" && names[(size_t) m - 1].empty()) names[(size_t) m - 1] = f.size() > 4 && !macro_clean(f[4]).empty() ? macro_clean(f[4]) : "Macro " + std::to_string(m);
+    } else if (op == "del") {
+        if (f.size() < 3) return;
+        const int at = find(f[2]);
+        if (at >= 0) routes.erase(routes.begin() + at);
+    } else if (op == "clear") {
+        routes.erase(std::remove_if(routes.begin(), routes.end(), [&](const R &r) { return r.m == m; }), routes.end());
+    } else if (op == "name") {
+        if (f.size() < 3) return;
+        names[(size_t) m - 1] = macro_clean(f[2]);
+    } else return;
+    for (int i = 1; i <= 8; i++) {                    /* a macro that moves nothing has no name (the Move hides it) */
+        bool any = false;
+        for (const R &r : routes) any = any || r.m == i;
+        if (!any) names[(size_t) i - 1].clear();
+    }
+    std::string mac, macn;
+    for (const R &r : routes) mac += (mac.empty() ? "" : ",") + std::to_string(r.m) + ":" + r.key + ":" + r.travel;
+    bool anyName = false;
+    for (int i = 0; i < 8; i++) { macn += (i ? "|" : "") + names[(size_t) i]; anyName = anyName || !names[(size_t) i].empty(); }
+    if (!anyName) macn.clear();
+    if (mac.size() >= sizeof inst->mac_str || macn.size() >= sizeof inst->macn_str) return;       /* no room: leave it as it was */
+    snprintf(inst->mac_str, sizeof inst->mac_str, "%s", mac.c_str());
+    snprintf(inst->macn_str, sizeof inst->macn_str, "%s", macn.c_str());
+    apply_macro_routes(inst, inst->mac_str);
+    republish_macro_names(inst);
+}
+
 static void tb_set_param(void *instance, const char *key, const char *val)
 {
     auto *inst = (tablor_instance *) instance;
@@ -1368,6 +1451,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         apply_state_blob(inst, val, true);
         return;
     }
+    if (!strcmp(k, "macro_edit")) { macro_edit(inst, val); return; }
 
     /* The preset page (list_param "preset"): load the sound at that index of the store's list. */
     if (!strcmp(k, "preset")) {
@@ -1628,6 +1712,8 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
      * preset_list / preset_now among them). Every declared key must read back. */
     if (!strcmp(key, "rescan"))
         return write_str(buf, buf_len, "0");
+    if (!strcmp(key, "macro_edit"))
+        return write_str(buf, buf_len, "");
     if (!strcmp(key, "preset_name")) {
         auto ps = inst->storeList();
         const int i = inst->store_index.load();

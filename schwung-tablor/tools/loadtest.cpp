@@ -210,6 +210,29 @@ int main(int argc, char **argv)
             nanosleep(&ts, nullptr);
         }
         CHECK(unitOf(1) == "" && unitOf(3) == "", "a preset without macros clears the units (\"%s\"/\"%s\")", unitOf(1).c_str(), unitOf(3).c_str());
+
+        /* The remote UI's macro editing: a knob added to a macro (right-click), its travel changed, removed. The routes and names read back; the name is the macro's own if it has none. */
+        auto settleMacros = [&]() { settle(api, inst); for (int i = 0; i < 400; i++) { char l[8] = {}; api->get_param(inst, "is_loading", l, sizeof l); if (l[0] == '0') break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); } };
+        auto read = [&](const char *key) { char b[3072] = {}; api->get_param(inst, key, b, sizeof b); return std::string(b); };
+        api->set_param(inst, "macro_edit", "add|2|wt1_level|40|Level");
+        api->set_param(inst, "macro_edit", "add|2|flt_freq|-30|Cutoff");
+        api->set_param(inst, "macro_edit", "add|5|no_such_key|10|X");
+        api->set_param(inst, "macro_edit", "add|9|wt1_level|10|X");
+        settleMacros();
+        CHECK(read("macro_routes") == "2:wt1_level:40,2:flt_freq:-30", "macro_edit add: routes read back (\"%s\")", read("macro_routes").c_str());
+        CHECK(read("macro_names") == "|Level||||||", "the first knob names the macro (\"%s\")", read("macro_names").c_str());
+        CHECK(unitOf(2) == "Level", "the Move gets the name as macro 2's unit (\"%s\")", unitOf(2).c_str());
+        api->set_param(inst, "macro_edit", "travel|2|wt1_level|-17.5");
+        api->set_param(inst, "macro_edit", "name|2|Brightness");
+        settleMacros();
+        CHECK(read("macro_routes") == "2:wt1_level:-17.5,2:flt_freq:-30" && read("macro_names") == "|Brightness||||||", "travel and name edited (\"%s\" / \"%s\")", read("macro_routes").c_str(), read("macro_names").c_str());
+        { char st[8192] = {}; api->get_param(inst, "state", st, sizeof st); CHECK(strstr(st, "mac=2:wt1_level:-17.5,2:flt_freq:-30;") && strstr(st, "macn=|Brightness||||||;"), "the slot's state carries the edited macros"); }
+        api->set_param(inst, "macro_edit", "del|2|wt1_level");
+        settleMacros();
+        CHECK(read("macro_routes") == "2:flt_freq:-30" && read("macro_names") == "|Brightness||||||", "a route removed (\"%s\")", read("macro_routes").c_str());
+        api->set_param(inst, "macro_edit", "del|2|flt_freq");
+        settleMacros();
+        CHECK(read("macro_routes").empty() && read("macro_names").empty() && unitOf(2) == "", "the last route removed: the macro has no name and no unit (\"%s\"/\"%s\")", read("macro_routes").c_str(), read("macro_names").c_str());
     }
 
     /* The slot remembers its demo: pack and part by name, restored from the state once the demo store has been scanned. Two parts of a throwaway pack

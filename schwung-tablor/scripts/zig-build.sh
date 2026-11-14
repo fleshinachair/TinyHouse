@@ -37,6 +37,7 @@ arm)
     $CXX $SRC "$ROOT/tools/enginebench.cpp" $ENGINE -lm -o "$OUT/tablor_enginebench"
     $CXX $SRC "$ROOT/tests/test_conv.cpp" -lm -o "$OUT/tablor_conv_test"
     $CXX $SRC "$ROOT/tools/convbench.cpp" -lm -o "$OUT/tablor_convbench"
+    $CXX $SRC "$ROOT/tests/test_granular.cpp" -lm -o "$OUT/tablor_granular_test"
     ;;
 *) echo "usage: $0 native|arm" >&2; exit 2 ;;
 esac

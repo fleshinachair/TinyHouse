@@ -118,3 +118,6 @@ Positions in percent of the file; the scan position p(t) = Start + Scan x t (t s
   (the first voice left, alternating, the middle one of an odd stack in the centre; UnisonStereo 100 % = hard, 50 % = pan 0.59, 25 % = 0.31), level 1/sqrt(n) per voice. Detune Width does nothing. The engine reuses `smpN_uni/det/spread`; UnisonWarp and UnisonStack are not carried (gap).
 - **Warp on the grains** (probes `calibration/probe_granular_warp.py`): a Dist* warp is applied to the file's raw samples inside each grain, before the window and the grain gain (the gain it adds does not change with the overlap
   of 1..100 grains but does with the file's own level: SoftSat at Warp 1: +13.4 dB for a 0.2-rms noise file, +8.6 dB at 0.33). Not built yet: needs the shaper law in absolute file units (probe the transfer curve with files of known level).
+
+## CPU on the Move (2026-11-14, `tablor_granular_test` built for aarch64, run from a scratch folder, load average ~2.5 from the Move's own processes)
+8 voices x Density 800 (224 grains live at once, the extreme): 6 s of audio in 1.65 s = 27.6 % of one core. A normal granular preset (Density knob 0.25 = 7.5 grains overlapping, 8 voices = 60 grains) costs about a quarter of that or less.

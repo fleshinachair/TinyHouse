@@ -138,7 +138,26 @@ body{
 .cols > *{min-width:0}
 
 /* ---- knob ---- */
-.knob{width:var(--kw,60px); text-align:center; flex:none; user-select:none}
+.knob{width:var(--kw,60px); text-align:center; flex:none; user-select:none; position:relative}
+.knob.inmac::after{content:attr(data-mac); position:absolute; top:-1px; right:3px; font-size:9px; letter-spacing:.04em; color:#0b0c0d; background:var(--g); border-radius:7px; padding:0 4px; line-height:13px; pointer-events:none}
+#macmenu{position:fixed; z-index:50; min-width:210px; background:#111415; border:1px solid var(--line2); border-radius:6px; box-shadow:0 8px 28px rgba(0,0,0,.6); padding:6px; font-size:12px}
+#macmenu .mh{color:var(--dim); font-size:10px; letter-spacing:.18em; text-transform:uppercase; padding:4px 8px 6px}
+#macmenu button{display:flex; width:100%; align-items:center; gap:8px; background:none; border:0; color:var(--txt); font:inherit; text-align:left; padding:5px 8px; border-radius:4px; cursor:pointer}
+#macmenu button:hover{background:#1b2023}
+#macmenu button .n{flex:0 0 18px; color:var(--g)}
+#macmenu button .nm{flex:1; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+#macmenu button .tick{color:var(--g)}
+#macmenu button.on .nm{color:var(--txt)}
+.macgrp{border:1px solid var(--line); border-radius:5px; padding:6px 8px; margin-bottom:8px}
+.macgrp .mgh{display:flex; align-items:center; gap:8px; margin-bottom:4px}
+.macgrp .mgh .b{color:var(--g); font-size:10px; letter-spacing:.16em}
+.macgrp input[type=text]{background:#0b0d0e; border:1px solid var(--line2); color:var(--txt); font:inherit; font-size:12px; padding:3px 6px; border-radius:3px; width:150px}
+.macgrp input[type=number]{background:#0b0d0e; border:1px solid var(--line2); color:var(--txt); font:inherit; font-size:12px; padding:3px 4px; border-radius:3px; width:64px}
+.macgrp .mr{display:flex; align-items:center; gap:10px; padding:3px 0; font-size:12px}
+.macgrp .mr .k{flex:1; color:var(--txt)}
+.macgrp .mr .u{color:var(--faint); font-size:10px}
+.macgrp button{background:none; border:1px solid var(--line2); color:var(--dim); font:inherit; font-size:11px; padding:2px 8px; border-radius:3px; cursor:pointer}
+.macgrp button:hover{color:var(--txt); border-color:var(--dim)}
 .knob svg{display:block; margin:0 auto; cursor:ns-resize; touch-action:none; width:var(--ks,40px); height:var(--ks,40px)}
 .knob .lab{color:var(--dim); font-size:10px; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .knob .val{color:#7e8a82; font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:13px}
@@ -377,6 +396,7 @@ var META = {};            /* key -> chain_params entry */
 var VAL = {};             /* key -> number (enums: option index) */
 var SUBS = {};            /* key -> [fn(value)] */
 var placed = {};
+var KNOBS = {};                       /* key -> its knob elements, so the macro marks can follow the routes */
 var graphs = [];
 
 /* ------------------------------------------------------------------ dom */
@@ -544,7 +564,9 @@ function knob(key, label, into) {
   var bip = min < 0 || (min === 0 && max === 127 && m.default === 64);
   var def = typeof m.default === "number" ? m.default : min;
   var wrap = el("div", "knob", into);
-  wrap.title = m.name + "  (" + key + ")  - drag, wheel, shift for fine, double-click resets";
+  wrap.title = m.name + "  (" + key + ")  - drag, wheel, shift for fine, double-click resets, right-click to put it on a macro";
+  (KNOBS[key] = KNOBS[key] || []).push(wrap);
+  if (!/^mac\d$/.test(key)) wrap.addEventListener("contextmenu", function (e) { e.preventDefault(); macMenu(key, m.name, e.clientX, e.clientY); });
   var svg = svgNode(wrap, "svg", { width: 40, height: 40, viewBox: "0 0 40 40" });
   svgNode(svg, "path", { d: arcPath(20, 20, KR, A0, A1), stroke: "#1f2326", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
   var arc = svgNode(svg, "path", { stroke: "#5be584", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
@@ -2702,7 +2724,7 @@ async function demoRun() {
 /* ---------------------------------------------------------------- macros
  * The preset's own macros (an imported Serum preset's): a macro knob moves the parameters the preset routes to it. The module does the moving; the page asks it for the
  * parameters' new values afterwards, so the knobs on the other tabs follow. */
-var MAC = { names: [], routes: [], labs: [], wraps: [], note: null, timer: null };
+var MAC = { names: [], routes: [], labs: [], wraps: [], note: null, timer: null, list: null, empty: null };
 function macRender() {
   var any = false;
   for (var i = 0; i < 8; i++) {
@@ -2712,6 +2734,75 @@ function macRender() {
     if (nm) { any = true; MAC.labs[i].textContent = nm; }
   }
   if (MAC.note) MAC.note.style.display = any ? "none" : "";
+}
+/* ---- user-assigned macros (right-click a knob): the plugin's `macro_edit` key edits the preset's macro routes live; they are saved with the slot and the Move shows the names ---- */
+function macSend(cmd) {
+  try { schwungRemote.setParam(KP + "macro_edit", cmd); } catch (e) {}
+  setTimeout(macReload, 160);
+}
+function macDefaultTravel(key) {
+  var m = META[key], cur = val(key), mid = (m.min + m.max) / 2;
+  return Math.round(cur <= mid ? m.max - cur : m.min - cur);               /* sweeps toward the far end of the control as the macro goes 0 -> 127 */
+}
+function macMenuClose() { var o = document.getElementById("macmenu"); if (o) o.remove(); }
+function macMenu(key, label, x, y) {
+  macMenuClose();
+  var box = el("div", null, document.body); box.id = "macmenu";
+  el("div", "mh", box, "Macro: " + label);
+  for (var n = 1; n <= 8; n++) (function (n) {
+    var has = MAC.routes.some(function (r) { return r.m === n && r.k === key; });
+    var b = el("button", has ? "on" : null, box);
+    el("span", "n", b, String(n));
+    el("span", "nm", b, MAC.names[n - 1] || (MAC.routes.some(function (r) { return r.m === n; }) ? "" : "empty"));
+    el("span", "tick", b, has ? "\u2713 remove" : "add");
+    b.addEventListener("click", function () {
+      macSend(has ? "del|" + n + "|" + key + "|" : "add|" + n + "|" + key + "|" + macDefaultTravel(key) + "|" + label);
+      macMenuClose();
+    });
+  })(n);
+  var W = window.innerWidth, H = window.innerHeight, r = box.getBoundingClientRect();
+  box.style.left = Math.max(4, Math.min(x, W - r.width - 4)) + "px";
+  box.style.top = Math.max(4, Math.min(y, H - r.height - 4)) + "px";
+  setTimeout(function () {
+    var off = function (e) { if (!box.contains(e.target)) { macMenuClose(); document.removeEventListener("pointerdown", off, true); } };
+    document.addEventListener("pointerdown", off, true);
+    document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { macMenuClose(); document.removeEventListener("keydown", esc); } });
+  }, 0);
+}
+function macMarks() {
+  var by = {};
+  MAC.routes.forEach(function (r) { (by[r.k] = by[r.k] || []).push(r.m); });
+  Object.keys(KNOBS).forEach(function (k) {
+    KNOBS[k].forEach(function (w) {
+      var ms = by[k];
+      w.classList.toggle("inmac", !!ms);
+      if (ms) w.setAttribute("data-mac", "M" + ms.join(",")); else w.removeAttribute("data-mac");
+    });
+  });
+}
+function macList() {
+  var host = MAC.list; if (!host) return;
+  host.innerHTML = "";
+  var any = false;
+  for (var n = 1; n <= 8; n++) (function (n) {
+    var rs = MAC.routes.filter(function (r) { return r.m === n; });
+    if (!rs.length) return;
+    any = true;
+    var g = el("div", "macgrp", host), h = el("div", "mgh", g);
+    el("span", "b", h, "MACRO " + n);
+    var inp = el("input", null, h); inp.type = "text"; inp.maxLength = 24; inp.value = MAC.names[n - 1] || ""; inp.placeholder = "name shown on the Move";
+    inp.addEventListener("change", function () { if (inp.value !== (MAC.names[n - 1] || "")) macSend("name|" + n + "|" + inp.value); });
+    var clr = el("button", null, h, "Clear macro"); clr.addEventListener("click", function () { macSend("clear|" + n); });
+    rs.forEach(function (r) {
+      var m = META[r.k] || {}, span = ((m.max - m.min) || 1), row2 = el("div", "mr", g);
+      el("span", "k", row2, m.name || r.k);
+      var t = el("input", null, row2); t.type = "number"; t.step = "5"; t.min = "-100"; t.max = "100"; t.value = String(Math.round(r.t / span * 100));
+      el("span", "u", row2, "% of its range over the macro");
+      t.addEventListener("change", function () { var v = Math.max(-100, Math.min(100, parseFloat(t.value) || 0)); macSend("travel|" + n + "|" + r.k + "|" + (v / 100 * span)); });
+      var d = el("button", null, row2, "Remove"); d.addEventListener("click", function () { macSend("del|" + n + "|" + r.k + "|"); });
+    });
+  })(n);
+  if (MAC.empty) MAC.empty.style.display = any ? "none" : "";
 }
 function macKeys(i) {
   var seen = {}, out = [];
@@ -2739,8 +2830,13 @@ function buildMacros(page) {
     MAC.wraps[i] = wraps[i]; MAC.labs[i] = wraps[i].querySelector(".lab");
     (function (n) { on("mac" + (n + 1), function () { macFollow(n); }); })(i);
   }
-  MAC.note = el("div", "demo-note", p.body, "This sound has no macros. Imported Serum presets bring theirs: each knob moves what the preset routes to it (cutoff, effect mix, wavetable position and so on), and the knobs on the other tabs follow.");
+  MAC.note = el("div", "demo-note", p.body, "This sound has no macros yet. Right-click any knob (on any tab) and choose a macro to put it there: the macro then moves that control, and the Move shows it as one of its eight macro knobs. Imported Serum presets bring their own.");
   macRender();
+  var ap = panel("Assignments", g);
+  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. Here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
+  MAC.list = el("div", null, ap.body);
+  MAC.empty = el("div", "demo-note", ap.body, "Nothing is assigned yet.");
+  macList();
 }
 function buildDemo(page) {
   var u = DM.ui = {};
@@ -2819,9 +2915,10 @@ var EXTRA = {
     if (!isNaN(b) && !isNaN(i)) { DM.b = b; DM.p = i; DM.playing = p[2] === "1"; demoRender(); }
   },
   demo_on: function (v) { DM.on = String(v).toLowerCase() === "on" || String(v) === "1"; demoRender(); },
-  macro_names: function (v) { MAC.names = String(v || "").split("|"); macRender(); },
+  macro_names: function (v) { MAC.names = String(v || "").split("|"); macRender(); macList(); },
   macro_routes: function (v) {
-    MAC.routes = String(v || "").split(",").map(function (t) { var a = t.split(":"); return { m: parseInt(a[0], 10), k: a[1] }; }).filter(function (r) { return r.k; });
+    MAC.routes = String(v || "").split(",").map(function (t) { var a = t.split(":"); return { m: parseInt(a[0], 10), k: a[1], t: parseFloat(a[2]) || 0 }; }).filter(function (r) { return r.k; });
+    macMarks(); macList();
   },
   preset_now: function (v) {
     var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
@@ -2845,6 +2942,7 @@ function buildTabs() {
     b.addEventListener("click", function () {
       ps.forEach(function (x, j) { if (x) x.classList.toggle("on", j === i); bs[j].classList.toggle("on", j === i); });
       document.getElementById("osc").style.display = i === 0 ? "" : "none";
+      var os = document.querySelector(".seg.oscsel"); if (os) os.style.display = i === 0 ? "" : "none";
       try { localStorage.setItem("th_tab2", String(i)); } catch (e) {}
       redrawSoon();
     });

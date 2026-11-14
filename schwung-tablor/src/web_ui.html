@@ -98,14 +98,14 @@ body{
 .fxbar{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; max-width:1180px}
 .fxchip{background:none; border:1px solid var(--line); color:var(--faint); font:inherit; font-size:10px; letter-spacing:.16em; text-transform:uppercase; padding:5px 10px; cursor:pointer; border-radius:3px}
 .fxchip:hover{color:var(--txt); border-color:var(--dim)}
-.fxchip.on{color:var(--g); border-color:var(--g)}
+.fxchip.on{color:var(--fxc, var(--g)); border-color:var(--fxc, var(--g))}
 .fxrack{display:flex; flex-direction:column; gap:8px; max-width:1180px}
 .fxrack.rackoff{opacity:.45}
 /* a slot after Serum's: the same size for every effect, the name down the left edge, the display filling its half, the controls beside it */
 .fxrack > .panel.fxslot{height:214px; margin:0; display:flex; flex-direction:row; overflow:hidden; --kw:52px; --ks:34px}
 .fxslot > .head{flex:0 0 116px; flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:10px; padding:12px 10px; border-bottom:0; border-right:1px solid var(--line)}
-.fxslot > .head .ttl{letter-spacing:.14em; line-height:1.3}
-.fxicon{width:76px; height:76px; margin:auto 0 2px 2px; color:rgba(91,229,132,.82); flex:none}
+.fxslot > .head .ttl{letter-spacing:.14em; line-height:1.3; color:var(--fxc, inherit)}
+.fxicon{width:76px; height:76px; margin:auto 0 2px 2px; color:var(--fxc, rgba(91,229,132,.82)); opacity:.9; flex:none}
 .fxicon *{vector-effect:non-scaling-stroke}
 .fxicon .dim{opacity:.42}
 .fxslot > .body{flex:1 1 auto; min-width:0; min-height:0; flex-direction:row; align-items:stretch; gap:14px; padding:10px 12px; overflow:hidden}
@@ -1224,9 +1224,17 @@ var FXICON = (function () {
     "EQ": '<path d="M4 32H12C17 32 18 14 24 14S31 32 36 32H44"/><path class="dim" d="M4 42H44M12 38V44M24 38V44M36 38V44"/>'
   };
 })();
+/* each effect's own colour for its name, its symbol and its chip, so the slot in view is clear at a glance: twelve hues around the wheel at one lightness, nothing else
+ * in the slot changes */
+var FXCOLOR = {
+  "Distortion": "hsl(8,78%,67%)", "Compressor": "hsl(30,85%,64%)", "Filter FX": "hsl(52,80%,62%)", "Delay 2": "hsl(88,55%,62%)",
+  "Delay": "hsl(122,50%,64%)", "Width": "hsl(162,55%,58%)", "Reverb": "hsl(190,65%,64%)", "Chorus": "hsl(214,80%,72%)",
+  "Flanger": "hsl(245,75%,76%)", "Hyper": "hsl(275,70%,74%)", "Phaser": "hsl(305,60%,72%)", "EQ": "hsl(336,70%,72%)"
+};
 function fxSlot(title, o, build) {
   var p = panel(title, fxRack, { power: o.power });
   p.root.classList.add("fxslot");
+  if (FXCOLOR[title]) p.root.style.setProperty("--fxc", FXCOLOR[title]);
   build(p.body, p);
   var kids = [].slice.call(p.body.children), gfx = document.createElement("div"), ctl = document.createElement("div");     /* the display apart from the controls */
   gfx.className = "fxgfx"; ctl.className = "fxctl";
@@ -1247,6 +1255,7 @@ function fxSlot(title, o, build) {
     p.head.insertBefore(off, p.head.firstChild);
   }
   var chip = el("button", "fxchip", fxBar, title);
+  if (FXCOLOR[title]) chip.style.setProperty("--fxc", FXCOLOR[title]);
   chip.title = "Switch " + title + " on / off";
   chip.addEventListener("click", function () { if (o.active()) o.turnOff(); else o.turnOn(); });
   var s = {

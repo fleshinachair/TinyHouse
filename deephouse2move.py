@@ -557,7 +557,7 @@ def noise_type_for(sample: str | None) -> tuple[int, str | None]:
 ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune": 5, "WT2 Tune": 6, "WT1 Pan": 11, "WT2 Pan": 12,
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
-          "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35}
+          "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38}
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -1335,6 +1335,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return "FX Filter Freq", CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "FXDistortion" and key[1] == "kParamWet":           # the effects block's Distortion Wet (fxmap.dist_dynamic): Serum's route moves the Wet knob, 1.0 x the depth
             return "Dist Wet", 1.0
+        if key[0] == "FXUtils" and key[1] == "kParamLevelOut":            # the Level Out knob of the Utils that ends a rack (fxmap.util_out_plan): the knob moves by 1.0 x the depth
+            return ("Util Out", "Bus1 Out", "Bus2 Out")[key[2]], 1.0
         if key[0] == "FXComp" and key[1] == "kParamWet":                  # the effects block's Comp Wet (fxmap.comp_dynamic): the parallel mix, 1.0 x the depth
             return "Comp Wet", 1.0
         if key[0] == "VoiceFilter" and key[1] == "kParamFreq":
@@ -1549,6 +1551,9 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     fxf_dyn = fxmap.dynamic_filter(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     dyn_dist = fxmap.dist_dynamic(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     dyn_comp = fxmap.comp_dynamic(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"]})
+    util_out_carried = []
+    for rack, rnodes in enumerate([ph.get("fx_nodes", [])] + list(ph.get("bus_nodes", [[], []]))):
+        util_out_carried += fxmap.util_out_plan(rnodes, ph["mods"], ph["macros"], rack)[0]
     for m in ph["mods"]:
         src, a = m["source"], m["amount_pct"] / 100.0
         key = (m["dest_type"], m["dest_param"], m["dest_id"])
@@ -1566,6 +1571,13 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             continue
         if fxf_dyn and fxf_dyn["lfos"] and m["dest_type"] == "FXFilter" and m["dest_param"] == "kParamFreq" and 6 <= src <= 15:
             other.append((src, ("FXFilter", "kParamFreq", 0), a, bool(m.get("bipolar"))))
+            continue
+        if m in util_out_carried:                  # the Level Out of a Utils that ends a rack (fxmap.util_out_plan): an LFO route (map_lfos) or an envelope route (the spare envelopes)
+            ukey = ("FXUtils", "kParamLevelOut", m["dest_id"] // 100)
+            if src <= 5:
+                routes.append((src - 2, ukey, a))
+            else:
+                other.append((src, ukey, a, bool(m.get("bipolar"))))
             continue
         if m["dest_type"].startswith("FX") or m["dest_type"] in ("Env", "Global", "LFOPointModBus"):
             continue
@@ -2093,6 +2105,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = "Dist Wet"
         elif key[0] == "FXComp" and key[1] == "kParamWet":
             dest = "Comp Wet"
+        elif key[0] == "FXUtils" and key[1] == "kParamLevelOut":
+            dest = ("Util Out", "Bus1 Out", "Bus2 Out")[key[2]]
         elif key[:2] in GRAN_ROUTE_KEYS and key[2] in gslot:
             dest = f"Smp{gslot[key[2]]} {GRAN_ROUTE_NAME[key[1]]}"
         if dest:
@@ -2160,7 +2174,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     note += apply_filter_fit(ph["name"], P)
     note += apply_width_fit(ph["name"], P)
     # ---- FX block -------------------------------------------------------------
-    fx_p, fx_notes, fx_info = fxmap.map_fx(ph["name"], ph.get("fx_nodes", []), ctx={"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
+    fx_p, fx_notes, fx_info = fxmap.map_fx(ph["name"], ph.get("fx_nodes", []), ctx={"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True, "rack": 0, "rack_nodes": ph.get("fx_nodes", [])})
     t_out = fx_p.pop("comp_thresh_out_db", None)
     cplan = fxmap.CONV_PLANS.pop(ph["name"], None)
     if cplan is not None:                                  # the Convolution reverb's impulse response, written as a set beside the samples (sample_export.write_ir)
@@ -2237,7 +2251,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
         if not nodes:
             notes.append(f"FX bus {b}: sent {', '.join(k.split('_')[0] for k in live)}, rack empty (a parallel copy)")
             continue
-        fx_p, fx_notes, _ = fxmap.map_fx(f"{ph['name']}#bus{b}", nodes, ctx={"mods": ph["mods"], "macros": ph["macros"]})
+        fx_p, fx_notes, _ = fxmap.map_fx(f"{ph['name']}#bus{b}", nodes, ctx={"mods": ph["mods"], "macros": ph["macros"], "rack": b, "rack_nodes": nodes})
         t_out = fx_p.pop("comp_thresh_out_db", None)
         extra = {k: fx_p.pop(k) for k in ("comp_thresh2_out_db", "comp_thresh3_out_db") if k in fx_p}
         if t_out is not None:

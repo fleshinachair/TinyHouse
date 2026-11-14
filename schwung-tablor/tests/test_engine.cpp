@@ -991,6 +991,36 @@ static void testFxFilterLfo()
     CHECK(opened > closed + 10.0, "an LFO route to FX Filter Freq opens a closed Filter FX low-pass (%.1f dB against %.1f)", opened, closed);
 }
 
+/* An LFO route to "Util Out" / "Bus1 Out" (MOD_DST 36, 37) moves the Level Out knob of the Utils that ends the main rack / bus 1: the gain is (2 x (the stored knob + the offset))^2,
+ * the stored knob being the rack's util_out pot / 127 (0 = no route, the signal untouched; measured on Serum: -12 dB at knob 0.25, +12 dB at 1.0). */
+static void testUtilOutLfo()
+{
+    auto level = [](int rack, int base, bool route) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127; e.pots[TB_P_VOLUME] = 10; e.pots[TB_P_WT1_LEVEL] = 20;       /* quiet enough that the output limiter is not engaged */
+        float *rp = e.pots;
+        if (rack == 1) { e.pots[TB_P_WT1_POST] = 2; e.pots[TB_P_WT1_BUS1] = 127; rp = e.busPots[0]; }
+        rp[TB_P_UTIL_OUT] = (float) base;
+        for (int k = 0; k < 16; k++) e.pots[TB_P_LFO1_S0 + k] = 127;          /* the LFO sits at 1 */
+        e.pots[TB_P_LFO1_RATE] = 0;
+        if (route) { e.pots[TB_P_LR1_SRC] = 1; e.pots[TB_P_LR1_DST] = rack == 1 ? 37 : 36; e.pots[TB_P_LR1_AMT] = 127; e.pots[TB_P_LR1_BIP] = 0; }
+        note(e, 72, 100);
+        auto x = render(e, 200);
+        double a = 0;
+        for (size_t i = x.size() / 2; i < x.size(); i += 2) a += (double) x[i] * x[i];
+        return 10.0 * std::log10(a / (x.size() / 4) + 1e-9);
+    };
+    for (int rack = 0; rack <= 1; rack++) {
+        const double plain = level(rack, 0, false);
+        const double half = level(rack, 64, false);         /* knob 0.504, no route: unity */
+        const double quiet = level(rack, 32, false);        /* knob 0.252, no route: (2 x 0.252)^2 = -11.9 dB */
+        const double opened = level(rack, 1, true);         /* a knob near 0 and the LFO at 1 with a full route: knob 1.0, +12 dB */
+        CHECK(std::fabs(half - plain) < 0.3, "rack %d: a Utils Level Out stored at its default leaves the level alone (%.2f vs %.2f dB)", rack, half, plain);
+        CHECK(std::fabs(quiet - (plain - 11.9)) < 0.6, "rack %d: a Level Out stored at 0.25 takes it down 12 dB (%.2f against %.2f)", rack, quiet, plain - 11.9);
+        CHECK(std::fabs(opened - (plain + 12.04)) < 0.6, "rack %d: a full LFO route opens it to +12 dB (%.2f against %.2f)", rack, opened, plain + 12.04);
+    }
+}
+
 /* A sample voice plays for as long as its sample. A dangling-if in Voice::process ran smp.release() on every block, not only when the voice ended: every sample
  * preset played its first 128 samples (3 ms) and nothing after, and the brass and strings multisamples, which fade in, were silent. */
 static void testSampleVoicePlaysThrough()
@@ -1161,6 +1191,7 @@ int main()
     testVelocityLaw();
     testFxBuses();
     testFxFilterLfo();
+    testUtilOutLfo();
     testNoteOnset();
     testMonoTakeover();
     testClipPlayer();

@@ -76,6 +76,22 @@ def log(*a):
 
 
 # ------------------------------------------------------------------ renderers
+def serum_openable(tree):
+    """A copy of the preset with its Serum 1 table names ("Analog S1/", "Digital S1/") pointed at the same files in "Analog/" and "Digital/": Serum 2's Tables folder has no "S1" folders,
+    so it cannot open them and plays nothing, where the converter (deephouse2move.s1_table_name) finds the tables."""
+    out = None
+    for i in range(3):
+        o = tree.get(f"Oscillator{i}")
+        w = (o or {}).get(f"WTOsc{i}") or {}
+        rel = (w.get("relativePathToWT") or "").replace("\\", "/").lstrip("/")
+        alias = d2m.s1_table_name(rel) if rel else rel
+        if rel and alias != rel and not (SERUM_TABLES / rel).is_file() and (SERUM_TABLES / alias).is_file():
+            if out is None:
+                out = copy.deepcopy(tree)
+            out[f"Oscillator{i}"][f"WTOsc{i}"]["relativePathToWT"] = alias
+    return tree if out is None else out
+
+
 class Serum:
     def __init__(self):
         self.engine = daw.RenderEngine(SR, 128)
@@ -83,6 +99,7 @@ class Serum:
         self.audio_seconds = 0.0
 
     def render(self, tree, notes, dur, hold, vel=100):
+        tree = serum_openable(tree)
         fd, path = tempfile.mkstemp(suffix=".bin")
         with os.fdopen(fd, "wb") as f:
             f.write(convert_preset_tree(tree))

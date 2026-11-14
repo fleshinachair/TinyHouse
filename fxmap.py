@@ -1057,10 +1057,52 @@ def comp_params(nodes: list[dict], dyn_i: int | None = None) -> tuple[dict, list
 UTILS_STEREO_KEYS = ("kParamWidth", "kParamLFMono", "kParamLFXover", "kParamBalance")
 
 
+UTIL_OUT_UNITY = 0.5                    # the Level Out knob's default (its gain is (knob / 0.5)^2: calibration/probe_utils_level.py)
+UTIL_OUT_AFTER = ("EQ", "Filter", "Utils")      # the effects that may sit behind a Utils whose gain pumps: they are linear, so the gain commutes with them
+
+
+def util_out_plan(nodes: list[dict], mods: list, macros: list, rack: int) -> tuple[list[dict], list[str]]:
+    """The routes from an envelope or LFO to the Level Out of a Utils that the engine carries as a gain on the rack's output (the main rack is 0, the buses 1 and 2; a bus rack's mod
+    destination id is 100 x rack + the node's place), and why any were not. The engine's gain is (2 x (the stored knob + the route's offset, kept in 0..1))^2, Serum's law
+    (calibration/probe_utils_level_route.py: the route adds to the knob and the knob stops at 0 and 1); it is carried for one Utils per rack when that Utils is not in a
+    Split branch and only linear effects (EQ, Filter, Utils) follow it in the rack, so the gain on the output is the gain at the node. The stored knob goes to the engine as the rack's util_out pot."""
+    carried, why = [], []
+    inside = branch_nodes(nodes)
+    for m in mods:
+        if m.get("dest_type") != "FXUtils" or m.get("dest_param") != "kParamLevelOut" or foldable_source(m, macros):
+            continue
+        did = m.get("dest_id")
+        if not isinstance(did, int) or did // 100 != rack:
+            continue
+        i = did % 100
+        n = nodes[i] if 0 <= i < len(nodes) else None
+        if n is None or kind_of(n) != "Utils":
+            why.append("Utils Level Out moved by an envelope/LFO (the pumping of its volume is not carried: the Utils node was not found)")
+            continue
+        if not enabled(n):
+            continue                                            # a bypassed Utils: the route changes nothing
+        src = m.get("source")
+        if not isinstance(src, int) or not (6 <= src <= 15 or (2 <= src <= 5 and not m.get("bipolar"))):
+            why.append("Utils Level Out moved by a source the engine has no route for (the pumping of its volume is not carried)")
+        elif i in inside:
+            why.append("Utils Level Out moved by an envelope/LFO in a Split branch (the pumping of its volume is not carried)")
+        elif any(c["dest_id"] != did for c in carried):
+            why.append("Utils Level Out moved by an envelope/LFO on a second Utils of the rack (the pumping of its volume is not carried)")
+        elif any(kind_of(x) not in UTIL_OUT_AFTER for x in nodes[i + 1:] if enabled(x)):
+            why.append("Utils Level Out moved by an envelope/LFO with a non-linear effect behind it in the rack (the pumping of its volume is not carried)")
+        else:
+            carried.append(m)
+    return carried, why
+
+
 def utils_level_why(nodes: list[dict], ctx: dict | None) -> list[str]:
-    """A Utils Level Out moved by an envelope or LFO (a gain that pumps with it, as on the hardstyle kicks): the rest of the Utils is still carried."""
-    mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils" and m.get("dest_param") == "kParamLevelOut"]
-    if any(not foldable_source(m, (ctx or {}).get("macros", [])) for m in mods):
+    """A Utils Level Out moved by an envelope or LFO (a gain that pumps with it, as on the hardstyle kicks) that the engine does not carry: the rest of the Utils is still carried."""
+    c = ctx or {}
+    if "rack_nodes" in c:
+        carried, why = util_out_plan(c["rack_nodes"], c.get("mods", []), c.get("macros", []), c.get("rack", 0))
+        return sorted(set(why))
+    mods = [m for m in c.get("mods", []) if m.get("dest_type") == "FXUtils" and m.get("dest_param") == "kParamLevelOut"]
+    if any(not foldable_source(m, c.get("macros", [])) for m in mods):
         return ["Utils Level Out moved by an envelope/LFO (the pumping of its volume is not carried)"]
     return []
 
@@ -1803,7 +1845,7 @@ def fx_defaults() -> dict:
               "flan_on": 0, "flan_mix": 0, "flan_rate": 37, "flan_depth": 64, "flan_fb": 0, "flan_phase": 0,
               "phas_on": 0, "phas_mix": 0, "phas_rate": 37, "phas_depth": 64, "phas_depth2": 0, "phas_freq": 50, "phas_fb": 0, "phas_phase": 0, "phas_poles": 4,
               "fxf_on": 0, "fxf_type": 0, "fxf_freq": 127, "fxf_res": 0, "fxf_env": 64,
-              "hyd_uni": 1, "hyd_det": 0, "hyd_rate": 40, "hyd_wet": 0, "split_band": 0, "split_freq": 64, "split_stages": 0})
+              "hyd_uni": 1, "hyd_det": 0, "hyd_rate": 40, "hyd_wet": 0, "split_band": 0, "split_freq": 64, "split_stages": 0, "util_out": 0})
     return P
 
 
@@ -1892,6 +1934,12 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     if uwhy:
         notes.append("Utils not carried: " + "; ".join(sorted(set(uwhy))))
     notes += utils_level_why(nodes, ctx)
+    if "rack_nodes" in (ctx or {}):
+        pumped, _ = util_out_plan(ctx["rack_nodes"], ctx.get("mods", []), ctx.get("macros", []), ctx.get("rack", 0))
+        if pumped:           # the stored knob goes to the engine as the base of the gain its routes move (0 is "no routes", so a knob at 0 is stored as 1)
+            lo = float(plain(ctx["rack_nodes"][pumped[0]["dest_id"] % 100]).get("kParamLevelOut", UTIL_OUT_UNITY))
+            P["util_out"] = max(1, int(round(min(max(lo, 0.0), 1.0) * 127)))
+            notes.append(f"Utils Level Out moved by {len(pumped)} envelope/LFO route(s) carried as a gain on the rack's output (stored knob {lo:.2f})")
     carried_utils = (width != 1.0 or mono is not None) and not uwhy
     # A Distortion / Comp / Bode / Filter / Utils / Split node with a stored Wet under 1 % and no envelope / LFO / velocity route to its Wet passes the signal untouched
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.

@@ -378,7 +378,9 @@ MOD_DST = ["None",
            # Appended, never inserted: presets store the INDEX.
            "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq", "Dist Wet", "Comp Wet",
            # Granular sample slots (granular.h): the knob of Density, Grain Length and Scan Rate, moved by an LFO / envelope route.
-           "Smp1 Density", "Smp1 Length", "Smp1 Scan", "Smp2 Density", "Smp2 Length", "Smp2 Scan", "Smp3 Density", "Smp3 Length", "Smp3 Scan"]
+           "Smp1 Density", "Smp1 Length", "Smp1 Scan", "Smp2 Density", "Smp2 Length", "Smp2 Scan", "Smp3 Density", "Smp3 Length", "Smp3 Scan",
+           # The Level Out knob of the Utils that ends the main rack / bus 1 / bus 2 (a sidechain-style pump on the hardstyle kicks).
+           "Util Out", "Bus1 Out", "Bus2 Out"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -513,6 +515,8 @@ TONE = dict(
     # 40 Hz to 500 Hz). The converter sets both from a Serum Utils effect; neither has a page on the device.
     mwid  = pot("mwidth",   "MWID", "Master Width", 64),
     mono  = pot("monohz",   "MONO", "Mono Below",   0),
+    # The base of the gain an LFO / envelope route puts on the Level Out of the Utils that ends a rack (0 = no such route; else the stored knob, pot / 127). Set by the converter; per rack.
+    utout = pot("util_out", "UTOU", "Utils Level Base", 0),
     # Distortion, the first stage of the FX block (before width, delay and reverb, so the tail stays clean the way a
     # distortion ahead of a reverb leaves it). Drive 0 is off; Mix is the wet part; Mode picks the curve: Soft is a
     # tanh, Asym adds a bias (even harmonics, the diode/tube/overdrive family), Hard clips. No page on the device:
@@ -670,7 +674,7 @@ BANKS = [
         row(HYD["uni"], HYD["det"], HYD["rate"], HYD["wet"]),
         row(DLY2["mix"], DLY2["time"], DLY2["timer"], DLY2["fb"], DLY2["lo"], DLY2["hi"]),
         row(DLY2["mode"]),
-        row(TONE["dpre"], TONE["dprf"], TONE["dprq"]),
+        row(TONE["dpre"], TONE["dprf"], TONE["dprq"], TONE["utout"]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[0][k], EQM[1][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQM[2][k], EQM[3][k])]),
         row(*[v for k in ("type", "freq", "gain", "q") for v in (EQS[0][k], EQS[1][k])]),

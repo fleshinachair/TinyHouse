@@ -294,6 +294,8 @@ private:
     StereoBiquad sideHp;
     float widthCur = 1.0f, monoSeen = -1.0f;
     float busWidthCur[2] = {1.0f, 1.0f};              /* a bus rack's own Utils width (the "bN.mwidth" key), smoothed */
+    float utilOutCur[3] = {1.0f, 1.0f, 1.0f};        /* the gain a route on a rack's ending Utils Level Out has put on it (main, bus 1, bus 2), ramped across each block */
+    float utilOutMod[3] = {0.0f, 0.0f, 0.0f};        /* the routes' offsets on that knob, read from the newest voice once per block */
     bool  monoActive = false;
 
     /* One block's hold on the tables: the only thing keeping them alive. */
@@ -310,6 +312,7 @@ private:
     float dryBuf[2][kBlock] = {};                 /* the sources routed Out, which skip the effects */
     float busTempoSeen[2] = {};
     void refreshBus(int b);
+    void applyUtilOut(int rack, float *l, float *r, int n);       /* the gain of a route on the Level Out of the Utils that ends a rack (0 main, 1 and 2 buses) */
     float fxSeen[TB_P_REV_ON - TB_P_DLY_MIX + 1] = {};
     float distSeen[TB_P_COMP_BELOW - TB_P_DIST_DRIVE + 1] = {};      /* the distortion and compressor pots are contiguous */
     float compOnSeen = -1.0f;

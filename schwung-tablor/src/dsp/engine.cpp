@@ -875,6 +875,25 @@ void Engine::refreshFx()
     fx.set(fxSettings(pots));
 }
 
+/* A route from an LFO or envelope to the Level Out knob of the Utils that ends a rack. Serum adds depth x source to the knob (0..1, stored 0.5 = unity, stopping at both ends: calibration/probe_utils_level_route.py)
+ * and the gain is (knob / 0.5)^2 (probe_utils_level.py: -12 dB at 0.25, +12 dB at 1.0, -28 dB at 0.1). The converter carries it when the stored knob is its default, so the gain here is (2 x (base + m))^2 with the base the rack's util_out pot / 127 (0 = no route).
+ * The gain is ramped across the block so a fast pump does not step. */
+void Engine::applyUtilOut(int rack, float *l, float *r, int n)
+{
+    const float *pp = rack == 0 ? pots : busPots[rack - 1];
+    const float base = pp[TB_P_UTIL_OUT];
+    if (base < 0.5f) {                                  /* no route on this rack's Utils */
+        if (utilOutCur[rack] == 1.0f) return;
+    }
+    const float knob = std::clamp(base / 127.0f + utilOutMod[rack], 0.0f, 1.0f);
+    const float target = base < 0.5f ? 1.0f : 4.0f * knob * knob;
+    float g = utilOutCur[rack];
+    if (g == 1.0f && target == 1.0f) return;
+    const float step = (target - g) / (float) n;       /* 0 once the gain has settled: a steady gain is still applied */
+    for (int i = 0; i < n; i++) { g += step; l[i] *= g; r[i] *= g; }
+    utilOutCur[rack] = target;
+}
+
 void Engine::refreshBus(int b)
 {
     /* The bus rack's pots, with the main rack's FX on / Space in their places: compared where they lie (the two taken from the main pots on their own), and
@@ -1003,6 +1022,9 @@ void Engine::renderBlock(int16_t *out, int frames)
                 for (auto &v : voices)
                     if (v.isActive() && v.serialNumber() >= newestC) { newestC = v.serialNumber(); cm = v.compWetMod(); }
                 fx.setCompWetMod(cm);
+                uint32_t newestU = 0;
+                for (auto &v : voices)
+                    if (v.isActive() && v.serialNumber() >= newestU) { newestU = v.serialNumber(); for (int r = 0; r < 3; r++) utilOutMod[r] = v.utilOutMod(r); }       /* with no voice sounding it keeps its last offsets: a bus tail stays at the pump's end level */
             }
             /* The buses' racks have the same Filter FX (the "b1.fxf_*" / "b2.fxf_*" keys), moved by the same envelope: Lead - Other Side's bus 1 filters
              * its distortion and the EQs behind it boost the highs it takes away. */
@@ -1035,11 +1057,13 @@ void Engine::renderBlock(int16_t *out, int frames)
                     bl[i] = m + sd; br[i] = m - sd;
                 }
             }
+            applyUtilOut(1 + b, busBuf[2 * b], busBuf[2 * b + 1], n);
             for (int i = 0; i < n; i++) { L[i] += busBuf[2 * b][i]; R[i] += busBuf[2 * b + 1][i]; }
         }
         fx.setConvPlan(std::atomic_load(&convPlan));
         if (fx.active())
             fx.process(L, R, n);
+        applyUtilOut(0, L, R, n);
         for (int i = 0; i < n; i++) { L[i] += dryBuf[0][i]; R[i] += dryBuf[1][i]; }          /* Out: past the effects */
 
         refreshTone();

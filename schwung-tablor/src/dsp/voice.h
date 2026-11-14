@@ -72,6 +72,8 @@ enum ModDst {
     MD_COMP_WET,                 /* the effects block's Comp Wet (its parallel mix), as a fraction of 0..100 %: read from the newest voice (compWetMod) */
     /* A granular sample slot's Density, Grain Length and Scan Rate KNOBS (granular.h): the offset is added to the knob (0..1; Scan: 400 % of speed per unit), as Serum's routes do. */
     MD_SMP1_GDENS, MD_SMP1_GLEN, MD_SMP1_GSCAN, MD_SMP2_GDENS, MD_SMP2_GLEN, MD_SMP2_GSCAN, MD_SMP3_GDENS, MD_SMP3_GLEN, MD_SMP3_GSCAN,
+    /* The Level Out KNOB of the Utils that ends a rack (its gain is (knob / 0.5)^2, the knob 0.5 = unity), moved by an LFO / envelope route: the main rack's, then bus 1's and bus 2's. Read by the engine from the newest voice. */
+    MD_UTIL_OUT, MD_BUS1_OUT, MD_BUS2_OUT,
     MD_COUNT
 };
 
@@ -151,6 +153,7 @@ public:
     bool isActive() const  { return active; }
     float distWetMod() const { return modOff[MD_DIST_WET]; }            /* LFO / spare-envelope routes to the Distortion's Wet */
     float compWetMod() const { return modOff[MD_COMP_WET]; }            /* LFO / spare-envelope routes to the Comp's Wet */
+    float utilOutMod(int rack) const { return modOff[MD_UTIL_OUT + rack]; }   /* rack 0 main, 1 and 2 the buses: the Level Out knob's offset */
     float fxfCutoffMod() const { return modOff[MD_FXF_FREQ]; }          /* LFO / spare-envelope routes to the Filter FX cutoff, as a fraction of the filter's width */
     float filterEnvelope() const { return filterADSR.getOutput(); }       /* the Filter FX in the effects block follows it */
     bool isReleasing() const { return adsr.getState() == AnalogADSR::State::release; }

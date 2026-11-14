@@ -122,8 +122,8 @@ def parse_sfz(path: Path) -> list[dict]:
         hi = int(r.get("hikey", key if key is not None else 127))
         root = int(r.get("pitch_keycenter", key if key is not None else 60))
         loops = r.get("loop_mode", "no_loop") in ("loop_continuous", "loop_sustain")
-        out.append({"lovel": int(float(r.get("lovel", 0))), "hivel": int(float(r.get("hivel", 127))), "volume": float(r.get("volume", 0)),
-                    "lo": lo, "hi": hi, "root": root, "loops": loops, "tune": float(r.get("tune", 0)) + 100.0 * float(r.get("transpose", 0)),
+        out.append({"lovel": int(_sfz_num(r.get("lovel", 0))), "hivel": int(_sfz_num(r.get("hivel", 127))), "volume": _sfz_num(r.get("volume", 0)),
+                    "lo": lo, "hi": hi, "root": root, "loops": loops, "tune": _sfz_num(r.get("tune", 0)) + 100.0 * _sfz_num(r.get("transpose", 0)),
                     "loop_start": _sfz_num(r.get("loop_start", 0)), "loop_end": _sfz_num(r.get("loop_end", 0)), "loop_crossfade": _sfz_num(r.get("loop_crossfade", 0)),
                     "file": (path.parent / default_path / r["sample"].replace("\\", "/")).resolve()})
     return out

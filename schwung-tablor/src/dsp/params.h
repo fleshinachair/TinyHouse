@@ -6,7 +6,7 @@
 
 #define TB_VERSION "1.11.0-th"
 #define TB_MODULE_ID "tinyhouse"
-#define TB_PARAM_COUNT 495
+#define TB_PARAM_COUNT 513
 
 typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;
 
@@ -517,6 +517,24 @@ enum {
     TB_P_SMP3_GROFF = 492,
     TB_P_SMP3_GRLEN = 493,
     TB_P_SMP3_GRPAN = 494,
+    TB_P_SMP_GSCX = 495,
+    TB_P_SMP_GSCM = 496,
+    TB_P_SMP_GBASE = 497,
+    TB_P_SMP_GSBR = 498,
+    TB_P_SMP_GLENM = 499,
+    TB_P_SMP_GDENM = 500,
+    TB_P_SMP2_GSCX = 501,
+    TB_P_SMP2_GSCM = 502,
+    TB_P_SMP2_GBASE = 503,
+    TB_P_SMP2_GSBR = 504,
+    TB_P_SMP2_GLENM = 505,
+    TB_P_SMP2_GDENM = 506,
+    TB_P_SMP3_GSCX = 507,
+    TB_P_SMP3_GSCM = 508,
+    TB_P_SMP3_GBASE = 509,
+    TB_P_SMP3_GSBR = 510,
+    TB_P_SMP3_GLENM = 511,
+    TB_P_SMP3_GDENM = 512,
 };
 
 static const char *const tb_opts_0[] = { "LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24", "Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +" };
@@ -546,6 +564,9 @@ static const char *const tb_opts_23[] = { "Off", "Low", "High", "Mid", "Side" };
 static const char *const tb_opts_24[] = { "Sample", "Granular" };
 static const char *const tb_opts_25[] = { "Tukey", "ExpDec", "Triangle", "BlackmanHarris", "Gaussian" };
 static const char *const tb_opts_26[] = { "Off", "Forward", "PingPong" };
+static const char *const tb_opts_27[] = { "x1", "x2" };
+static const char *const tb_opts_28[] = { "Free", "Tempo lock", "Tempo sync" };
+static const char *const tb_opts_29[] = { "Free", "BPM" };
 
 static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "wt1_table", TB_PATH, 0, 0, 0, 0, 0 },
@@ -1043,6 +1064,24 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "smp3_groff", TB_INT, 0, 100, 0, 0, 0 },
     { "smp3_grlen", TB_INT, 0, 100, 0, 0, 0 },
     { "smp3_grpan", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_gscx", TB_ENUM, 0, 1, 0, 2, tb_opts_27 },
+    { "smp_gscm", TB_ENUM, 0, 2, 0, 3, tb_opts_28 },
+    { "smp_gbase", TB_INT, 20, 400, 120, 0, 0 },
+    { "smp_gsbr", TB_INT, 0, 8, 3, 0, 0 },
+    { "smp_glenm", TB_ENUM, 0, 1, 0, 2, tb_opts_29 },
+    { "smp_gdenm", TB_ENUM, 0, 1, 0, 2, tb_opts_29 },
+    { "smp2_gscx", TB_ENUM, 0, 1, 0, 2, tb_opts_27 },
+    { "smp2_gscm", TB_ENUM, 0, 2, 0, 3, tb_opts_28 },
+    { "smp2_gbase", TB_INT, 20, 400, 120, 0, 0 },
+    { "smp2_gsbr", TB_INT, 0, 8, 3, 0, 0 },
+    { "smp2_glenm", TB_ENUM, 0, 1, 0, 2, tb_opts_29 },
+    { "smp2_gdenm", TB_ENUM, 0, 1, 0, 2, tb_opts_29 },
+    { "smp3_gscx", TB_ENUM, 0, 1, 0, 2, tb_opts_27 },
+    { "smp3_gscm", TB_ENUM, 0, 2, 0, 3, tb_opts_28 },
+    { "smp3_gbase", TB_INT, 20, 400, 120, 0, 0 },
+    { "smp3_gsbr", TB_INT, 0, 8, 3, 0, 0 },
+    { "smp3_glenm", TB_ENUM, 0, 1, 0, 2, tb_opts_29 },
+    { "smp3_gdenm", TB_ENUM, 0, 1, 0, 2, tb_opts_29 },
 };
 
 /* chain_params: fully static, served verbatim. It MUST stay cheap —

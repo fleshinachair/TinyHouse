@@ -320,6 +320,16 @@ def _gran2(slot, tag, name):
         rpan  = num(f"{slot}_grpan",    f"GQ{tag}W", f"{name} Random Pan", 0, 100, 0),
     )
 GRANB1, GRANB2, GRANB3 = _gran2("smp", "A", "Sample"), _gran2("smp2", "B", "Sample 2"), _gran2("smp3", "C", "Sample 3")
+def _gran3(slot, tag, name):
+    return dict(
+        scx   = enum(f"{slot}_gscx",   f"GR{tag}X", f"{name} Grain Scan Range", ["x1", "x2"], 0),
+        scm   = enum(f"{slot}_gscm",   f"GR{tag}M", f"{name} Grain Scan Mode", ["Free", "Tempo lock", "Tempo sync"], 0),
+        base  = num(f"{slot}_gbase",   f"GR{tag}B", f"{name} Grain Base Tempo", 20, 400, 120),
+        sbr   = num(f"{slot}_gsbr",    f"GR{tag}R", f"{name} Grain Scan Rate Step", 0, 8, 3),
+        lenm  = enum(f"{slot}_glenm",  f"GR{tag}L", f"{name} Grain Length Mode", ["Free", "BPM"], 0),
+        denm  = enum(f"{slot}_gdenm",  f"GR{tag}D", f"{name} Grain Density Mode", ["Free", "BPM"], 0),
+    )
+GRANC1, GRANC2, GRANC3 = _gran3("smp", "A", "Sample"), _gran3("smp2", "B", "Sample 2"), _gran3("smp3", "C", "Sample 3")
 SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
     wave  = enum("sub_wave", "SUBW", "Sub Wave", SUB_WAVES, 0),
@@ -688,6 +698,8 @@ BANKS = [
     ("Granular", False, [row(*G.values()) for G in (GRAN1, GRAN2, GRAN3)]),
     # After the Granular bank, for the same reason: the scan range, loop and Random settings of the granular mode. Set by the converter; no page on the device.
     ("Granular 2", False, [row(*list(G.values())[i:i + 6]) for G in (GRANB1, GRANB2, GRANB3) for i in (0, 6)]),
+    # After Granular 2, for the same reason: the scan range option, the tempo scan, and the BPM modes of grain length and density. Set by the converter; no page on the device.
+    ("Granular 3", False, [row(*G.values()) for G in (GRANC1, GRANC2, GRANC3)]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

@@ -104,3 +104,17 @@ Positions in percent of the file; the scan position p(t) = Start + Scan x t (t s
 - **Manual Position** (`kParamManualPositionMode` = 1, `kParamPosition` percent): every grain reads at Position; the scan and Start are ignored (Position 50 % = 4.0 s with Start 25 % and Scan 100 %).
 - **ScanRange** = 1 (8 oscillators): with End 50 %, Start 12.5 % the scan moved at twice the speed (1.0 -> 1.84 in 0.42 s). Meaning unknown, not carried.
 - Not measured: Tailed past the end, Loop Crossfade, LoopStartLink, Random Start (oscillator), the tempo-synced scan (`kParamScanBPM*`, `kParamBaseTempo`, `kParamScanTempoLock`).
+
+## Scan range, tempo, BPM modes, unison, warp (measured 2026-11-14 with `chirp.wav` / `click1.wav`; DawDreamer `set_bpm` for the tempo)
+- **ScanRange** 1: the scan runs at exactly twice the speed at every rate (rate 10 / 25 / 50 / 100 / 200 -> 0.2 / 0.5 / 1 / 2 / 4 file-s/s), a negative rate likewise. Engine: `smpN_gscx`.
+- **Tempo lock** (`kParamScanTempoLock` 1, `kParamBaseTempo`): speed = rate x host BPM / base tempo (base 60 / 138 / 240 at 120 BPM: 2 / 0.87 / 0.5; at 60 BPM and base 120: 0.5). Engine: `gscm` 1 + `gbase`.
+- **Tempo sync** (`kParamScanBPMDivide` > 0 switches it on; the value, 1 / 2 / 3, changes nothing; without it `kParamScanBPMRate` does nothing): the scan covers a fixed fraction of the file per second,
+  0.0625 x 2^rate x BPM / 120 (rate 0..4 measured; an 8 s and a 4 s file give the same fraction, so it is file-length independent: 1 bar per file at rate 3, 120 BPM, 4 s). The stored Scan Rate is ignored (its sign, from Reverse, is kept).
+  Engine: `gscm` 2 + `gsbr`. `808 - Texture` stores BPMRate 0 without Divide: no tempo scan there (the old gap was a false alarm).
+- **LengthMode BPM**: the grain length snaps to 1/128 s x 2^i at 120 BPM (i = 0..13, to 64 s) and scales as 120 / BPM. The knob k = (L/10)^0.25 steps 14 times: i = floor(14 k - 0.158) (boundaries measured at k = 0.2256 + n/14, +/-0.003).
+- **DensityMode BPM**: the births per second are 2^m at 120 BPM, whatever the grain length, scaled by BPM / 120; m = floor(14 k - 3.82) - 2 (k = Density knob), from 1/16 s at k ~ 0.2 to 256 /s at k = 1 (boundaries k = 0.273 + n/14).
+  The overlap is then births x length (the gain table follows it). Engine: `glenm`, `gdenm`.
+- **Unison** (7 oscillators): every grain is born once per voice (the same grid, each voice its own Random draws is assumed), voices spread evenly across the Detune: total span 4 d^1.25 semitones for Detune d (0.25 -> 0.71 st, 0.5 -> 1.68, 1 -> 3.96), pan like the sample oscillator
+  (the first voice left, alternating, the middle one of an odd stack in the centre; UnisonStereo 100 % = hard, 50 % = pan 0.59, 25 % = 0.31), level 1/sqrt(n) per voice. Detune Width does nothing. The engine reuses `smpN_uni/det/spread`; UnisonWarp and UnisonStack are not carried (gap).
+- **Warp on the grains** (probes `calibration/probe_granular_warp.py`): a Dist* warp is applied to the file's raw samples inside each grain, before the window and the grain gain (the gain it adds does not change with the overlap
+  of 1..100 grains but does with the file's own level: SoftSat at Warp 1: +13.4 dB for a 0.2-rms noise file, +8.6 dB at 0.33). Not built yet: needs the shaper law in absolute file units (probe the transfer curve with files of known level).

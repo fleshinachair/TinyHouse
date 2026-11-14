@@ -1167,9 +1167,7 @@ GRAN_ROUTE_NAME = {"kParamDensity": "Density", "kParamGrainLength": "Length", "k
 GRAN_WINDOW = {"kWindowTukey": 0, "kWindowExpDec": 1, "kWindowTriangle": 2, "kWindowBlackmanHarris": 3, "kWindowGaussian": 4}
 GRAN_DENSITY_KNOB, GRAN_LENGTH_KNOB = 0.25, 0.5          # Serum's defaults when the preset does not store them (Density 3.9, Length 0.625 s)
 # The settings the engine does not carry yet, each a sound gap until its probe (name in the message, then the keys). The probe numbers are in docs/GRANULAR_DESIGN.md section 6.
-GRAN_OSC_GAPS = (("scan range option (P4: ScanRange 1 doubles the scan speed, its meaning is unknown)", ("kParamScanRange",)),
-                 ("random start (P5)", ("kParamRandomStart",)),
-                 ("tempo-synced scan (P4)", ("kParamScanBPMDivide", "kParamScanBPMRate", "kParamScanTempoLock", "kParamBaseTempo")),
+GRAN_OSC_GAPS = (("random start (P5)", ("kParamRandomStart",)),
                  ("key / velocity zone", ("kParamKeyZoneMin", "kParamKeyZoneMax", "kParamVelocityZoneMin", "kParamVelocityZoneMax")))
 # The Random settings the engine carries (engine param, Serum key, top of its range); a static route into one is folded in (percent = 100 x the route's share of the knob).
 GRAN_RANDOM = (("grdir", "kParamRandomDir"), ("grgain", "kParamRandomGain"), ("groff", "kParamRandomOffset"), ("grlen", "kParamRandomGrainLength"), ("grpan", "kParamRandomPan"))
@@ -1223,17 +1221,30 @@ def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, 
             gaps.append(label)
     if "kParamLoopMode" in osc and mode not in ("kForward", "kPingPong", "kTailed", "kOff"):
         gaps.append(f"loop mode {mode}")
+    # ScanRange 1 runs the scan at twice the speed; Tempo lock scales it by host / base tempo; a BPM Divide makes it a fraction of the file per beat pattern; BPM Length and Density snap
+    # to note grids (all measured, docs/GRANULAR_PROBE_NOTES.md "Tempo")
+    if osc.get("kParamScanRange", 0.0):
+        pots[f"{sk}_gscx"] = 1
+    if osc.get("kParamScanBPMDivide", 0.0) > 0.0:
+        pots[f"{sk}_gscm"] = 2
+        pots[f"{sk}_gsbr"] = round(_clamp(float(osc.get("kParamScanBPMRate", 3.0)), 0.0, 8.0))
+        pots[f"{sk}_gscan"] = -100.0 if osc.get("kParamReverse", 0.0) else 100.0
+    elif osc.get("kParamScanTempoLock", 0.0):
+        pots[f"{sk}_gscm"] = 1
+        pots[f"{sk}_gbase"] = round(_clamp(float(osc.get("kParamBaseTempo", 120.0)), 20.0, 400.0), 2)
     if gr.get("kParamLengthMode") == "kLengthBPM":
-        gaps.append("tempo-synced grain length (P9)")
+        pots[f"{sk}_glenm"] = 1
     if gr.get("kParamDensityMode") == "kDensityBPM":
-        gaps.append("tempo-synced density (P9)")
+        pots[f"{sk}_gdenm"] = 1
     rnd = [k[12:] for k, v in gr.items() if k in ("kParamRandomWindowSkew", "kParamRandomWindowAmount", "kParamRandomWarp") and isinstance(v, (int, float)) and v > 0]
     if rnd:
         gaps.append("Random " + " / ".join(rnd) + " (not measured)")
     if gr.get("kParamWarpMenu") or gr.get("kParamWarpMenu2"):
         gaps.append("warp on the grains (P8)")
-    if unison > 1:
-        gaps.append(f"unison {unison} (P7)")
+    if unison > 1:                                        # carried by the caller (the slot's unison, detune and spread); what the granular oscillator adds to it is not
+        extra = [k[6:] for k in ("kParamUnisonWarp", "kParamUnisonStack") if osc.get(k) not in (None, 0.0, "kOff", "kNone", "kNormal", "kNoStack")]
+        if extra:
+            gaps.append("unison " + " / ".join(extra))
     if abs(float(osc.get("kParamPan", 0.0))) >= 10.0:
         gaps.append("pan (P11)")
     if "gain" in node or "trimHead" in node:
@@ -1874,6 +1885,15 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if ggaps:
                 crit.append(f"osc {'ABC'[so['id']]} (granular): {', '.join(ggaps)} not carried")
             appr.extend(f"osc {'ABC'[so['id']]} (granular): {x}" for x in gappr)
+        if so.get("gran") and so["unison"] > 1:
+            # Serum's Unison on a Granular oscillator: a copy of every grain per voice, detuned across 4 d^1.25 semitones (d = the Detune knob; Detune Width does nothing here), alternating to
+            # the two sides by the stereo width, 1/sqrt(n) in level (measured, docs/GRANULAR_PROBE_NOTES.md)
+            P[f"{sk}_uni"] = _clamp(so["unison"], 1, 8)
+            P[f"{sk}_det"] = round(_clamp(so["detune"] + fold[("Oscillator", "kParamDetune", so["id"])], 0.0, 1.0) * 127)
+            sst = so["stereo_pct"] if so["stereo_pct"] is not None else CAL["stereo_default"]
+            P[f"{sk}_spread"] = round(_clamp(sst / 100 * CAL["width_scale"], 0, 1) * 127)
+            if so["unison"] > 8:
+                appr.append(f"granular unison {so['unison']} fits as 8")
         if not so.get("noise") and not so.get("gran") and so["unison"] > 1:
             # Serum's Unison on a Sample / Multisample oscillator: the same stack as a wavetable's (detune across the stack, stereo spread), up to the engine's 8 streams
             P[f"{sk}_uni"] = _clamp(so["unison"], 1, 8)

@@ -64,11 +64,19 @@ p, _, _ = D.granular_pots("smp", d, 3, 1, Counter({("Oscillator", "kParamPositio
 check("manual position 40 + a folded route of 10 %; a folded route adds to Random Pan", p["smp_gman"] == 1 and abs(p["smp_gpos"] - 50.0) < 1e-6 and p["smp_grpan"] == 25.0, str(p))
 
 # 4. what is still flagged
-d = {"osc": {"kParamScanRange": 1.0, "kParamPan": 40.0, "kParamPitchTrack": 0.0, "kParamScanBPMRate": 2.0}, "gran": {"kParamRandomWindowSkew": 30.0, "kParamWarpMenu": "kFM_OSC", "kParamLengthMode": "kLengthBPM"}, "node": {"gain": 3.0}}
+d = {"osc": {"kParamScanRange": 1.0, "kParamPan": 40.0, "kParamPitchTrack": 0.0, "kParamScanBPMRate": 2.0, "kParamScanBPMDivide": 1.0}, "gran": {"kParamRandomWindowSkew": 30.0, "kParamWarpMenu": "kFM_OSC", "kParamLengthMode": "kLengthBPM"}, "node": {"gain": 3.0}}
 p, gaps, _ = D.granular_pots("smp", d, 0, 3, nofold)
 g = " | ".join(gaps)
-check("flags scan range option, tempo scan, BPM length, Random Window Skew, warp, unison, pan, gain", all(s in g for s in ("scan range", "tempo-synced scan", "grain length", "WindowSkew", "warp", "unison 3", "pan", "gain")), g)
 check("pitch track off -> fixed pitch", p.get("smp_fixed") == 1)
+check("flags Random Window Skew, warp, pan, gain", all(s in g for s in ("WindowSkew", "warp", "pan", "gain")), g)
+check("... and no longer scan range, tempo scan, BPM length, unison", not any(s in g for s in ("scan range", "tempo", "grain length", "unison")), g)
+check("ScanRange 1, Divide + BPM rate 2, BPM length carried", p.get("smp_gscx") == 1 and p.get("smp_gscm") == 2 and p.get("smp_gsbr") == 2 and p.get("smp_glenm") == 1 and p.get("smp_gscan") == 100.0, str(p))
+d = {"osc": {"kParamScanTempoLock": 1.0, "kParamBaseTempo": 138.0, "kParamScanRate": -76.9}, "gran": {"kParamDensityMode": "kDensityBPM"}, "node": {}}
+p, gaps, _ = D.granular_pots("smp3", d, 2, 1, nofold)
+check("Tempo lock at base 138, BPM density", p.get("smp3_gscm") == 1 and p.get("smp3_gbase") == 138.0 and p.get("smp3_gdenm") == 1 and p["smp3_gscan"] == -76.9 and not gaps, str(p) + str(gaps))
+d = {"osc": {"kParamUnison": 2.0, "kParamUnisonWarp": 37.5}, "gran": {}, "node": {}}
+p, gaps, _ = D.granular_pots("smp", d, 0, 2, nofold)
+check("unison warp is still a gap, plain unison is not", any("UnisonWarp" in x for x in gaps) and len(gaps) == 1, str(gaps))
 
 print("\n%d failure(s)" % fails)
 sys.exit(1 if fails else 0)

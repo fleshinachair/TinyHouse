@@ -91,10 +91,16 @@ struct GrainParams {
     float position = 0.0f;
     /* the Random settings as Serum stores them / 100 (pitch: semitones, capped at 12) */
     float rDir = 0.0f, rGain = 0.0f, rPitch = 0.0f, rOffset = 0.0f, rLen = 0.0f, rPan = 0.0f;
+    /* Unison, as the sample oscillator has it (measured on Serum's granular oscillator): `uni` copies of every grain, detuned evenly across `uniDet` semitones, alternating to the
+     * two sides by `uniSpread` (0..1), the middle one of an odd stack in the centre, each 1/sqrt(uni) in level. Every copy draws its own Random settings. */
+    int   uni = 1;
+    float uniDet = 0.0f, uniSpread = 0.0f;
+    /* DensityMode BPM: grains are born at this many per second (the grid does not depend on the grain length); 0: the Density knob sets the overlap, as in the free mode. */
+    float birthsPerSec = 0.0f;
 };
 
 struct GrainCloud {
-    static constexpr int kPool = 64;
+    static constexpr int kPool = 192;
     static constexpr int kWinN = 1024;
 
     std::shared_ptr<const SampleSet> own;
@@ -123,13 +129,25 @@ struct GrainCloud {
     {
         if (!on || !r || n <= 0) return;
         buildWindow(gp);
-        const float N = grainDensityN(gp.kd);
         const double T = std::max(0.0, (double) gp.lenSeconds);
+        const float N = gp.birthsPerSec > 0.0f ? (float) (gp.birthsPerSec * T) : grainDensityN(gp.kd);        /* the overlap: births per second x the grain length */
         const double lenSamp = T * sr;
         const double fileSec = (double) r->frames / (double) r->rate;
         const double step = std::pow(2.0, (double) (semis + r->tuneCents / 100.0f) / 12.0) * (double) r->rate / (double) sr;
         const int M = std::clamp((int) std::floor(N) + 1, 1, 31);
         const float amp = r->gain * (1.0f / 32768.0f) * kGrainGain[M];
+        const int U = std::clamp(gp.uni, 1, 8);
+        float uMul[8], uGl[8], uGr[8];
+        for (int v = 0; v < U; v++) {
+            float st = 0.0f, pan = 0.0f;
+            if (U > 1) {
+                st = -gp.uniDet / 2.0f + gp.uniDet / (float) (U - 1) * (float) v;
+                const bool middle = (U & 1) && v == U / 2;
+                pan = std::clamp(gp.uniSpread * (middle ? 0.0f : (v & 1) ? 1.0f : -1.0f), -1.0f, 1.0f);
+            }
+            const float comp = 1.0f / std::sqrt((float) U);
+            uMul[v] = std::pow(2.0f, st / 12.0f); uGl[v] = (1.0f - pan) * comp; uGr[v] = (1.0f + pan) * comp;
+        }
         const bool live = N > 1e-6f && lenSamp >= 2.0;
         const double spacing = live ? lenSamp / (double) N : 1e30;      /* samples between births */
         const double scan = gp.scanPct * 0.01;
@@ -167,17 +185,19 @@ struct GrainCloud {
             }
             if (gp.rOffset > 0.0f) ps += (double) rnd2() * 0.15 * fileF * v4Off;
             if (ps < 0.0 || ps >= fileF) return;                    /* outside the file there is no grain */
-            const bool back = vDir > 0.0f && rnd01() < vDir;
-            double gstep = back ? -step : step;
-            if (stMax > 0.0f) gstep *= std::pow(2.0, (double) (rnd2() * stMax) / 12.0);
-            double ls2 = lenSamp;
-            if (gp.rLen > 0.0f) ls2 = std::max(2.0, lenSamp * (1.0 + (double) rnd2() * v4Len));
-            for (auto &g : grains) if (!g.alive) {
-                g.alive = true; g.pos = ps * (double) r->rate + ageSamples * gstep; g.step = gstep; g.age = (int) ageSamples; g.invLen = (float) (1.0 / ls2);
-                g.lenSamp = (int) ls2; g.amp = amp * (vGain > 0.0f ? 1.0f - vGain * rnd01() : 1.0f); g.off = offset;
-                g.gl = g.gr = 1.0f;
-                if (vPan > 0.0f) grainPanGains(rnd2() * vPan, g.gl, g.gr);
-                return;
+            for (int v = 0; v < U; v++) {
+                const bool back = vDir > 0.0f && rnd01() < vDir;
+                double gstep = (back ? -step : step) * (double) uMul[v];
+                if (stMax > 0.0f) gstep *= std::pow(2.0, (double) (rnd2() * stMax) / 12.0);
+                double ls2 = lenSamp;
+                if (gp.rLen > 0.0f) ls2 = std::max(2.0, lenSamp * (1.0 + (double) rnd2() * v4Len));
+                for (auto &g : grains) if (!g.alive) {
+                    g.alive = true; g.pos = ps * (double) r->rate + ageSamples * gstep; g.step = gstep; g.age = (int) ageSamples; g.invLen = (float) (1.0 / ls2);
+                    g.lenSamp = (int) ls2; g.amp = amp * (vGain > 0.0f ? 1.0f - vGain * rnd01() : 1.0f); g.off = offset;
+                    g.gl = uGl[v]; g.gr = uGr[v];
+                    if (vPan > 0.0f) { float pl, pr; grainPanGains(rnd2() * vPan, pl, pr); g.gl *= pl; g.gr *= pr; }
+                    break;
+                }
             }
         };
 

@@ -1043,6 +1043,74 @@ static void testGranularSlot()
     { Engine e; base(e); e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GSCAN] = 0; note(e, 60); render(e, 100);
       const uint8_t off[] = { 0x80, 60, 0 }; e.onMidi(off, 3); render(e, 600);
       CHECK(e.activeStreams() == 0, "a released note ends"); }
+
+    /* ---- tempo scan, ScanRange, the BPM grids and unison (measured on Serum, docs/GRANULAR_PROBE_NOTES.md) ---- */
+    {
+        auto ramp = std::make_shared<SampleSet>();
+        SampleRegion rr; rr.rate = 44100.0f; rr.root = 60; rr.frames = 44100 * 4; rr.pcm.resize((size_t) rr.frames);
+        for (int i = 0; i < rr.frames; i++) rr.pcm[(size_t) i] = (int16_t) (24000.0 * i / rr.frames);
+        ramp->regions.push_back(std::move(rr));
+        /* where the scan is at about 1.05 s, read off the ramp: a fraction of the 4 s file */
+        auto posAt1s = [&](auto setup) {
+            Engine e; e.pots[TB_P_WT1_LEVEL] = 0; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127; e.pots[TB_P_SMP_LEVEL] = 127; e.setSample(ramp);
+            e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GDENS] = 100; e.pots[TB_P_SMP_GLEN] = 40; e.pots[TB_P_SMP_GWINP] = 100;       /* many short grains */
+            e.setHostBpm(120.0f);
+            setup(e); note(e, 60);
+            auto y = render(e, 4 * 172);                                                 /* 1.0 s ... */
+            const int f0 = 44100, f1 = 44100 + 4410;
+            double acc = 0.0, ref = 0.0;
+            for (int i = f0; i < f1; i++) acc += y[(size_t) i * 2];
+            return acc / (f1 - f0);
+        };
+        const double base = posAt1s([](Engine &) {});
+        CHECK(base > 100.0, "the ramp read at Scan 100 %% gives a level (%.0f)", base);
+        const double x2 = posAt1s([](Engine &e) { e.pots[TB_P_SMP_GSCX] = 1; });
+        CHECK(std::fabs(x2 / base - 2.0) < 0.15, "ScanRange 1 runs the scan at twice the speed (%.2f x)", x2 / base);
+        const double lock = posAt1s([](Engine &e) { e.pots[TB_P_SMP_GSCM] = 1; e.pots[TB_P_SMP_GBASE] = 60; });
+        CHECK(std::fabs(lock / base - 2.0) < 0.15, "Tempo lock at base 60 under 120 BPM: twice the speed (%.2f x)", lock / base);
+        const double sync = posAt1s([](Engine &e) { e.pots[TB_P_SMP_GSCM] = 2; e.pots[TB_P_SMP_GSBR] = 2; });
+        CHECK(std::fabs(sync / base - 1.0) < 0.15, "Tempo sync step 2 on a 4 s file at 120 BPM: 1 s of file per second (%.2f x)", sync / base);
+        const double sync3 = posAt1s([](Engine &e) { e.pots[TB_P_SMP_GSCM] = 2; e.pots[TB_P_SMP_GSBR] = 3; });
+        CHECK(std::fabs(sync3 / base - 2.0) < 0.15, "step 3: twice that (%.2f x)", sync3 / base);
+    }
+    {   /* BPM density: births per second, whatever the grain length; BPM length: the grain lasts 1/128 s x 2^i */
+        auto dc = std::make_shared<SampleSet>();
+        SampleRegion dr; dr.rate = 44100.0f; dr.root = 60; dr.frames = 44100 * 8; dr.pcm.assign((size_t) dr.frames, (int16_t) 12000);
+        dc->regions.push_back(std::move(dr));
+        auto duty = [&](float kLen, float kDen, bool lenBpm, bool denBpm, float bpm) {
+            Engine e; e.pots[TB_P_WT1_LEVEL] = 0; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127; e.pots[TB_P_SMP_LEVEL] = 127; e.setSample(dc);
+            e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GSCAN] = 0; e.pots[TB_P_SMP_GWINP] = 100; e.setHostBpm(bpm);
+            e.pots[TB_P_SMP_GDENS] = 127.0f * kDen; e.pots[TB_P_SMP_GLEN] = 127.0f * kLen; e.pots[TB_P_SMP_GLENM] = lenBpm ? 1.0f : 0.0f; e.pots[TB_P_SMP_GDENM] = denBpm ? 1.0f : 0.0f;
+            note(e, 60);
+            auto y = render(e, 8 * 172);
+            int on = 0; const int frames = (int) y.size() / 2;
+            for (int i = 0; i < frames; i++) on += std::abs(y[(size_t) i * 2]) > 20 ? 1 : 0;
+            return (double) on / frames;
+        };
+        /* knob 0.3 -> rate 2^-2 = 0.25 births/s; length knob 0.4 -> i = 5 -> 0.25 s: 1/16 of the time is sounding */
+        const double d120 = duty(0.4f, 0.3f, true, true, 120.0f);
+        CHECK(std::fabs(d120 - 0.0625) < 0.012, "BPM density 0.25 births/s x BPM length 0.25 s: %.3f of the time sounding (1/16)", d120);
+        const double d60 = duty(0.4f, 0.3f, true, true, 60.0f);
+        CHECK(std::fabs(d60 - 0.125) < 0.015, "at 60 BPM the grain lasts twice as long, 0.5 s of the 4 s heard (births are half as fast, so still one): %.3f", d60);
+        const double dfree = duty(0.4f, 0.3f, false, false, 120.0f);
+        CHECK(dfree > 0.5, "the free modes at the same knobs are much denser (%.2f)", dfree);
+    }
+    {   /* Unison: a copy of every grain, detuned across 4 d^1.25 semitones, the first voice to the left, the last to the right, 1/sqrt(n) in level */
+        auto click = std::make_shared<SampleSet>();
+        SampleRegion cr; cr.rate = 44100.0f; cr.root = 60; cr.frames = 44100 * 4; cr.pcm.assign((size_t) cr.frames, (int16_t) 0); cr.pcm[(size_t) (0.05 * 44100)] = 29000;
+        click->regions.push_back(std::move(cr));
+        Engine e; e.pots[TB_P_WT1_LEVEL] = 0; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127; e.pots[TB_P_SMP_LEVEL] = 127; e.setSample(click);
+        e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GSCAN] = 0; e.pots[TB_P_SMP_GDENS] = 30; e.pots[TB_P_SMP_GLEN] = 40; e.pots[TB_P_SMP_GWINP] = 0;
+        e.pots[TB_P_SMP_UNI] = 2; e.pots[TB_P_SMP_DET] = 127.0f * 0.5f; e.pots[TB_P_SMP_SPREAD] = 127; e.pots[TB_P_UNI_CAP] = 8;
+        note(e, 60);
+        auto y = render(e, 40);
+        int il = -1, ir = -1, pl = 0, pr = 0;
+        for (int i = 1764; i < 2646; i++) { if (std::abs(y[(size_t) i * 2]) > pl) { pl = std::abs(y[(size_t) i * 2]); il = i; } if (std::abs(y[(size_t) i * 2 + 1]) > pr) { pr = std::abs(y[(size_t) i * 2 + 1]); ir = i; } }
+        const double ms = 1000.0 * std::abs(ir - il) / 44100.0;          /* the lower voice (left) arrives later */
+        CHECK(pl > 0 && pr > 0 && std::fabs(ms - 4.85) < 0.35, "unison 2, detune 0.5: the right voice's click comes %.2f ms after the left's (Serum 4.85)", ms);
+        int lOther = std::abs(y[(size_t) ir * 2]), rOther = std::abs(y[(size_t) il * 2 + 1]);
+        CHECK(lOther < pl / 20 && rOther < pr / 20, "at full spread each voice is hard to its own side (leak %d / %d of %d / %d)", lOther, rOther, pl, pr);
+    }
 }
 
 /* Macros: a macro pot moves its routed parameters by travel x change / 127 and leaves the rest; the preset's own values are where the macro sat when it loaded. */

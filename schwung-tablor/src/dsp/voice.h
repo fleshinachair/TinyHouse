@@ -426,15 +426,36 @@ public:
         }
 
         /* The granular kind of each sample slot (granular.h): Density / Grain Length are knobs that a route adds to, Scan Rate is a percent (a route of a adds 4a). */
-        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb) {
+        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb, int xc, int uniP, int detP, int spreadP) {
             if (!gc.on || !(P[levelP] > 0.0f)) return;
             const float knob = pot01(P[levelP]);
             const bool fixedPitch = P[fixedP] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - gc.r->root) + c.pitchBendSemis) + P[tuneP] + P[fineP] / 100.0f;
             GrainParams gp;
             gp.kd = std::clamp(pot01(P[densP]) + modOff[mDens], 0.0f, 1.0f);
-            gp.lenSeconds = grainLengthSeconds(pot01(P[lenP]) + modOff[mDens + 1]);
-            gp.scanPct = P[scanP] + 400.0f * modOff[mDens + 2];
+            const float kl = std::clamp(pot01(P[lenP]) + modOff[mDens + 1], 0.0f, 1.0f);
+            gp.lenSeconds = grainLengthSeconds(kl);
+            gp.scanPct = (P[scanP] + 400.0f * modOff[mDens + 2]) * (P[xc] >= 0.5f ? 2.0f : 1.0f);          /* ScanRange 1: the scan runs at twice the speed (measured) */
+            /* tempo (measured on Serum, docs/GRANULAR_PROBE_NOTES.md): Tempo lock scales the scan by host / base tempo; Tempo sync scans 0.0625 x 2^step of the file per second at
+             * 120 BPM, scaled by the host tempo; the BPM modes snap the grain length to 1/128 s x 2^i (i = 0..13) and the birth rate to 2^m per second, both at 120 BPM and scaled by
+             * the tempo, i and m stepping 14 times across the knob */
+            const float hostBpm = c.bpm >= 20.0f ? std::clamp(c.bpm, 40.0f, 300.0f) : 120.0f;
+            const int scm = (int) P[xc + 1];
+            if (scm == 1) gp.scanPct *= hostBpm / std::max(P[xc + 2], 20.0f);
+            else if (scm == 2) {
+                const float fileSec = (float) gc.r->frames / (float) gc.r->rate;
+                gp.scanPct = (P[scanP] < 0.0f ? -1.0f : 1.0f) * 100.0f * fileSec * 0.0625f * std::pow(2.0f, P[xc + 3]) * hostBpm / 120.0f;
+            }
+            if (P[xc + 4] >= 0.5f) {
+                const int i = std::clamp((int) std::floor(14.0f * kl - 0.158f), 0, 13);
+                gp.lenSeconds = 0.0078125f * (float) (1 << i) * 120.0f / hostBpm;
+            }
+            if (P[xc + 5] >= 0.5f) {
+                const int m = std::clamp((int) std::floor(14.0f * gp.kd - 3.82f) - 2, -6, 8);
+                gp.birthsPerSec = std::pow(2.0f, (float) m) * hostBpm / 120.0f;
+            }
+            gp.uni = std::min((int) P[uniP], (int) P[TB_P_UNI_CAP]);
+            if (gp.uni > 1) { gp.uniDet = 4.0f * std::pow(pot01(P[detP]), 1.25f); gp.uniSpread = pot01(P[spreadP]); }          /* the granular detune: 4 d^1.25 semitones across the stack */
             gp.start = P[startP] * 0.01f;
             gp.winShape = (int) P[winP]; gp.winParam = P[winpP]; gp.winSkew = P[skewP];
             gp.loopMode = (int) P[xb]; gp.loopStart = P[xb + 1] * 0.01f; gp.loopEnd = P[xb + 2] * 0.01f; gp.end = P[xb + 3] * 0.01f;      /* xb: the slot's 12 params from _GLOOP (gen_params _gran2) */
@@ -442,9 +463,10 @@ public:
             gp.rDir = P[xb + 6] * 0.01f; gp.rGain = P[xb + 7] * 0.01f; gp.rPitch = P[xb + 8]; gp.rOffset = P[xb + 9] * 0.01f; gp.rLen = P[xb + 10] * 0.01f; gp.rPan = P[xb + 11] * 0.01f;
             addSource(P[postP], balP, busP, [&](float *l, float *r) { gc.processAdding(gp, semis, knob * knob, (float) sampleRate, l, r, n); });
         };
-        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS, TB_P_SMP_GLOOP);
-        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS, TB_P_SMP2_GLOOP);
-        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS, TB_P_SMP3_GLOOP);
+        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS, TB_P_SMP_GLOOP, TB_P_SMP_GSCX, TB_P_SMP_UNI, TB_P_SMP_DET, TB_P_SMP_SPREAD);
+        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS, TB_P_SMP2_GLOOP, TB_P_SMP2_GSCX, TB_P_SMP2_UNI, TB_P_SMP2_DET, TB_P_SMP2_SPREAD);
+        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS, TB_P_SMP3_GLOOP, TB_P_SMP3_GSCX, TB_P_SMP3_UNI, TB_P_SMP3_DET, TB_P_SMP3_SPREAD);
+        static_assert(TB_P_SMP_GDENM == TB_P_SMP_GSCX + 5 && TB_P_SMP2_GDENM == TB_P_SMP2_GSCX + 5 && TB_P_SMP3_GDENM == TB_P_SMP3_GSCX + 5, "the granular tempo params of a slot are contiguous");
         static_assert(TB_P_SMP_GRPAN == TB_P_SMP_GLOOP + 11 && TB_P_SMP2_GRPAN == TB_P_SMP2_GLOOP + 11 && TB_P_SMP3_GRPAN == TB_P_SMP3_GLOOP + 11, "the granular scan / loop / random params of a slot are contiguous");
 
         /* velocity */

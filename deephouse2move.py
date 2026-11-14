@@ -1996,6 +1996,11 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     reaches2 = {}
     if f2["enabled"] and not bypassed:
         bal = {int(k): v for k, v in ph["balance"].items()}       # (the preset has been through JSON: keys are strings; an int lookup found none and sent every source to Filter 1)
+        # A macro, velocity or note route into a source's Filter Balance moves it by that fraction of the balance's whole -100..+100 range, so 2 x the amount on the
+        # -1..+1 scale (scratch probe on PD - Early Morning Sunrays: the wavetable layer's balance +100 pulled by a -100 % route on a macro at 83 %; the engine at 2 x
+        # (balance 22 of 127) matched Serum's level and octave bands within 1.5 dB, at 1 x (74) it was 5 dB too loud and 20 dB too dark). Folded in at the saved macro position.
+        for oid_ in list(bal):
+            bal[oid_] = _clamp(bal[oid_] + 2.0 * fold[("RoutingSlot", "kParamFilterBalance", oid_)], -1.0, 1.0)
         pot_bal = lambda src: round(_clamp((bal.get(src, -1.0) + 1.0) * 63.5, 0, 127)) if routed.get(src) else 0
         for oid, slot in slot_of.items():
             P[f"wt{slot}_bal"] = pot_bal(oid)

@@ -230,7 +230,8 @@ def measure_fingerprints(name, tree, meas):
         known = fxmap.fingerprint_for(nm)
         # a fingerprint from before the convolver has no Conv measurement (conv, reverb_noconv): measured again when the rack holds a Conv
         has_conv = known is not None and "Conv" in (known.get("fx") or [])
-        if known is not None and not (has_conv and "conv" not in known):
+        stale = has_conv and ("conv" not in known or ("Reverb" in (known.get("fx") or []) and "reverb_noconv" not in known))        # or measured with the Conv's tail in the Reverb's
+        if known is not None and not stale:
             continue
         if not meas or meas[0][0].audio_seconds > 1000:
             meas[:] = [FP.start_measuring()]
@@ -304,13 +305,13 @@ def main():
             why = d2m.unsupported_reasons(m)
             warp_why = [w for w in why if " warp " in w and w.endswith("unsupported (no FM/RM/fold in Tablor)")]
             fx_why = [w for w in why if w not in warp_why]
-            needs_fx = [w for w in fx_why if "no Serum fingerprint" in w]
+            needs_fx = [w for w in fx_why if "no Serum fingerprint" in w or "measure the fingerprint again" in w]
             can_ab = not a.no_ab_ignore and not a.no_level
             fx_off = ignored_effects_off(tree, header, name, fx_why) if (len(needs_fx) < len(fx_why) and can_ab) else None
             off = fx_off
             if warp_why and can_ab and (len(needs_fx) == len(fx_why) or fx_off is not None):
                 off = zero_unsupported_warps(fx_off or tree, m)
-            return why, [w for w in why if "no Serum fingerprint" in w], off
+            return why, [w for w in why if "no Serum fingerprint" in w or "measure the fingerprint again" in w], off
         why, needs_fx, off_tree = plan(m)
         if needs_fx and (len(needs_fx) == len(why) or off_tree is not None):          # the effects are the only thing missing: measure them in Serum, then convert again
             try:

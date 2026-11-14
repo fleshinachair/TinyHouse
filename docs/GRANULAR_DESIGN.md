@@ -145,3 +145,12 @@ converter (`granular_pots`: loop, End, manual position, Reverse, the five Random
 Result over the 58 granular presets in the Presets folder: 43 carry a granular slot, **19 have no granular gap left, 18 of them no gap at all**. Still gaps: warp on the grains (11), ScanRange (7), unison (5), a route into Random Pitch (5), Random Start (4),
 tempo-synced scan / length / density (6), Warp routes, pan, zones. The engine's grain count is unlimited by design; the PC bench varies 5-19 % of a core for 8 voices x Density 800 depending on the load of the machine: **the Move figure is still needed**.
 Next: the render gate against Serum for the 18-19 clean presets (needs the user), the Move CPU, then P8 (warps on the grains), P7 (unison), P9 (BPM modes).
+
+## 12. Status 2026-11-14 (evening)
+Built since section 11: ScanRange x2, Tempo lock, Tempo sync (a fraction of the file per second, 0.0625 x 2^step at 120 BPM), BPM grain length (1/128 s x 2^i, 14 steps over the knob) and BPM density (2^m births per second, 14 steps),
+granular unison (a copy of every grain per voice; Detune 4 d^1.25 semitones across the stack, the sample oscillator's pan and level law), the grain pool raised to 192. New params `smpN_gscx/gscm/gbase/gsbr/glenm/gdenm` (appended, 513 in all).
+Measured laws: docs/GRANULAR_PROBE_NOTES.md ("Scan range, tempo, BPM modes, unison, warp"). Engine tests: test_engine.cpp (scan speeds, BPM grids, unison); converter tests: test_granular_convert.py.
+Move CPU: the extreme case (8 voices, 224 grains live) is 27.6 % of one core on the Move itself.
+Result over the 58 granular presets in the Presets folder: **38 have no granular gap left, 32 no gap at all** (was 19 / 18). What remains: warp on the grains (11; probe started, a Dist* warp acts on the raw file samples inside each grain),
+a route into Random Pitch (5), into Warp / Warp2 (4), Random Start (4), a route into Position (2), P11 pan for stereo files (2), key / velocity zones (2), Random Window / Warp (3), UnisonWarp / UnisonStack, sample gain / trim, a fourth sample slot (osc C granular next to two samples).
+Still needing the user: the render gate against Serum for the clean presets (step 5), and audition.

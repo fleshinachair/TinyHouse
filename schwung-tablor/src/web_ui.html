@@ -2847,18 +2847,19 @@ function macPredict(i, now) {
 }
 function macFollow(i) {
   clearTimeout(MAC.timer);
+  /* Once the macro has been still a moment the page's sum is written back to the module, so the module, the host's copy and the display all hold the same number. (The host's own copy of a
+   * control a macro moved is only ever an old reading, partway through the sweep, so it is never read back; and the module moves by every small step where the page sees fewer, so the two can
+   * differ by a little at a limit until this write-back.) */
   MAC.timer = setTimeout(function () {
     macKeys(i).forEach(function (k) {
-      schwungRemote.getParam(KP + k).then(function (v) {
-        if (v === undefined || v === null || v === "") return;
-        var n = parseFloat(v), b = MACP.before[k], p = MACP.pred[k];
-        delete MACP.before[k];
-        if (!isNaN(n) && b !== undefined && p !== undefined && Math.abs(n - p) > Math.abs(n - b) + 0.5) return;   /* the old value again: stale */
-        delete MACP.pred[k];
-        incoming(k, v);
-      }).catch(function () {});
+      var p = MACP.pred[k];
+      delete MACP.before[k];
+      delete MACP.pred[k];
+      if (p === undefined) return;
+      setVal(k, p, false);
+      send(k, val(k));
     });
-  }, 120);
+  }, 350);
 }
 function macReload() {
   MACP.hold = Date.now() + 1500;                      /* a preset has just loaded: its macro values are not moves */

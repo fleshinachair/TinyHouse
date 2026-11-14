@@ -2741,8 +2741,10 @@ function macSend(cmd) {
   setTimeout(macReload, 160);
 }
 function macDefaultTravel(key) {
-  var m = META[key], cur = val(key), mid = (m.min + m.max) / 2;
-  return Math.round(cur <= mid ? m.max - cur : m.min - cur);               /* sweeps toward the far end of the control as the macro goes 0 -> 127 */
+  var m = META[key], cur = Number(val(key)), span = (m.max - m.min) || 1;
+  if (!isFinite(cur)) cur = m.min;
+  /* the macro going UP raises the control, from where it sits now to its top; only a control already within a tenth of its top goes the other way, down to its bottom */
+  return Math.round(cur <= m.max - span * 0.1 ? m.max - cur : m.min - cur);
 }
 function macMenuClose() { var o = document.getElementById("macmenu"); if (o) o.remove(); }
 function macMenu(key, label, x, y) {
@@ -2833,7 +2835,7 @@ function buildMacros(page) {
   MAC.note = el("div", "demo-note", p.body, "This sound has no macros yet. Right-click any knob (on any tab) and choose a macro to put it there: the macro then moves that control, and the Move shows it as one of its eight macro knobs. Imported Serum presets bring their own.");
   macRender();
   var ap = panel("Assignments", g);
-  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. Here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
+  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. A new assignment lets the macro raise the control from where it sits to its top; here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
   MAC.list = el("div", null, ap.body);
   MAC.empty = el("div", "demo-note", ap.body, "Nothing is assigned yet.");
   macList();

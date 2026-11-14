@@ -15,7 +15,16 @@ Serum to measure against, so it sets loudness, reverb and width from general rul
 out as close as possible to the original, use the Python scripts instead: they render each preset through the real plugin and match the level, reverb and width to it
 (see [More accurate conversion with the Python scripts](#more-accurate-conversion-with-the-python-scripts)).
 
-![The TinyHouse remote UI: three wavetable oscillators, with the tabs for the macros, filters, envelopes and effects below](docs/img/remote-ui.png)
+![The TinyHouse remote UI: tabs along the top (Osc, Macros, Filter, Envelopes, FX, Mix, Globals, Demo), three wavetable oscillators on the Osc tab](docs/img/remote-ui.png)
+
+## The workflow
+
+1. **Bring a Serum 2 preset.** Drop a `.SerumPreset` (or a whole pack) on the remote UI's Import dialog. It is converted in your browser and stored on the Move.
+2. **Fine-tune it on the remote UI.** Everything is a live control, in both directions with the Move: wavetables and their positions, unison, the filter curve, envelopes, the whole effects rack. Change a knob and you hear it on the Move straight away.
+3. **Put the eight controls you care about on macros.** Right-click any knob, on any tab, and choose a macro (see [Macros you set yourself](#macros-you-set-yourself)). Name them if you like. The Move shows them as its eight macro knobs.
+4. **Jam on the Move.** Pick the sound, play, and work the eight macros and the performance pages. No computer is needed from here; the sound is saved with the slot and with your set.
+
+## Getting started
 
 ## Getting started
 
@@ -50,8 +59,8 @@ Your presets go nowhere but your Move: the converter runs inside the browser pag
 
 ## Tweaking and playing
 
-**Fine-tuning is on the remote UI.** It is laid out after Serum: three oscillators with 3D wavetable displays, then tabs for macros, filters, envelopes,
-effects, mix and globals. Every control is live in both directions with the Move. Drag the filter curve and envelopes, pick wavetables from the
+**Fine-tuning is on the remote UI.** It is laid out after Serum: tabs along the top (Osc, Macros, Filter, Envelopes, FX, Mix, Globals, Demo), and on the Osc tab
+three oscillators with 3D wavetable displays. Every control is live in both directions with the Move. Drag the filter curve and envelopes, pick wavetables from the
 list, set the effects, and save the result as a preset of your own. The import report's loudness, reverb and width are set from general rules (the
 importer has no Serum to compare against), so set **Volume** and the effects to taste.
 
@@ -75,12 +84,27 @@ It is a live limit, not part of the sound: it is not stored in presets, so loadi
 
 A preset's macros come across live: turning a macro moves the same parameters Serum's would (cutoff, effect mix, wavetable position and so on).
 
+### Macros you set yourself
+
+Any preset can have macros, not only the ones that came with a Serum preset. On the remote UI, **right-click a knob** (on any tab) and a small menu lists the eight
+macros. Pick one and the knob is now on that macro: it shows a small **M** tag, and turning the macro, on the Move or on the page, moves it.
+
+![Right-clicking a knob: the menu lists the eight macros, each with its name and an add or remove entry](docs/img/remote-macro-menu.png)
+
+- A new assignment lets the macro raise the control from where it sits now to its top (a control already near its top goes down instead). Put several knobs on
+  one macro to move them together: a cutoff and a reverb mix, say.
+- The **Macros** tab lists what each macro holds. There you name a macro (the name is what the Move shows on that knob), set how far each control travels as the
+  macro goes from 0 to 127 as a percentage of its range (a negative number runs it the other way), take a control off, or clear a whole macro.
+- Assignments are saved with the slot and come back with your set. A macro with nothing on it has no name and stays hidden on the Move.
+
+![The Macros tab: the macros that are in use as dials, and under Assignments what each one moves and by how much](docs/img/remote-macros.png)
+
 ## The effects chain
 
 Most Serum presets get half their character from the effects rack, so the rack is not an afterthought. TinyHouse has a full effects chain, and each stage was
 measured against Serum with controlled test patches (not tuned by ear), so the effects follow Serum's own curves:
 
-![The FX tab on a Deep House preset: the stages in use with their controls, and the bypassed ones listed underneath](docs/img/remote-fx.png)
+![The FX tab is a rack like Serum's: the chips along the top switch an effect on or off, and the effects that are on are stacked in signal order, each with its symbol, display and controls](docs/img/remote-fx.png)
 
 | Stage | Serum effect | |
 |---|---|---|

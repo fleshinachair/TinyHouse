@@ -220,6 +220,27 @@ int main(int argc, char **argv)
         api->set_param(inst, "macro_edit", "add|9|wt1_level|10|X");
         settleMacros();
         CHECK(read("macro_routes") == "2:wt1_level:40,2:flt_freq:-30", "macro_edit add: routes read back (\"%s\")", read("macro_routes").c_str());
+        {   /* and the macro must MOVE what it holds: macro 2 up by 127 takes Level 40 up, Cutoff 30 down */
+            const float l0 = (float) atof(read("wt1_level").c_str()), c0 = (float) atof(read("flt_freq").c_str());
+            api->set_param(inst, "mac2", "0"); api->set_param(inst, "mac2", "127");
+            const float l1 = (float) atof(read("wt1_level").c_str()), c1 = (float) atof(read("flt_freq").c_str());
+            CHECK(std::fabs((l1 - l0) - 40.0f) < 1.5f || l1 >= 127.0f, "turning macro 2 moves Level (%g -> %g)", (double) l0, (double) l1);
+            CHECK(std::fabs((c1 - c0) + 30.0f) < 1.5f || c1 <= 0.0f, "... and Cutoff (%g -> %g)", (double) c0, (double) c1);
+            api->set_param(inst, "mac2", "0");
+        }
+        {   /* the remote UI's spelling ("synth:" in front of every key), a travel that is not a number, and a macro that was already part-way up when the knob was added */
+            api->set_param(inst, "synth:macro_edit", "add|4|wt2_level|NaN|Bad");
+            api->set_param(inst, "synth:mac4", "50");
+            api->set_param(inst, "synth:macro_edit", "add|4|wt3_level|30|Ok");
+            settleMacros();
+            const float a0 = (float) atof(read("wt3_level").c_str()), n0 = (float) atof(read("wt2_level").c_str());
+            api->set_param(inst, "synth:mac4", "100");
+            const float a1 = (float) atof(read("wt3_level").c_str()), n1 = (float) atof(read("wt2_level").c_str());
+            CHECK(std::fabs((a1 - a0) - 30.0f * 50.0f / 127.0f) < 1.5f || a1 >= 127.0f, "prefixed keys, macro already at 50: +50 moves Level by 30 x 50/127 (%g -> %g)", (double) a0, (double) a1);
+            CHECK(!std::isnan(n1) && std::fabs(n1 - n0) < 0.01f, "a NaN travel moves nothing and breaks nothing (%g -> %g, routes \"%s\")", (double) n0, (double) n1, read("macro_routes").c_str());
+            api->set_param(inst, "synth:macro_edit", "clear|4");
+            settleMacros();
+        }
         CHECK(read("macro_names") == "|Level||||||", "the first knob names the macro (\"%s\")", read("macro_names").c_str());
         CHECK(unitOf(2) == "Level", "the Move gets the name as macro 2's unit (\"%s\")", unitOf(2).c_str());
         api->set_param(inst, "macro_edit", "travel|2|wt1_level|-17.5");

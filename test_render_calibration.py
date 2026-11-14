@@ -783,7 +783,7 @@ def usable(tree):
         if o[f"WTOsc{i}"].get("embeddedWTData"):                  # the table is stored in the preset: Serum and the converter both play that copy, the file need not exist
             continue
         rel = o[f"WTOsc{i}"].get("relativePathToWT", "").replace("\\", "/").lstrip("/")
-        if rel and not any((SERUM_TABLES / c).is_file() for c in (rel, "S2 Tables/" + rel)):
+        if rel and not any((SERUM_TABLES / c).is_file() for c in (rel, "S2 Tables/" + rel, d2m.s1_table_name(rel))):
             return False
     return True
 

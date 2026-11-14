@@ -959,6 +959,12 @@ def fit_unison(unison: list[int], budget: int) -> list[int]:
     return out
 
 
+def s1_table_name(rel: str) -> str:
+    """A preset made from Serum 1's tables names them under "Analog S1/" or "Digital S1/"; the same files sit in "Analog/" and "Digital/"."""
+    head, _, tail = rel.partition("/")
+    return (head[:-3] + "/" + tail) if head in ("Analog S1", "Digital S1") and tail else rel
+
+
 def resolve_table(ref, pack: dict[str, Path], serum_tables: Path | None,
                   wt_out: Path, subdir: str) -> tuple[str | None, str | None]:
     """Return (Move path or None, normalised ref). Copies the file into wt_out."""
@@ -972,7 +978,7 @@ def resolve_table(ref, pack: dict[str, Path], serum_tables: Path | None,
     # first in Analog/, something else in the Deep House pack), so the exact path under Serum's Tables folder wins over a name match.
     src = None
     if serum_tables:
-        for cand in (serum_tables / rel, serum_tables / "S2 Tables" / rel):
+        for cand in (serum_tables / rel, serum_tables / "S2 Tables" / rel, serum_tables / s1_table_name(rel)):
             if cand.is_file():
                 src = cand
                 break

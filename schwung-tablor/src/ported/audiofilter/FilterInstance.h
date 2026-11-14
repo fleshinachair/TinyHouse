@@ -44,38 +44,47 @@ template <class DataType>
 void processFilterStereo(FilterState<DataType>& sa, FilterState<DataType>& sb, const FilterParams<DataType>& params,
                          DataType* outA, DataType* outB, const DataType* inA, const DataType* inB, int numSamples)
 {
+    /* The state and the coefficients in locals for the loop: written through the references, every sample stored and reloaded them (the output might alias
+     * them as far as the compiler knows), a memory round trip inside the filter's recursion. The same operations in the same order (output-identical). */
+    const DataType f = params.f, r = params.r, g = params.g, h = params.h, b = params.b, l = params.l, fr = params.f + params.r;
+    DataType az1 = sa.z1, az2 = sa.z2, bz1 = sb.z1, bz2 = sb.z2;
     for (auto i = 0; i < numSamples; ++i)
     {
         const auto xa = inA[i], xb = inB[i];
 
-        const auto hpa = (xa - (params.f + params.r)*sa.z1 - sa.z2) * params.g;
-        const auto hpb = (xb - (params.f + params.r)*sb.z1 - sb.z2) * params.g;
-        const auto bpa = sa.z1 + params.f*hpa;
-        const auto bpb = sb.z1 + params.f*hpb;
-        const auto lpa = sa.z2 + params.f*bpa;
-        const auto lpb = sb.z2 + params.f*bpb;
+        const auto hpa = (xa - fr*az1 - az2) * g;
+        const auto hpb = (xb - fr*bz1 - bz2) * g;
+        const auto bpa = az1 + f*hpa;
+        const auto bpb = bz1 + f*hpb;
+        const auto lpa = az2 + f*bpa;
+        const auto lpb = bz2 + f*bpb;
 
-        sa.z1 = 2 * bpa - sa.z1;
-        sb.z1 = 2 * bpb - sb.z1;
-        sa.z2 = 2 * lpa - sa.z2;
-        sb.z2 = 2 * lpb - sb.z2;
+        az1 = 2 * bpa - az1;
+        bz1 = 2 * bpb - bz1;
+        az2 = 2 * lpa - az2;
+        bz2 = 2 * lpb - bz2;
 
-        outA[i] = params.h * hpa + params.b * bpa + params.l * lpa;
-        outB[i] = params.h * hpb + params.b * bpb + params.l * lpb;
+        outA[i] = h * hpa + b * bpa + l * lpa;
+        outB[i] = h * hpb + b * bpb + l * lpb;
     }
+    sa.z1 = az1; sa.z2 = az2; sb.z1 = bz1; sb.z2 = bz2;
+    (void) r;
 
     if (params.useCompensation)
     {
+        const DataType c0 = params.c0, c1 = params.c1, c2 = params.c2;
+        DataType ax1 = sa.x1, ax2 = sa.x2, bx1 = sb.x1, bx2 = sb.x2;
         for (auto i = 0; i < numSamples; ++i)
         {
             const auto xa = outA[i], xb = outB[i];
-            const auto ya = xa * params.c0 + sa.x1 * params.c1 + sa.x2 * params.c2;
-            const auto yb = xb * params.c0 + sb.x1 * params.c1 + sb.x2 * params.c2;
-            sa.x2 = sa.x1; sb.x2 = sb.x1;
-            sa.x1 = xa;    sb.x1 = xb;
+            const auto ya = xa * c0 + ax1 * c1 + ax2 * c2;
+            const auto yb = xb * c0 + bx1 * c1 + bx2 * c2;
+            ax2 = ax1; bx2 = bx1;
+            ax1 = xa;  bx1 = xb;
             outA[i] = ya;
             outB[i] = yb;
         }
+        sa.x1 = ax1; sa.x2 = ax2; sb.x1 = bx1; sb.x2 = bx2;
     }
 }
 

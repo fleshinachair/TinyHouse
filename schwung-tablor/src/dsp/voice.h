@@ -302,9 +302,13 @@ public:
 
         updateParams(c, n);
 
-        float preL[kBlock] = {}, preR[kBlock] = {};
-        float pre2L[kBlock] = {}, pre2R[kBlock] = {};              /* the sources that go to Filter 2 */
-        float postL[kBlock] = {}, postR[kBlock] = {};
+        /* The block's buffers are cleared for the n samples used, not the whole kBlock: a short call (the demo and clip players split blocks at their notes)
+         * would otherwise pay for clearing all of them every time. */
+        const auto clr = [n](float *a) { std::memset(a, 0, sizeof(float) * (size_t) n); };
+        float preL[kBlock], preR[kBlock];
+        float pre2L[kBlock], pre2R[kBlock];                        /* the sources that go to Filter 2 */
+        float postL[kBlock], postR[kBlock];
+        clr(preL); clr(preR); clr(pre2L); clr(pre2R); clr(postL); clr(postR);
 
         const float *P = c.pots;
 
@@ -312,7 +316,8 @@ public:
          * balance t from -1 (Filter 1 only) to +1 (Filter 2 only): Filter 1 gets (1 - t) / 2 of it and Filter 2 (1 + t) / 2, as Serum's
          * (calibration/probe_filter2.py). Filter 2 only runs if some source reaches it. */
         bool usesF2 = false;
-        float dryL[kBlock] = {}, dryR[kBlock] = {};
+        float dryL[kBlock], dryR[kBlock];
+        clr(dryL); clr(dryR);
         bool dryUsed = false;
         auto route = [&](bool direct, int balPot, auto &&renderTo) {
             if (direct) { renderTo(postL, postR); return; }
@@ -320,7 +325,8 @@ public:
             if (t <= -0.999f) { renderTo(preL, preR); return; }
             usesF2 = true;
             if (t >= 0.999f) { renderTo(pre2L, pre2R); return; }
-            float tl[kBlock] = {}, tr[kBlock] = {};
+            float tl[kBlock], tr[kBlock];
+            clr(tl); clr(tr);
             renderTo(tl, tr);
             const float wa = 0.5f * (1.0f - t), wb = 0.5f * (1.0f + t);
             for (int i = 0; i < n; i++) {
@@ -331,7 +337,8 @@ public:
         /* The FX buses: a source can also send to Bus 1 and Bus 2 (gain = pot/127, which the converter writes as Serum's level cubed), taken
          * before the filter and after the amp envelope (calibration/probe_bus.py), and its route can be None, which leaves it on the buses alone,
          * or Out, which takes it past the effects as well. */
-        float busL[2][kBlock] = {}, busR[2][kBlock] = {};
+        float busL[2][kBlock], busR[2][kBlock];
+        clr(busL[0]); clr(busL[1]); clr(busR[0]); clr(busR[1]);
         bool busUsed = false;
         auto addSource = [&](float routePot, int balPot, int sendPot, auto &&renderTo) {
             const bool none = routePot >= 1.5f && routePot < 2.5f, out = routePot >= 2.5f, direct = routePot >= 0.5f && routePot < 1.5f;
@@ -342,7 +349,8 @@ public:
                 else if (!none) route(direct, balPot, renderTo);
                 return;
             }
-            float tl[kBlock] = {}, tr[kBlock] = {};
+            float tl[kBlock], tr[kBlock];
+            clr(tl); clr(tr);
             renderTo(tl, tr);
             auto addTo = [&](float *l, float *r) { for (int i = 0; i < n; i++) { l[i] += tl[i]; r[i] += tr[i]; } };
             if (out) { addTo(dryL, dryR); dryUsed = true; }
@@ -373,7 +381,8 @@ public:
             srcs[4] = noiseSig;
         }
         if (subSigOn) {
-            float unusedR[kBlock] = {};
+            float unusedR[kBlock];
+            clr(unusedR);
             for (int i = 0; i < n; i++) subSig[i] = 0.0f;
             StereoOscillator::Params unit = subParams;
             unit.leftGain = 1.0f; unit.rightGain = 0.0f;
@@ -384,7 +393,8 @@ public:
             if (!needSrc[j + 1]) continue;
             VoicedWTParams m = vp[j];
             m.voices = 1; m.gain = 1.0f; m.pan = 0.0f; m.spread = 0.0f; m.xwarp = m.xwarp2 = 0;
-            float unusedR[kBlock] = {};
+            float unusedR[kBlock];
+            clr(unusedR);
             for (int i = 0; i < n; i++) oscSig[j][i] = 0.0f;
             modOsc[j].processAdding(oscNote[j], m, oscSig[j], unusedR, n);
             srcs[j + 1] = oscSig[j];
@@ -400,7 +410,8 @@ public:
         if (noiseParams.leftGain + noiseParams.rightGain > 0.0f)
             addSource(P[TB_P_NOISE_POST], TB_P_NOISE_BAL, TB_P_NOISE_BUS1, [&](float *l, float *r) {
                 if (noiseHpHz <= 0.0f && noiseLpHz <= 0.0f) { noise.processAdding(60.0f, noiseParams, l, r, n); return; }
-                float tl[kBlock] = {}, tr[kBlock] = {};                /* the noise through its own colour filters first (Serum's Color: a 12 dB/octave low-pass and high-pass) */
+                float tl[kBlock], tr[kBlock];                          /* the noise through its own colour filters first (Serum's Color: a 12 dB/octave low-pass and high-pass) */
+                clr(tl); clr(tr);
                 noise.processAdding(60.0f, noiseParams, tl, tr, n);
                 if (noiseHpHz > 0.0f) noiseHp.process(tl, tr, n);
                 if (noiseLpHz > 0.0f) noiseLp.process(tl, tr, n);
@@ -897,11 +908,14 @@ private:
     {
         if (prev < 0.0f) prev = target;
         const float lp = std::log(prev), lt = std::log(target);
+        /* A step every 32 samples or so: the 4 of a full block, fewer for a short call (the demo, clip and arp players split the block at their notes), which
+         * otherwise designed the filter 4 times over for a few samples. A full block is stepped exactly as before. */
+        const int steps = std::min(std::max(n / 32, 1), kFltSub);
         int done = 0;
-        for (int k = 1; k <= kFltSub; k++) {
-            const int end = k == kFltSub ? n : (n * k) / kFltSub;
+        for (int k = 1; k <= steps; k++) {
+            const int end = k == steps ? n : (n * k) / steps;
             if (end <= done) continue;
-            flt.setParams(std::exp(lp + (lt - lp) * (float) k / (float) kFltSub), q);
+            flt.setParams(std::exp(lp + (lt - lp) * (float) k / (float) steps), q);
             flt.process(l + done, r + done, end - done);
             done = end;
         }

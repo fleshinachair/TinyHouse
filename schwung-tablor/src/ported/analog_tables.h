@@ -78,8 +78,14 @@ class FastGauss {
 public:
     explicit FastGauss(float sd) : scale(sd / 37837.227f)
     {
+#ifdef TB_DETERMINISTIC_NOISE                                  /* test builds: the same noise every run, so two renders can be compared sample for sample */
+        static uint64_t seq = 0x9E3779B97F4A7C15ULL;
+        seq = seq * 6364136223846793005ULL + 1442695040888963407ULL;
+        state = seq | 1ULL;
+#else
         std::random_device rd;
         state = ((uint64_t) rd() << 32 | rd()) | 1ULL;
+#endif
     }
     inline float next()
     {

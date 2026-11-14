@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 namespace tb {
 
@@ -107,16 +108,28 @@ public:
         if (!wt || wt->size() == 0) return;
         if (params.shape == 5) prepareCurve(params.curveMode, params.curveAmt);
 
-        if (params.pmod || params.fmod || params.selfPd > 0.0f)
-            processModulated(note, params, l, r, n);
-        else if (params.sync > 0.0f || syncEngaged)
+        /* The shaper (postProcess) is a function of each sample alone, so the paths below write the raw samples to a block buffer and finish() shapes them
+         * and adds them in with the gains in one pass: the same arithmetic per sample, without a call and four branches per sample (output-identical).
+         * Sync keeps its own: its polyBLEP works on shaped values. */
+        if (params.pmod || params.fmod || params.selfPd > 0.0f || !(params.sync > 0.0f || syncEngaged)) {
+            float raw[kRawBlock];
+            for (int at = 0; at < n; at += kRawBlock) {
+                const int k = std::min(kRawBlock, n - at);
+                if (params.pmod || params.fmod || params.selfPd > 0.0f) {
+                    Params q = params;
+                    if (q.pmod) q.pmod += at;
+                    if (q.fmod) q.fmod += at;
+                    processModulated(note, q, raw, k);
+                } else if (tableIndex != lastTableIndex && lastTableIndex >= 0)
+                    processCrossfade(note, params, raw, k);
+                else if (params.bend == 0.0f && params.formant == 0.0f)
+                    processSimple(note, params, raw, k);
+                else
+                    processComplex(note, params, raw, k);
+                finish(params, raw, l + at, r + at, k);
+            }
+        } else
             processSync(note, params, l, r, n);
-        else if (tableIndex != lastTableIndex && lastTableIndex >= 0)
-            processCrossfade(note, params, l, r, n);
-        else if (params.bend == 0.0f && params.formant == 0.0f)
-            processSimple(note, params, l, r, n);
-        else
-            processComplex(note, params, l, r, n);
 
         if (blockDC) {
             for (int i = 0; i < n; i++) {
@@ -210,6 +223,59 @@ private:
         }
     }
 
+    /* postProcess over a block, then the stream added in at its gains. The branches are taken once per block; each sample sees the same operations, in the
+     * same order, as postProcess gives it. */
+    void finish(const Params &p, float *o, float *l, float *r, int n) const
+    {
+        if (p.shape == 5) {
+            for (int i = 0; i < n; i++) {
+                const float v = o[i];
+                const float u = (std::min(std::max(v * (1.0f / 0.9f), -1.0f), 1.0f) + 1.0f) * (0.5f * (kWarpCurvePts - 1));
+                const int j = std::min((int) u, kWarpCurvePts - 2);
+                o[i] = 0.9f * (curve[j] + (curve[j + 1] - curve[j]) * (u - (float) j));
+            }
+        } else if (p.shape == 2) {
+            const float sg = p.shapeGain, so = p.shapeOut;
+            for (int i = 0; i < n; i++) {
+                const float u = sg * o[i];
+                const float f = std::min(std::max(u, -1.0f), 1.0f);
+                o[i] = so * f;
+            }
+        } else if (p.shape == 3) {
+            const float sg = p.shapeGain, so = p.shapeOut;
+            for (int i = 0; i < n; i++) {
+                const float u = sg * o[i];
+                const float f = u / (1.0f + std::fabs(u));
+                o[i] = so * f;
+            }
+        } else if (p.shape >= 4) {
+            const float sg = p.shapeGain, so = p.shapeOut;
+            for (int i = 0; i < n; i++) {
+                const float u = sg * o[i];
+                const float c = std::min(std::max(u, -1.0f), 1.0f);
+                const float f = 1.5f * (c - c * c * c * (1.0f / 3.0f));
+                o[i] = so * f;
+            }
+        }
+        if (p.asym > 0.0f) {
+            const float t = math::pow2(p.asym);
+            for (int i = 0; i < n; i++)
+                o[i] = math::lerp(o[i], math::pow4(o[i] - 1.0f) * -1.0f + 1.0f, t);
+        }
+        if (p.fold > 0.0f) {
+            const float fold = math::pow2(math::pow2(1.0f - p.fold)) * 1.5f;
+            for (int i = 0; i < n; i++) {
+                const float v = o[i];
+                o[i] = v - (std::max(v, fold) - fold) * 2.0f - (std::min(v, -fold) + fold) * 2.0f;
+            }
+        }
+        const float gl = p.leftGain, gr = p.rightGain;
+        for (int i = 0; i < n; i++) {
+            l[i] += o[i] * gl;
+            r[i] += o[i] * gr;
+        }
+    }
+
     /* gin's bendDistortion + formantDistortion, formant exp hoisted. */
     inline float distort(float ph, float bend, float formantMul) const
     {
@@ -227,7 +293,7 @@ private:
         return ph;
     }
 
-    void processSimple(float note, const Params &p, float *l, float *r, int n)
+    void processSimple(float note, const Params &p, float *o, int n)
     {
         if (tableIndex == -1 || tableIndex >= wt->size())
             tableIndex = posToIndex(p.position);
@@ -246,9 +312,7 @@ private:
                 float s = FrameTable::readLinear(la, ph);
                 if (frac > 0.0f)
                     s += (FrameTable::readLinear(lb, ph) - s) * frac;
-                postProcess(p, s);
-                *l++ += s * p.leftGain;
-                *r++ += s * p.rightGain;
+                *o++ = s;
                 phase += delta;
             }
             while (phase >= 1.0f) phase -= 1.0f;
@@ -258,7 +322,7 @@ private:
 
     /* The Sub as a modulator (PD: the phase is pushed by it; FM: the phase step is). The phase changes by a different amount every sample, so
      * this walks one sample at a time and wraps the phase either way (an FM deviation can pull it back). */
-    void processModulated(float note, const Params &p, float *l, float *r, int n)
+    void processModulated(float note, const Params &p, float *o, int n)
     {
         const float delta = freqDelta(note);
         const float formantMul = (p.formant != 0.0f)
@@ -267,6 +331,18 @@ private:
         float frac = 0.0f;
         posToFrames(p.position, fa, fb, frac);
         const MipLevel &la = fa->levelRef(note), &lb = fb->levelRef(note);
+        if (!(p.selfPd > 0.0f)) {                      /* the common case, as a loop specialised on what is on (output-identical: an absent term is + 0) */
+            const bool pm = p.pmod != nullptr, fm = p.fmod != nullptr, fr = frac > 0.0f, ds = p.bend != 0.0f || formantMul != 1.0f;
+            const int sel = (pm ? 8 : 0) | (fm ? 4 : 0) | (fr ? 2 : 0) | (ds ? 1 : 0);
+            switch (sel) {
+#define TB_MODCASE(k) case k: modLoop<(k & 8) != 0, (k & 4) != 0, (k & 2) != 0, (k & 1) != 0>(p, la, lb, frac, delta, formantMul, o, n); break;
+            TB_MODCASE(0) TB_MODCASE(1) TB_MODCASE(2) TB_MODCASE(3) TB_MODCASE(4) TB_MODCASE(5) TB_MODCASE(6) TB_MODCASE(7)
+            TB_MODCASE(8) TB_MODCASE(9) TB_MODCASE(10) TB_MODCASE(11) TB_MODCASE(12) TB_MODCASE(13) TB_MODCASE(14) TB_MODCASE(15)
+#undef TB_MODCASE
+            }
+            lastTableIndex = tableIndex = posToIndex(p.position);
+            return;
+        }
         for (int i = 0; i < n; i++) {
             float at = phase + (p.pmod ? p.pmod[i] : 0.0f);
             at -= std::floor(at);
@@ -285,16 +361,34 @@ private:
                         s += (FrameTable::readLinear(lb, ph2) - s) * frac;
                 }
             }
-            postProcess(p, s);
-            l[i] += s * p.leftGain;
-            r[i] += s * p.rightGain;
+            o[i] = s;
             phase += delta + (p.fmod ? p.fmod[i] : 0.0f);
             phase -= std::floor(phase);
         }
         lastTableIndex = tableIndex = posToIndex(p.position);
     }
 
-    void processComplex(float note, const Params &p, float *l, float *r, int n)
+    template <bool PM, bool FM, bool FR, bool DS>
+    void modLoop(const Params &p, const MipLevel &la, const MipLevel &lb, float frac, float delta, float formantMul, float *o, int n)
+    {
+        const float *pmod = p.pmod, *fmod = p.fmod;
+        const float bend = p.bend;
+        float ph0 = phase;
+        for (int i = 0; i < n; i++) {
+            float at = PM ? ph0 + pmod[i] : ph0;
+            at -= std::floor(at);                          /* kept without PM too: a phase handed in at exactly 1 wraps to 0, as it does above */
+            const float ph = DS ? distort(std::min(kAlmostOne, at), bend, formantMul) : std::min(kAlmostOne, at);
+            float s = FrameTable::readLinear(la, ph);
+            if (FR)
+                s += (FrameTable::readLinear(lb, ph) - s) * frac;
+            o[i] = s;
+            ph0 += FM ? delta + fmod[i] : delta;
+            ph0 -= std::floor(ph0);
+        }
+        phase = ph0;
+    }
+
+    void processComplex(float note, const Params &p, float *o, int n)
     {
         if (tableIndex == -1 || tableIndex >= wt->size())
             tableIndex = posToIndex(p.position);
@@ -315,9 +409,7 @@ private:
                 float s = FrameTable::readLinear(la, ph);
                 if (frac > 0.0f)
                     s += (FrameTable::readLinear(lb, ph) - s) * frac;
-                postProcess(p, s);
-                *l++ += s * p.leftGain;
-                *r++ += s * p.rightGain;
+                *o++ = s;
                 phase += delta;
             }
             while (phase >= 1.0f) phase -= 1.0f;
@@ -389,7 +481,7 @@ private:
         }
     }
 
-    void processCrossfade(float note, const Params &p, float *l, float *r, int n)
+    void processCrossfade(float note, const Params &p, float *o, int n)
     {
         if (tableIndex == -1 || tableIndex >= wt->size())
             tableIndex = posToIndex(p.position);
@@ -410,9 +502,7 @@ private:
                 float s1 = ft1->processLinear(note, ph);
                 float s2 = ft2->processLinear(note, ph);
                 float s = s1 * phase + s2 * (1.0f - phase);  /* old->new over one cycle */
-                postProcess(p, s);
-                *l++ += s * p.leftGain;
-                *r++ += s * p.rightGain;
+                *o++ = s;
                 phase += delta;
             }
             while (phase >= 1.0f) {
@@ -425,6 +515,7 @@ private:
     }
 
     static constexpr float kAlmostOne = 0.99999994f; /* < 1.0f in float */
+    static constexpr int kRawBlock = 128;
 
     const Wavetable *wt = nullptr;
     double sampleRate = 44100.0;
@@ -594,7 +685,8 @@ public:
         }
         while (n > 0) {
             const int todo = std::min(n, kStackBlock);
-            float sl[kStackBlock] = {}, sr[kStackBlock] = {};
+            float sl[kStackBlock], sr[kStackBlock];
+            std::memset(sl, 0, sizeof(float) * (size_t) todo); std::memset(sr, 0, sizeof(float) * (size_t) todo);
             float pm[kStackBlock], fm[kStackBlock];
             bool hasPm = false, hasFm = false;
             for (int k = 0; k < 2; k++) {

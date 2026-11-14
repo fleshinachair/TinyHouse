@@ -877,12 +877,20 @@ void Engine::refreshFx()
 
 void Engine::refreshBus(int b)
 {
+    /* The bus rack's pots, with the main rack's FX on / Space in their places: compared where they lie (the two taken from the main pots on their own), and
+     * copied only when something moved, rather than copying the whole set to compare it on every call. */
+    constexpr int kLo = TB_P_FX_ON < TB_P_FX_SPACE ? TB_P_FX_ON : TB_P_FX_SPACE, kHi = TB_P_FX_ON < TB_P_FX_SPACE ? TB_P_FX_SPACE : TB_P_FX_ON;
+    const float *bp = busPots[b];
+    const float *seen = busSeen[b];
+    const float fxOn = pots[TB_P_FX_ON], fxSpace = pots[TB_P_FX_SPACE];
+    const float tempoNow = (TB_P_DLY_SYNC == TB_P_FX_ON ? fxOn : TB_P_DLY_SYNC == TB_P_FX_SPACE ? fxSpace : bp[TB_P_DLY_SYNC]) >= 1.0f ? hostBpm : 0.0f;
+    const auto same = [&](int from, int to) { return to <= from || std::memcmp(seen + from, bp + from, sizeof(float) * (size_t) (to - from)) == 0; };
+    if (busSeenValid[b] && busTempoSeen[b] == tempoNow && std::memcmp(&seen[TB_P_FX_ON], &fxOn, sizeof fxOn) == 0 && std::memcmp(&seen[TB_P_FX_SPACE], &fxSpace, sizeof fxSpace) == 0 &&
+        same(0, kLo) && same(kLo + 1, kHi) && same(kHi + 1, TB_PARAM_COUNT)) return;
     float p[TB_PARAM_COUNT];
-    std::memcpy(p, busPots[b], sizeof p);
-    p[TB_P_FX_ON] = pots[TB_P_FX_ON];
-    p[TB_P_FX_SPACE] = pots[TB_P_FX_SPACE];
-    const float tempoNow = p[TB_P_DLY_SYNC] >= 1.0f ? hostBpm : 0.0f;
-    if (busSeenValid[b] && busTempoSeen[b] == tempoNow && std::memcmp(busSeen[b], p, sizeof p) == 0) return;
+    std::memcpy(p, bp, sizeof p);
+    p[TB_P_FX_ON] = fxOn;
+    p[TB_P_FX_SPACE] = fxSpace;
     std::memcpy(busSeen[b], p, sizeof p);
     busTempoSeen[b] = tempoNow;
     busSeenValid[b] = true;

@@ -36,6 +36,7 @@ inline constexpr int kMaxTailParts = 140;                                   /* 1
 struct Fft {
     int n = 0;
     std::vector<float> cs, sn;
+    std::vector<float> twr, twi;                                           /* cs / sn by stage, see init */
     std::vector<int> rev;
 
     void init(int N)
@@ -46,6 +47,13 @@ struct Fft {
             cs[(size_t) k] = (float) std::cos(6.283185307179586 * k / N);
             sn[(size_t) k] = (float) -std::sin(6.283185307179586 * k / N);
         }
+        /* the same twiddles laid out stage by stage (a stage of half-size h at [h - 1, 2h - 1)), so a stage reads them in order rather than at a stride */
+        twr.assign((size_t) N, 0.0f); twi.assign((size_t) N, 0.0f);
+        for (int half = 1; half < N; half <<= 1)
+            for (int j = 0; j < half; j++) {
+                twr[(size_t) (half - 1 + j)] = cs[(size_t) (j * (N / (2 * half)))];
+                twi[(size_t) (half - 1 + j)] = sn[(size_t) (j * (N / (2 * half)))];
+            }
         int lg = 0;
         while ((1 << lg) < N) lg++;
         for (int i = 0; i < N; i++) {
@@ -63,15 +71,30 @@ struct Fft {
             if (i < j) { std::swap(re[i], re[j]); std::swap(im[i], im[j]); }
         }
         const float sg = inverse ? -1.0f : 1.0f;                            /* the table holds the forward sign; the inverse conjugates it */
+        /* Each butterfly of a stage is independent of the others, so the order they run in does not change a bit of the result: the short stages run twiddle by
+         * twiddle across the groups, the long ones group by group along contiguous twiddles (which the compiler can vectorise). */
         for (int len = 2; len <= n; len <<= 1) {
-            const int half = len >> 1, stride = n / len;
-            for (int i = 0; i < n; i += len) {
+            const int half = len >> 1;
+            const float *twR = &twr[(size_t) (half - 1)], *twI = &twi[(size_t) (half - 1)];
+            if (half < 4) {
                 for (int j = 0; j < half; j++) {
-                    const float wr = cs[(size_t) (j * stride)], wi = sg * sn[(size_t) (j * stride)];
-                    const int a = i + j, b = a + half;
-                    const float tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
-                    re[b] = re[a] - tr; im[b] = im[a] - ti;
-                    re[a] += tr; im[a] += ti;
+                    const float wr = twR[j], wi = sg * twI[j];
+                    for (int a = j; a < n; a += len) {
+                        const int b = a + half;
+                        const float tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
+                        re[b] = re[a] - tr; im[b] = im[a] - ti;
+                        re[a] += tr; im[a] += ti;
+                    }
+                }
+                continue;
+            }
+            for (int i = 0; i < n; i += len) {
+                float *__restrict ra = re + i, *__restrict ia = im + i, *__restrict rb = re + i + half, *__restrict ib = im + i + half;
+                for (int j = 0; j < half; j++) {
+                    const float wr = twR[j], wi = sg * twI[j];
+                    const float tr = rb[j] * wr - ib[j] * wi, ti = rb[j] * wi + ib[j] * wr;
+                    rb[j] = ra[j] - tr; ib[j] = ia[j] - ti;
+                    ra[j] += tr; ia[j] += ti;
                 }
             }
         }

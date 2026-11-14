@@ -272,6 +272,24 @@ def sample_osc(tree: dict, i: int) -> dict | None:
             "fine": float(pp.get("kParamFine", 0.0)), "level": float(pp.get("kParamVolume", 0.75))}
 
 
+def granular_osc(tree: dict, i: int) -> dict | None:
+    """A Granular oscillator's file as the same kind of record sample_osc returns, so the converter exports it as a one-region sample set (the engine's granular slot
+    reads the set exactly as its sample slot does: Serum plays the file at its own pitch on the base note, root C4 unless the file says otherwise). The grain settings
+    are not here (deephouse2move.granular_pots reads them); `granular` marks the record. Loop settings are not applied to the set: they are a granular setting."""
+    o = tree.get(f"Oscillator{i}")
+    pp = o.get("plainParams") if isinstance(o, dict) else None
+    if not isinstance(pp, dict) or pp.get("kParamType") != "kOsc_Granular":
+        return None
+    node = o.get(f"GranularOsc{i}", {})
+    file = node.get("samplePathRelative")
+    embedded = not file and _embed(node)
+    if embedded:
+        file = embedded
+    return {"multi": False, "spectral": False, "granular": True, "file": file, "embedded": bool(embedded), "base_note": int(node.get("baseNote", 60)),
+            "loop": None, "ping_pong": False, "xfade": 0.0, "octave": float(pp.get("kParamOctave", 0.0)), "pitch": float(pp.get("kParamPitch", 0.0)),
+            "fine": float(pp.get("kParamFine", 0.0)), "level": float(pp.get("kParamVolume", 0.75))}
+
+
 def noise_sample(tree: dict) -> dict | None:
     """The noise slot's sample, if it is a one-shot sample (a click or hit) rather than a noise to loop: played once, at its own pitch."""
     o = tree.get("Oscillator3")

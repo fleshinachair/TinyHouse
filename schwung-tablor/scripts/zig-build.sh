@@ -22,6 +22,7 @@ native)
     $CXX $SRC "$ROOT/tests/test_demo.cpp" $ENGINE -o "$OUT/native_demo_test.exe"
     $CXX $SRC "$ROOT/tests/test_conv.cpp" -o "$OUT/native_conv_test.exe"
     $CXX $SRC "$ROOT/tests/test_partjoin.cpp" -o "$OUT/native_partjoin_test.exe"
+    $CXX $SRC "$ROOT/tests/test_granular.cpp" -o "$OUT/native_granular_test.exe"
     $CXX $SRC "$ROOT/../calibration/tablor_cli.cpp" $ENGINE -o "$ROOT/../calibration/tablor_cli.exe"
     ;;
 arm)

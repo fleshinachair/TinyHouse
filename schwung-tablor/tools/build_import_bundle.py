@@ -19,7 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 PY = ["import_web.py", "deephouse2move.py", "fxmap.py", "fxmetrics.py", "sample_export.py", "serum_paths.py"]
-DATA = ["dist_curves", "dist_scales", "filter_models", "filter_res", "fxfilter_drive_probe2", "fxfilter_models_probe", "fx_laws", "fxf_cutoff", "level_law", "lfo_scales", "warp_dist_curves"]
+DATA = ["dist_curves", "dist_scales", "filter_models", "filter_res", "fxfilter_drive_probe2", "fxfilter_models_probe", "fx_laws", "fxf_cutoff", "level_law", "lfo_scales", "warp_curve_modes", "warp_dist_curves"]
 
 
 def main() -> None:

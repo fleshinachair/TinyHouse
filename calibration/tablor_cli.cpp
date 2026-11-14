@@ -32,6 +32,7 @@ static std::shared_ptr<Wavetable> loadTable(const std::string &path)
      * interpolation" is stepped through a frame at a time, as Serum does. */
     float peak = 0.0f;
     for (float v : w.samples) peak = std::max(peak, std::fabs(v));
+    if (w.normPeak > 0.0f) peak = w.normPeak;                   /* a "tbpk" chunk: the importer rewrote the table (Even/Odd) and says which peak to normalise by */
     if (peak > 0.0f) { const float g = 0.9f / peak; for (float &v : w.samples) v *= g; }
     auto table = std::make_shared<Wavetable>();
     if (nf <= 0 || !wtBuild(*table, w.samples.data(), nf, frame, 44100.0f, 44100.0f)) return nullptr;

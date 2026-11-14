@@ -22,6 +22,7 @@ struct WavData {
     float sampleRate = 0.0f;
     int   clmFrameSize = 0;       /* 0 = no clm chunk */
     bool  clmStepped = false;     /* the clm interpolation digit is 0: Serum plays a frame at a time, no blending between them */
+    float normPeak = 0.0f;        /* a "tbpk" chunk (written by the importer for a table it rewrote): the peak the loader should normalise by, instead of the file's own */
 };
 
 inline bool wavLoad(const char *path, WavData &out)
@@ -75,6 +76,9 @@ inline bool wavLoad(const char *path, WavData &out)
                 const size_t sp = s.find(' ');
                 out.clmStepped = sp != std::string::npos && sp + 1 < s.size() && s[sp + 1] == '0';
             }
+        } else if (id == 0x6b706274u && len >= 4) {          /* "tbpk" */
+            float pk = 0.0f;
+            if (std::fread(&pk, 4, 1, f) == 1 && pk > 0.0f && std::isfinite(pk)) out.normPeak = pk;
         } else if (id == 0x61746164u && haveFmt) {          /* "data" */
             const int bytesPer = bits / 8;
             if ((fmt == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32)) ||

@@ -193,6 +193,7 @@ private:
         float rate = 44100.0f;
         int frameSize = 0;
         bool steppedFlag = false;
+        float normPeak = 0.0f;                 /* from a "tbpk" chunk: the peak to normalise by (0 = the table's own) */
 
         if (entry.flac || entry.flacFrameSize > 0) {
             if (!wtDecodeFlac(entry.path.c_str(), samples, rate))
@@ -208,6 +209,7 @@ private:
                 return nullptr;
             rate = w.sampleRate > 0 ? w.sampleRate : 44100.0f;
             steppedFlag = w.clmStepped;
+            normPeak = w.normPeak;
 
             /* DECIDE THE FRAME SIZE BEFORE MOVING THE SAMPLES.
              *
@@ -283,6 +285,7 @@ private:
         /* normalize to 0.9 peak for consistent loudness across libraries */
         float peak = 0.0f;
         for (float v : samples) peak = std::max(peak, std::fabs(v));
+        if (normPeak > 0.0f) peak = normPeak;        /* a table the importer rewrote (Even/Odd): normalise as the table it was made from, so the mix keeps its level */
         if (peak > 0.0f) {
             float g = 0.9f / peak;
             for (float &v : samples) v *= g;

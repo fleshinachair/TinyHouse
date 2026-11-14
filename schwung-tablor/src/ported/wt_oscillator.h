@@ -21,6 +21,7 @@
 #pragma once
 
 #include "wavetable.h"
+#include "../dsp/warp_curves.h"
 
 #include <algorithm>
 #include <cmath>
@@ -71,9 +72,12 @@ public:
         /* Serum's Dist* oscillator warps: a static shaper out = shapeOut f(shapeGain x) of every stream's sample (calibration/fit_warp_dist.py) */
         int   shape     = 0;      /* 0 off, 2 hard clip, 3 softsign, 4 cubic soft clip (1 is unused: std::tanh costs 7x the others per sample) */
         float shapeGain = 1.0f, shapeOut = 1.0f;
+        int   curveMode = 0;      /* shape 5: one of Serum's static waveshapers as a measured transfer curve (warp_curves.h), curveMode its index, curveAmt Serum's 0..1 amount */
+        float curveAmt  = 0.0f;
         /* Serum's PD / FM warps (the modulator is the Sub or another oscillator): pmod is added to the phase, in cycles; fmod to the phase step, in cycles per
          * sample (a frequency deviation). Both are already scaled by the warp's depth, one value per sample of the block. */
         const float *pmod = nullptr, *fmod = nullptr;
+        float selfPd = 0.0f;      /* Serum's SelfPD: the phase pushed by the wave's own value, read at p + selfPd x(p + selfPd x(...)) (cycles per table peak; 0 off) */
     };
 
     void setSampleRate(double sr)
@@ -101,8 +105,9 @@ public:
     void processAdding(float note, const Params &params, float *l, float *r, int n)
     {
         if (!wt || wt->size() == 0) return;
+        if (params.shape == 5) prepareCurve(params.curveMode, params.curveAmt);
 
-        if (params.pmod || params.fmod)
+        if (params.pmod || params.fmod || params.selfPd > 0.0f)
             processModulated(note, params, l, r, n);
         else if (params.sync > 0.0f || syncEngaged)
             processSync(note, params, l, r, n);
@@ -166,9 +171,28 @@ private:
         return freq / (float) sampleRate;
     }
 
+    /* The measured curve at an amount: the two nearest measured amounts mixed, rebuilt only when mode or amount changes. */
+    void prepareCurve(int mode, float amount)
+    {
+        mode = std::clamp(mode, 0, kWarpCurveModes - 1);
+        amount = std::clamp(amount, 0.0f, 1.0f);
+        if (mode == curveModeC && amount == curveAmtC) return;
+        curveModeC = mode; curveAmtC = amount;
+        const float pos = amount * (kWarpCurveAmts - 1);
+        const int i0 = std::min((int) pos, kWarpCurveAmts - 2);
+        const float f = pos - (float) i0;
+        for (int j = 0; j < kWarpCurvePts; j++)
+            curve[j] = kWarpCurveData[mode][i0][j] * (1.0f - f) + kWarpCurveData[mode][i0 + 1][j] * f;
+    }
+
     inline void postProcess(const Params &p, float &v) const
     {
-        if (p.shape >= 2) {
+        if (p.shape == 5) {
+            /* the loader normalises every table to a 0.9 peak; Serum's curves are in file units (a table peaks at 1) */
+            const float u = (std::min(std::max(v * (1.0f / 0.9f), -1.0f), 1.0f) + 1.0f) * (0.5f * (kWarpCurvePts - 1));
+            const int i = std::min((int) u, kWarpCurvePts - 2);
+            v = 0.9f * (curve[i] + (curve[i + 1] - curve[i]) * (u - (float) i));
+        } else if (p.shape >= 2) {
             const float u = p.shapeGain * v;
             float f;
             switch (p.shape) {
@@ -250,6 +274,17 @@ private:
             float s = FrameTable::readLinear(la, ph);
             if (frac > 0.0f)
                 s += (FrameTable::readLinear(lb, ph) - s) * frac;
+            if (p.selfPd > 0.0f) {                         /* the implicit y = x(p + z y), three fixed-point steps (the table is at a 0.9 peak: y is taken in units of the peak) */
+                const float base = at;
+                for (int it = 0; it < 3; it++) {
+                    float at2 = base + p.selfPd * (s * (1.0f / 0.9f));
+                    at2 -= std::floor(at2);
+                    const float ph2 = distort(std::min(kAlmostOne, at2), p.bend, formantMul);
+                    s = FrameTable::readLinear(la, ph2);
+                    if (frac > 0.0f)
+                        s += (FrameTable::readLinear(lb, ph2) - s) * frac;
+                }
+            }
             postProcess(p, s);
             l[i] += s * p.leftGain;
             r[i] += s * p.rightGain;
@@ -396,6 +431,9 @@ private:
     float phase = 0.0f;
     int tableIndex = -1, lastTableIndex = -1;
     bool blockDC = true;
+    float curve[kWarpCurvePts] = {};
+    int   curveModeC = -1;
+    float curveAmtC = -1.0f;
     DCBlocker blockerL, blockerR;
     float masterPhase = 0.0f, syncHold = 0.0f;
     bool syncEngaged = false;
@@ -416,6 +454,8 @@ struct VoicedWTParams {
     float sync = 0.0f;
     int   shape = 0;
     float shapeGain = 1.0f, shapeOut = 1.0f;
+    int   curveMode = 0;
+    float curveAmt = 0.0f;
     /* One more of Serum's warps on the oscillator: 0 none, 1 Filter LP, 2 Filter HP, 3 FM from Sub, 4 PD from Sub, 5 RM from Sub; xamount is
      * Serum's 0..1 amount. The laws are measured (calibration/probe_warp_fm.py, probe_filterwarp.py). */
     int   xwarp = 0;
@@ -446,6 +486,37 @@ inline constexpr float kXwarpPdCycles = 33.6f / 6.28318530718f;   /* PD index in
 inline constexpr float kXwarpFmHz     = 58200.0f;                  /* FM deviation at amount 1, Hz (x a^4) */
 inline constexpr float kXwarpRmGain   = 1.314f;
 inline constexpr float kXwarpOscScale = 1.52f;
+/* The Noise as the modulator (calibration/probe_noise_warp_law.py, averaged over renders, calibration/validate_noise_warps.py).
+ *  - FM from the Noise is a real FM by white noise: the carrier becomes a Lorentzian line (the power stays) whose half width H grows exponentially with the amount (about x 3.3 per 0.1), read from the
+ *    share of the power left in the carrier's +-1.4 Hz (H = 1.4 / tan(pi share / 2)). A white frequency noise of standard deviation d cycles per sample has H = pi d^2 fs, so d = sqrt(H / (pi fs)).
+ *    Nothing audible below 0.45.
+ *  - PD from the Noise is a phase modulation by white noise (carrier keeps exp(-s^2), s the rms phase in radians), on from about 0.55; the tables are s^2 against the amount.
+ *  - RM from the Noise is (1 - a) x + 0.409 a^2 x n, n white at unit rms (the noise part's power 0.168 a^4 of the note's). */
+inline float noiseFmSdCycles(float a, float sampleRate)
+{
+    static const float A[10] = { 0.45f, 0.5f, 0.55f, 0.6f, 0.65f, 0.7f, 0.75f, 0.8f, 0.9f, 1.0f };
+    static const float H[10] = { 0.054f, 0.42f, 2.05f, 11.7f, 21.0f, 52.0f, 150.0f, 230.0f, 4000.0f, 30000.0f };
+    if (a < A[0]) return 0.0f;
+    int j = 1;
+    while (j < 9 && A[j] < a) j++;
+    const float t = std::min((a - A[j - 1]) / (A[j] - A[j - 1]), 1.0f);
+    const float h = std::exp(std::log(H[j - 1]) + t * (std::log(H[j]) - std::log(H[j - 1])));
+    return std::sqrt(h / (3.14159265f * sampleRate));
+}
+inline float noisePdSigmaCycles(float a)
+{
+    static const float PA[10] = { 0.55f, 0.6f, 0.65f, 0.7f, 0.75f, 0.8f, 0.85f, 0.9f, 0.95f, 1.0f };
+    static const float PV[10] = { 0.0f, 0.06f, 0.22f, 0.75f, 2.9f, 3.6f, 4.6f, 5.0f, 6.0f, 9.8f };
+    if (a <= PA[0]) return 0.0f;
+    int j = 1;
+    while (j < 9 && PA[j] < a) j++;
+    const float t = std::min((a - PA[j - 1]) / (PA[j] - PA[j - 1]), 1.0f);
+    return std::sqrt(PV[j - 1] + t * (PV[j] - PV[j - 1])) / 6.28318530718f;
+}
+inline constexpr float kXwarpNoiseRmGain = 0.409f;
+/* SelfPD: the phase is pushed by the wave's own value, y = x(p + z y), z = 0.62 a^2 cycles (measured: the implicit form fits a sine to 0.003-0.01 rms up to amount 0.4, where z is 0.095;
+ * z / a^2 reads 0.63, 0.61, 0.59, 0.56 at 0.2 .. 0.5). */
+inline float selfPdCycles(float a) { return a <= 0.5f ? 0.62f * a * a : 0.155f + (a - 0.5f) * 0.4f; }
 /* An oscillator as the modulator is 1.52 times as strong as the Sub at the same amount (calibration/probe_warp_osc.py: FM deviation 90 000 a^4 Hz against the Sub's
  * 58 200, PD index 51 a^4 against 33.6, RM / AM sidebands a against 0.657 a). Mode 6, AM, is x (1 + a 1.314 k S). */
 
@@ -495,16 +566,25 @@ public:
     /* `src[0..3]` are the modulators' waveforms at unit level for the block (the Sub, then oscillators A..C), null where not rendered; the FM / PD / RM / AM warps read them. */
     void processAdding(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *const *src = nullptr)
     {
-        struct Slot { int kind = 0; float a = 0.0f, gain = 1.0f, g = 0.0f; const float *sig = nullptr; };
+        struct Slot { int kind = 0; float a = 0.0f, gain = 1.0f, g = 0.0f; const float *sig = nullptr; bool noise = false; };
         Slot s[2];
+        float selfPd = 0.0f;
         for (int k = 0; k < 2; k++) {
             const int w = k ? vp.xwarp2 : vp.xwarp;
             const float a = std::min(std::max(k ? vp.xamount2 : vp.xamount, 0.0f), 1.0f);
-            if (w < 1 || w > 6 || a <= 0.0f) continue;
+            if (w < 1 || w > 7 || a <= 0.0f) continue;
+            if (w == 7) {                                      /* SelfPD: 0.62 a^2 cycles (calibration/probe_selfpd.py: the implicit form fits a sine to 0.01 up to amount 0.4) */
+                selfPd = selfPdCycles(a);
+                continue;
+            }
             if (w >= 3) {
-                const int si = std::min(std::max(k ? vp.xsrc2 : vp.xsrc, 0), 3);
+                const int si = std::min(std::max(k ? vp.xsrc2 : vp.xsrc, 0), 4);
                 if (!src || !src[si]) continue;
                 s[k].sig = src[si]; s[k].gain = si == 0 ? 1.0f : kXwarpOscScale;
+                if (si == 4) {
+                    if (w == 6) continue;                      /* AM from the Noise is not measured */
+                    s[k].noise = true; s[k].gain = 1.0f;
+                }
             } else {
                 /* Filter warps: a one-pole (trapezoidal) at the corner, once per stack, since the filter is linear and the stack is the sum of its streams */
                 const float kk = std::tan(std::min((float) M_PI * filterWarpCornerHz(a) / (float) sampleRate, 1.5533f));
@@ -524,14 +604,16 @@ public:
                 float *dst = fmk ? fm : pm;
                 bool &has = fmk ? hasFm : hasPm;
                 if (!has) { for (int i = 0; i < todo; i++) dst[i] = 0.0f; has = true; }
-                const float depth = (fmk ? kXwarpFmHz / (float) sampleRate : kXwarpPdCycles) * a4 * s[k].gain;
+                const float depth = s[k].noise ? (fmk ? noiseFmSdCycles(s[k].a, (float) sampleRate) : noisePdSigmaCycles(s[k].a))
+                                                : (fmk ? kXwarpFmHz / (float) sampleRate : kXwarpPdCycles) * a4 * s[k].gain;
                 for (int i = 0; i < todo; i++) dst[i] += depth * s[k].sig[i];
             }
-            renderStack(note, vp, sl, sr, todo, hasPm ? pm : nullptr, hasFm ? fm : nullptr);
+            renderStack(note, vp, sl, sr, todo, hasPm ? pm : nullptr, hasFm ? fm : nullptr, selfPd);
             for (int k = 0; k < 2; k++) {
                 const int kind = s[k].kind;
                 if (kind == 5 || kind == 6) {
-                    const float dry = kind == 5 ? 1.0f - s[k].a : 1.0f, wet = s[k].a * kXwarpRmGain * s[k].gain;
+                    const float dry = kind == 5 ? 1.0f - s[k].a : 1.0f,
+                                wet = s[k].noise ? kXwarpNoiseRmGain * s[k].a * s[k].a : s[k].a * kXwarpRmGain * s[k].gain;
                     for (int i = 0; i < todo; i++) {
                         const float g = dry + wet * s[k].sig[i];
                         sl[i] *= g; sr[i] *= g;
@@ -557,13 +639,13 @@ public:
 private:
     static constexpr int kStackBlock = 128;
 
-    void renderStack(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *pmod, const float *fmod)
+    void renderStack(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *pmod, const float *fmod, float selfPd = 0.0f)
     {
         WTOscillator::Params p;
         p.position = vp.position; p.bend = vp.bend; p.formant = vp.formant;
         p.asym = vp.asym; p.fold = vp.fold; p.sync = vp.sync;
-        p.shape = vp.shape; p.shapeGain = vp.shapeGain; p.shapeOut = vp.shapeOut;
-        p.pmod = pmod; p.fmod = fmod;
+        p.shape = vp.shape; p.shapeGain = vp.shapeGain; p.shapeOut = vp.shapeOut; p.curveMode = vp.curveMode; p.curveAmt = vp.curveAmt;
+        p.pmod = pmod; p.fmod = fmod; p.selfPd = selfPd;
 
         const int voices = std::clamp(vp.voices, 1, (int) oscs.size());
         if (voices == 1) {

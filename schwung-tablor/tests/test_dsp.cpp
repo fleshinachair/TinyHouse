@@ -1,4 +1,5 @@
 #include <chrono>
+#include <complex>
 /* Phase 2 DSP validation — numeric golden checks for every ported block.
  *
  * The checks assert MEASURED behaviour (frequency response in dB, envelope
@@ -16,6 +17,7 @@
 #include "../src/ported/adsr.h"
 #include "../src/ported/analog_tables.h"
 #include "../src/ported/wt_oscillator.h"
+#include "../src/dsp/comb.h"
 #include "../src/ported/wav.h"
 #include "../src/dsp/sample.h"
 #include "../src/dsp/preset_digest.h"
@@ -344,6 +346,68 @@ static float heardHz(const std::vector<float>&data,int fs,int nf){
     return zc*44100.0f/l.size();
 }
 
+/* The importer rewrites a wavetable for Serum's Even/Odd warp (x + c x half a cycle later, up to twice the original peak) and says in a "tbpk" chunk which peak to normalise by */
+static void testWavNormPeak()
+{
+    printf("== wav tbpk chunk ==\n");
+    std::vector<float> s(2048 * 2);
+    for (size_t i = 0; i < s.size(); i++) s[i] = 2.0f * std::sin(6.2831853f * (float) (i % 2048) / 2048.0f);
+    const char *path = "tbpk_test.wav";
+    writeWav(path, s, 3, 32, 1, 0, "<!>2048 01000000 wavetable");
+    { FILE *f = fopen(path, "ab"); fwrite("tbpk", 1, 4, f); p32(f, 4); const float pk = 1.0f; fwrite(&pk, 1, 4, f); fclose(f); }
+    WavData w;
+    CHECK(wavLoad(path, w) && w.samples.size() == s.size(), "a wav with a tbpk chunk after the data still loads");
+    CHECK(std::fabs(w.normPeak - 1.0f) < 1e-6f, "its tbpk peak is read (%.3f)", w.normPeak);
+    writeWav(path, s, 3, 32, 1, 0, "<!>2048 01000000 wavetable");
+    WavData w2;
+    CHECK(wavLoad(path, w2) && w2.normPeak == 0.0f, "a wav without one has none (%.3f)", w2.normPeak);
+    remove(path);
+}
+
+/* The comb / flanger voice filters (comb.h): the impulse response's spectrum is Serum's measured law a (1 + c z^-D) / (1 - g z^-D) */
+static void testCombFilter()
+{
+    printf("== comb filter ==\n");
+    const double sr = 44100.0, hz = 425.0, D = sr / hz;
+    struct C { int kind, sign; float reso; const char *name; };
+    for (const C &c : { C{ 0, 1, 0.5f, "Comb +" }, C{ 0, -1, 0.7f, "Comb -" }, C{ 1, 1, 0.3f, "Flange +" }, C{ 1, -1, 0.8f, "Flange -" } }) {
+        CombFilter f; f.setSampleRate(sr);
+        std::vector<float> l(16384, 0.0f), r(16384, 0.0f);
+        l[0] = r[0] = 1.0f;
+        for (int off = 0; off < 16384; off += 128) f.process(l.data() + off, r.data() + off, 128, c.kind, c.sign, c.reso, (float) hz);
+        const double g = c.sign * std::min((double) c.reso, 0.99), cc = c.kind ? (double) c.sign : c.sign * g * g, a = 0.4965 / (1.0 + std::fabs(g));
+        double worst = 0;
+        for (double fr : { 200.0, 640.0, 1111.0, 2600.0 }) {
+            double re = 0, im = 0;
+            for (int i = 0; i < 16384; i++) { re += l[(size_t) i] * std::cos(6.283185307 * fr * i / sr); im -= l[(size_t) i] * std::sin(6.283185307 * fr * i / sr); }
+            const double th = 6.283185307 * fr * D / sr;
+            const double nr = 1.0 + cc * std::cos(th), ni = -cc * std::sin(th), dr = 1.0 - g * std::cos(th), di = g * std::sin(th);
+            const double want = a * std::sqrt((nr * nr + ni * ni) / (dr * dr + di * di)), got = std::sqrt(re * re + im * im);
+            worst = std::max(worst, std::fabs(20.0 * std::log10((got + 1e-12) / (want + 1e-12))));
+        }
+        CHECK(worst < 0.5, "%s at reso %.1f: impulse response within %.2f dB of the law", c.name, c.reso, worst);
+    }
+    /* the phaser chain: a (1 + A^N) / (1 - g A^N), A a first-order all-pass at 0.511 x the cutoff */
+    for (int stages : { 2, 4, 8 }) {
+        const float reso = 0.45f;
+        PhaserFilter f; f.setSampleRate(sr);
+        std::vector<float> l(16384, 0.0f), r(16384, 0.0f);
+        l[0] = r[0] = 1.0f;
+        for (int off = 0; off < 16384; off += 128) f.process(l.data() + off, r.data() + off, 128, stages, reso, 900.0f);
+        const double t = std::tan(3.14159265358979 * 0.511 * 900.0 / sr), a1 = (t - 1.0) / (t + 1.0), g = reso, a = 0.4965 / (1.0 + g);
+        double worst = 0;
+        for (double fr : { 150.0, 400.0, 900.0, 2500.0, 7000.0 }) {
+            double re = 0, im = 0;
+            for (int i = 0; i < 16384; i++) { re += l[(size_t) i] * std::cos(6.283185307 * fr * i / sr); im -= l[(size_t) i] * std::sin(6.283185307 * fr * i / sr); }
+            const double w = 6.283185307 * fr / sr;
+            std::complex<double> z = std::polar(1.0, -w), ap = (a1 + z) / (1.0 + a1 * z), An = std::pow(ap, stages);
+            const double want = a * std::abs((1.0 + An) / (1.0 - g * An)), got = std::sqrt(re * re + im * im);
+            worst = std::max(worst, std::fabs(20.0 * std::log10((got + 1e-12) / (want + 1e-12))));
+        }
+        CHECK(worst < 0.6, "Phase %d at reso %.2f: impulse response within %.2f dB of the law", 6 * stages, reso, worst);
+    }
+}
+
 static void testWavFormats()
 {
     printf("== wav formats ==\n");
@@ -617,6 +681,45 @@ static void testXwarp()
         render(84.0f, 1, 1.0f, lo);
         CHECK(std::fabs(amp(lo, f) / amp(dry, f) - 1.0) < 0.03, "low-pass warp at 1.0 is open (%.3f)", amp(lo, f) / amp(dry, f));
     }
+    /* SelfPD: the phase pushed by the wave's own value. A sine at amount 0.2 has its 2nd harmonic at -23.1 dB (Serum, calibration/validate_static_warps.py), at 0.35 -14.0 dB (this table peaks at 1, the loader's at 0.9, so the push reads about 1 dB strong here) */
+    {
+        render(48.0f, 7, 0.2f, x);
+        const double h2 = 20.0 * std::log10(amp(x, 2 * f0) / a0);
+        CHECK(std::fabs(h2 + 23.1) < 2.5, "SelfPD 0.20: 2nd harmonic %.1f dB (Serum -23.1)", h2);
+        render(48.0f, 7, 0.35f, x);
+        const double h2b = 20.0 * std::log10(amp(x, 2 * f0) / a0);
+        CHECK(std::fabs(h2b + 14.0) < 2.0, "SelfPD 0.35: 2nd harmonic %.1f dB (Serum -14.0)", h2b);
+    }
+    /* the Noise as the modulator (source 4): RM is (1 - a) x + 0.409 a^2 x n, so the carrier line is 1 - a; FM below 0.45 and PD below 0.55 do nothing; PD at 0.8 leaves the carrier
+     * at -13.6 dB (Serum, calibration/probe_noise_warp_law.py), FM at 0.5 at -0.9 dB */
+    {
+        FastGauss g(1.0f);
+        auto renderN = [&](int xw, float a, std::vector<float> &out) {
+            VoicedWTOscillator o(kMaxUnison);
+            o.setSampleRate(sr); o.setWavetable(&wt); o.noteOn(0.0f);
+            VoicedWTParams vp; vp.voices = 1; vp.xwarp = xw; vp.xamount = a; vp.xsrc = 4;
+            out.clear();
+            for (int blk = 0; blk < 44100 * 2 / 128; blk++) {
+                float l[128] = {}, r[128] = {}, nz[128];
+                for (int i = 0; i < 128; i++) nz[i] = g.next();
+                const float *srcs[5] = { nz, nz, nz, nz, nz };
+                o.processAdding(48.0f, vp, l, r, 128, srcs);
+                if (blk * 128 > 8192) out.insert(out.end(), l, l + 128);
+            }
+        };
+        renderN(5, 0.6f, x);
+        CHECK(std::fabs(line(f0) - 0.4) < 0.05, "RM from the Noise 0.60: carrier %.3f (0.400)", line(f0));
+        renderN(3, 0.40f, x);
+        CHECK(std::fabs(line(f0) - 1.0) < 0.03, "FM from the Noise 0.40 does nothing (carrier %.3f)", line(f0));
+        renderN(4, 0.50f, x);
+        CHECK(std::fabs(line(f0) - 1.0) < 0.03, "PD from the Noise 0.50 does nothing (carrier %.3f)", line(f0));
+        renderN(4, 0.80f, x);
+        const double pdDb = 20.0 * std::log10(line(f0));
+        CHECK(pdDb < -9.0 && pdDb > -19.0, "PD from the Noise 0.80: carrier %.1f dB (Serum -13.6)", pdDb);
+        renderN(3, 0.50f, x);
+        const double fmDb = 20.0 * std::log10(line(f0));
+        CHECK(fmDb < -0.2 && fmDb > -9.0, "FM from the Noise 0.50: carrier %.1f dB (Serum -0.9 within 1.4 Hz; this reads one bin, so lower)", fmDb);
+    }
 }
 
 static void testWarpShaper()
@@ -650,6 +753,45 @@ static void testWarpShaper()
     CHECK(h3clean < -60.0, "no shaper: no third harmonic (%.1f dB)", h3clean);
     CHECK(h3soft > -25.0 && h3soft < -8.0, "a softsign shaper at gain 4 makes a third harmonic (%.1f dB re the fundamental)", h3soft);
     CHECK(std::fabs(20.0 * std::log10(amp(ident, f0) / amp(clean, f0))) < 0.3, "pre-gain 0.02 with output gain 50 is transparent (%.2f dB)", 20.0 * std::log10(amp(ident, f0) / amp(clean, f0)));
+    /* shape 5: Serum's measured waveshaper curves (warp_curves.h). The engine's harmonics of a sine through a curve equal the curve's own, and a curve at amount 0 of a mode that is the identity there is transparent */
+    {
+        Wavetable wt9;                                    /* a sine peaking at 0.9, as the loader leaves a table: the curves are in file units (peak 1) and the engine rescales by 1/0.9 */
+        { std::vector<float> s9(2048); for (int i = 0; i < 2048; i++) s9[(size_t) i] = 0.9f * std::sin(2.0f * (float) M_PI * (float) i / 2048.0f); wtBuild(wt9, s9.data(), 1, 2048, 44100.0f, 44100.0f); }
+        auto renderCurve = [&](int mode, float amt, std::vector<float> &out) {
+            VoicedWTOscillator o(kMaxUnison);
+            o.setSampleRate(44100.0); o.setWavetable(&wt9); o.noteOn(0.0f);
+            VoicedWTParams vp; vp.voices = 1; vp.shape = 5; vp.curveMode = mode; vp.curveAmt = amt;
+            out.clear();
+            for (int blk = 0; blk < 44100 / 128; blk++) {
+                float l[128] = {}, r[128] = {};
+                o.processAdding(note, vp, l, r, 128);
+                if (blk * 128 > 8192) out.insert(out.end(), l, l + 128);
+            }
+        };
+        auto refHarm = [&](int mode, float amt, int k) {          /* the curve's own k-th harmonic of a unit sine */
+            const float pos = amt * (kWarpCurveAmts - 1); const int i0 = std::min((int) pos, kWarpCurveAmts - 2); const float fr = pos - (float) i0;
+            double re = 0, im = 0; const int N = 4096;
+            for (int i = 0; i < N; i++) {
+                const double x = std::sin(6.283185307179586 * i / N), u = (x + 1.0) * 0.5 * (kWarpCurvePts - 1); const int j = std::min((int) u, kWarpCurvePts - 2);
+                auto c = [&](int a_) { return kWarpCurveData[mode][i0][a_] * (1 - fr) + kWarpCurveData[mode][i0 + 1][a_] * fr; };
+                const double y = c(j) + (c(j + 1) - c(j)) * (u - j);
+                re += y * std::cos(6.283185307179586 * k * i / N); im += y * std::sin(6.283185307179586 * k * i / N);
+            }
+            return std::sqrt(re * re + im * im) * 2.0 / N;
+        };
+        std::vector<float> o;
+        for (int mode : { 0, 1, 2 }) {
+            renderCurve(mode, 0.7f, o);
+            const double e3 = 20.0 * std::log10(amp(o, 3 * f0) / amp(o, f0)), r3 = 20.0 * std::log10(refHarm(mode, 0.7f, 3) / refHarm(mode, 0.7f, 1));
+            const double e2 = 20.0 * std::log10(amp(o, 2 * f0) / amp(o, f0) + 1e-9), r2 = 20.0 * std::log10(refHarm(mode, 0.7f, 2) / refHarm(mode, 0.7f, 1) + 1e-9);
+            CHECK(std::fabs(e3 - r3) < 0.7 && (std::fabs(e2 - r2) < 1.0 || (e2 < -50.0 && r2 < -50.0)), "curve %d at 0.7: 3rd %.1f dB (curve %.1f), 2nd %.1f dB (curve %.1f)", mode, e3, r3, e2, r2);
+        }
+        renderCurve(6, 0.0f, o);
+        std::vector<float> clean9;
+        { VoicedWTOscillator o9(kMaxUnison); o9.setSampleRate(44100.0); o9.setWavetable(&wt9); o9.noteOn(0.0f); VoicedWTParams vp9; vp9.voices = 1;
+          for (int blk = 0; blk < 44100 / 128; blk++) { float l[128] = {}, r[128] = {}; o9.processAdding(note, vp9, l, r, 128); if (blk * 128 > 8192) clean9.insert(clean9.end(), l, l + 128); } }
+        CHECK(std::fabs(20.0 * std::log10(amp(o, f0) / amp(clean9, f0))) < 0.3, "the Quantize curve at 0 is transparent (%.2f dB)", 20.0 * std::log10(amp(o, f0) / amp(clean9, f0)));
+    }
     /* cost, informational: 16 unison streams, one second of audio, wall time per shaper kind (native x86, a relative figure only) */
     {
         const char *names[] = { "none", "(unused)", "clip", "softsign", "cubic" };
@@ -950,6 +1092,8 @@ int main()
     testShortWavetables();
     testShortFrameTables();
     testWavFormats();
+    testWavNormPeak();
+    testCombFilter();
     testMorphToEvenHarmonicsKeepsItsFrame();
     testAnalogTables();
     testUnisonKeepsTheBass();

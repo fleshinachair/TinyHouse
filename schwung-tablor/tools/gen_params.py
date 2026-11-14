@@ -98,15 +98,15 @@ def osc(n):
         bend   = pot(f"wt{n}_bend",    f"BND{n}",  f"WT{n} Bend", 64),
         formant= pot(f"wt{n}_formant", f"FRM{n}",  f"WT{n} Formant", 64),
         sync   = pot(f"wt{n}_sync",    f"SYN{n}",  f"WT{n} Sync", 0),
-        shape  = enum(f"wt{n}_wshape", f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic"], 0),
+        shape  = enum(f"wt{n}_wshape", f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic", "Curve"], 0),
         sgain  = pot(f"wt{n}_sgain",   f"SGN{n}",  f"WT{n} Shaper Gain", 64),
         sout   = pot(f"wt{n}_sout",    f"SOT{n}",  f"WT{n} Shaper Out", 64),
-        xw     = enum(f"wt{n}_xw",     f"XW{n}",   f"WT{n} Warp", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM"], 0),
+        xw     = enum(f"wt{n}_xw",     f"XW{n}",   f"WT{n} Warp", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM", "SelfPD"], 0),
         xa     = num(f"wt{n}_xa",      f"XA{n}",   f"WT{n} Warp Amount", 0, 1000, 0),
-        xs     = enum(f"wt{n}_xs",     f"XS{n}",   f"WT{n} Warp From", ["Sub", "Osc A", "Osc B", "Osc C"], 0),
-        xw2    = enum(f"wt{n}_xw2",    f"XV{n}",   f"WT{n} Warp 2", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM"], 0),
+        xs     = enum(f"wt{n}_xs",     f"XS{n}",   f"WT{n} Warp From", ["Sub", "Osc A", "Osc B", "Osc C", "Noise"], 0),
+        xw2    = enum(f"wt{n}_xw2",    f"XV{n}",   f"WT{n} Warp 2", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM", "SelfPD"], 0),
         xa2    = num(f"wt{n}_xa2",     f"XB{n}",   f"WT{n} Warp 2 Amount", 0, 1000, 0),
-        xs2    = enum(f"wt{n}_xs2",    f"XU{n}",   f"WT{n} Warp 2 From", ["Sub", "Osc A", "Osc B", "Osc C"], 0),
+        xs2    = enum(f"wt{n}_xs2",    f"XU{n}",   f"WT{n} Warp 2 From", ["Sub", "Osc A", "Osc B", "Osc C", "Noise"], 0),
     )
 
 # WT3 is deliberately the plain one: a layer, not a third lead. It has no bend
@@ -114,11 +114,14 @@ def osc(n):
 # and the third oscillator is there to fill a sound out, not to shape it.
 O1, O2, O3 = osc(1), osc(2), osc(3)
 
+# The voice filters' types: the eight biquads, then Serum's comb and flanger models (comb.h: a feedback comb tuned to the cutoff, Reso its feedback).
+FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +"]
+
 FILTER = dict(
     freq = pot("flt_freq", "FREQ", "Filter Freq", 127),
     res  = pot("flt_res",  "RES",  "Filter Res", 0),
     env  = pot("flt_env",  "FENV", "Filter EG Amt", 64),
-    type = enum("flt_type", "TYPE", "Filter Type", FILTER_TYPES, 1),
+    type = enum("flt_type", "TYPE", "Filter Type", FILTER_TYPES_V, 1),
     drive = pot("flt_drive", "DRIVE", "Filter Drive", 0),
     key  = pot("flt_key",  "KEYT", "Key Track", 0),
     vel  = pot("flt_vel",  "VELT", "Vel Track", 0),
@@ -136,7 +139,7 @@ FILTER2 = dict(
 # the filter envelope by its own amount. Each source has a balance between the two filters (0 = filter 1 only, the default; 127 = filter 2 only;
 # the middle is half and half, a straight crossfade as Serum's). Filter 2 runs only when a source reaches it. Set by the converter.
 VFILTER2 = dict(
-    type  = enum("flt2_type",  "V2TY", "Filter 2 Type", FILTER_TYPES, 1),
+    type  = enum("flt2_type",  "V2TY", "Filter 2 Type", FILTER_TYPES_V, 1),
     freq  = pot("flt2_freq",   "V2FQ", "Filter 2 Freq", 127),
     res   = pot("flt2_res",    "V2RS", "Filter 2 Res", 0),
     env   = pot("flt2_env",    "V2EN", "Filter 2 EG Amt", 64),
@@ -263,6 +266,10 @@ CONV = dict(
 )
 # Serum's Split / SplitMS: the stages named in Stages (HyperD 1, Distortion 2, Chorus / Flanger / Phaser 4, Width 32) work on one band only. Band 1 is the low band below Freq, 2 the high band
 # above it (a 4th-order Linkwitz-Riley crossover, measured: calibration/probe_split_band.py), 3 the Mid and 4 the Side of a SplitMS. Freq is 20 Hz .. 20 kHz (log). Off by default.
+CTUNE = dict(
+    f1 = num("flt_cfine",  "CTU1", "Filter Comb Tune", 0, 127, 64),
+    f2 = num("flt2_cfine", "CTU2", "Filter 2 Comb Tune", 0, 127, 64),
+)
 SPLITFX = dict(
     band  = enum("split_band",  "SPLB", "Split Band", ["Off", "Low", "High", "Mid", "Side"], 0),
     freq  = pot("split_freq",   "SPLF", "Split Freq", 64),
@@ -279,6 +286,22 @@ SAMPLE3 = dict(
     det   = pot("smp3_det",    "SMRD", "Sample 3 Detune", 0),
     spread = pot("smp3_spread", "SMRW", "Sample 3 Spread", 0),
 )
+
+# Serum's Granular oscillator as a mode of a sample slot (granular.h; measured laws in docs/GRANULAR_PROBE_NOTES.md). Density and Grain Length are Serum KNOB positions (pot = 127 x knob),
+# because a modulation route adds to the knob; Scan Rate is -200..200 %. Set by the converter; no page on the device.
+GRAN_WINDOWS = ["Tukey", "ExpDec", "Triangle", "BlackmanHarris", "Gaussian"]
+def _gran(slot, tag, name):
+    return dict(
+        kind  = enum(f"{slot}_kind",  f"GR{tag}K", f"{name} Kind", ["Sample", "Granular"], 0),
+        dens  = pot(f"{slot}_gdens",  f"GR{tag}D", f"{name} Grain Density", 32),
+        len   = pot(f"{slot}_glen",   f"GR{tag}L", f"{name} Grain Length", 64),
+        scan  = num(f"{slot}_gscan",  f"GR{tag}S", f"{name} Grain Scan", -200, 200, 100),
+        start = num(f"{slot}_gstart", f"GR{tag}T", f"{name} Grain Start", 0, 100, 0),
+        win   = enum(f"{slot}_gwin",  f"GR{tag}W", f"{name} Grain Window", GRAN_WINDOWS, 0),
+        winp  = num(f"{slot}_gwinp",  f"GR{tag}P", f"{name} Grain Window Param", 0, 100, 100),
+        skew  = num(f"{slot}_gskew",  f"GR{tag}X", f"{name} Grain Window Skew", -100, 100, 0),
+    )
+GRAN1, GRAN2, GRAN3 = _gran("smp", "A", "Sample"), _gran("smp2", "B", "Sample 2"), _gran("smp3", "C", "Sample 3")
 SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
     wave  = enum("sub_wave", "SUBW", "Sub Wave", SUB_WAVES, 0),
@@ -325,7 +348,9 @@ MOD_DST = ["None",
            "WT1 Bend", "WT2 Bend", "WT1 Formant", "WT2 Formant", "WT1 Pan", "WT2 Pan",
            "Filter Freq", "Filter Res", "Sub Level", "Noise Level", "Amp",
            # Appended, never inserted: presets store the INDEX.
-           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq", "Dist Wet", "Comp Wet"]
+           "WT3 Pos", "WT3 Level", "WT1 Sync", "WT2 Sync", "WT3 Sync", "Filter 2 Freq", "FX Filter Freq", "Dist Wet", "Comp Wet",
+           # Granular sample slots (granular.h): the knob of Density, Grain Length and Scan Rate, moved by an LFO / envelope route.
+           "Smp1 Density", "Smp1 Length", "Smp1 Scan", "Smp2 Density", "Smp2 Length", "Smp2 Scan", "Smp3 Density", "Smp3 Length", "Smp3 Scan"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -639,6 +664,10 @@ BANKS = [
     ("Conv", False, [row(CONV["set"], CONV["mix"])]),
     # After the Conv, for the same reason. Set by the converter; no page on the device.
     ("Split", False, [row(SPLITFX["band"], SPLITFX["freq"], SPLITFX["stages"])]),
+    # After the Split, for the same reason. The comb filters' tuning, in cents (64 = 0): a pot step of Freq is a semitone, far too coarse to tune a comb. Set by the converter.
+    ("CombTune", False, [row(CTUNE["f1"], CTUNE["f2"])]),
+    # After the CombTune, for the same reason. The granular mode of the three sample slots; set by the converter, no page on the device.
+    ("Granular", False, [row(*G.values()) for G in (GRAN1, GRAN2, GRAN3)]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -744,7 +773,7 @@ def chain_param(p):
 # exactly like the wavetable enums. A static entry would duplicate the key.
 # The LFO shapes, rates, modes and routes are hidden and only ever set by the converter or a preset load, so the host has
 # no use for them in chain_params (they would double its size); they stay in the param table, the state blob and set_param.
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|smp\d?_(kind|g[a-z]+)$)")
 chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"])]
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"

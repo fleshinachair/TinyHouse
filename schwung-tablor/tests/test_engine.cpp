@@ -1015,6 +1015,36 @@ static void testSampleVoicePlaysThrough()
     CHECK(rms(tail) > 0.5 * rms(head), "and so are blocks 500-600, a second and a half in (rms %.0f against %.0f)", rms(tail), rms(head));
 }
 
+/* A sample slot in its Granular kind (granular.h): audible through the voice, silent at Density 0, a spare-envelope route to Density wakes it, the Sample kind is untouched. */
+static void testGranularSlot()
+{
+    printf("\n== granular sample slot ==\n");
+    auto set = std::make_shared<SampleSet>();
+    SampleRegion r;
+    r.rate = 44100.0f; r.root = 60; r.frames = 44100 * 4;
+    r.pcm.resize((size_t) r.frames);
+    for (int i = 0; i < r.frames; i++) r.pcm[(size_t) i] = (int16_t) (12000.0 * std::sin(2.0 * M_PI * 261.63 * i / 44100.0));
+    set->regions.push_back(std::move(r));
+    auto base = [&](Engine &e) {
+        e.pots[TB_P_WT1_LEVEL] = 0; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_SMP_LEVEL] = 110; e.setSample(set);
+    };
+    double sampleRms = 0.0;
+    { Engine e; base(e); note(e, 60); sampleRms = rms(render(e, 300)); CHECK(sampleRms > 500.0, "the Sample kind still plays (rms %.0f)", sampleRms); }
+    { Engine e; base(e); e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GSTART] = 25; note(e, 60);
+      const double g = rms(render(e, 300)); CHECK(g > 500.0, "the Granular kind plays (rms %.0f)", g); }
+    { Engine e; base(e); e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GDENS] = 0; note(e, 60);
+      const double g = rms(render(e, 300)); CHECK(g < 1.0, "Density 0 is silence (rms %.1f)", g); }
+    { Engine e; base(e); e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GDENS] = 0; e.pots[TB_P_SMP_GSTART] = 25;
+      e.pots[TB_P_ME1_DST] = MD_SMP1_GDENS; e.pots[TB_P_ME1_AMT] = 100; e.pots[TB_P_ME1_A] = 0; e.pots[TB_P_ME1_S] = 127; note(e, 60);
+      const double g = rms(render(e, 300)); CHECK(g > 100.0, "an envelope route to Density wakes it (rms %.0f)", g); }
+    { Engine e; base(e); e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GSCAN] = 0; e.pots[TB_P_SMP_LEVEL] = 0; note(e, 60);
+      const double g = rms(render(e, 300)); CHECK(g < 1.0, "level 0 is silence (rms %.1f)", g); }
+    { Engine e; base(e); e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GSCAN] = 0; note(e, 60); render(e, 100);
+      const uint8_t off[] = { 0x80, 60, 0 }; e.onMidi(off, 3); render(e, 600);
+      CHECK(e.activeStreams() == 0, "a released note ends"); }
+}
+
 /* Macros: a macro pot moves its routed parameters by travel x change / 127 and leaves the rest; the preset's own values are where the macro sat when it loaded. */
 static void testMacros()
 {
@@ -1048,6 +1078,7 @@ int main()
     testMacros();
     testThirdOscillator();
     testSampleVoicePlaysThrough();
+    testGranularSlot();
     testDestinationOrder();
     testStreamBudget();
     testTuneRange();

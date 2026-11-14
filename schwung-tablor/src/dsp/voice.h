@@ -14,7 +14,9 @@
 #include "../ported/wt_oscillator.h"
 #include "../ported/analog_tables.h"
 #include "../ported/filter.h"
+#include "comb.h"
 #include "sample.h"
+#include "granular.h"
 #include "../ported/adsr.h"
 #include "param_map.h"
 #include "params.h"
@@ -68,6 +70,8 @@ enum ModDst {
     MD_FXF_FREQ,                 /* the effects block's Filter FX cutoff: read by the engine from the newest voice (fxfCutoffMod) */
     MD_DIST_WET,                 /* the effects block's Distortion Wet, as a fraction of its 0..100 % range: read by the engine from the newest voice (distWetMod) */
     MD_COMP_WET,                 /* the effects block's Comp Wet (its parallel mix), as a fraction of 0..100 %: read from the newest voice (compWetMod) */
+    /* A granular sample slot's Density, Grain Length and Scan Rate KNOBS (granular.h): the offset is added to the knob (0..1; Scan: 400 % of speed per unit), as Serum's routes do. */
+    MD_SMP1_GDENS, MD_SMP1_GLEN, MD_SMP1_GSCAN, MD_SMP2_GDENS, MD_SMP2_GLEN, MD_SMP2_GSCAN, MD_SMP3_GDENS, MD_SMP3_GLEN, MD_SMP3_GSCAN,
     MD_COUNT
 };
 
@@ -133,6 +137,10 @@ public:
         sub.setSampleRate(sr); noise.setSampleRate(sr);
         filter.setSampleRate(sr);
         filter2.setSampleRate(sr);
+        comb.setSampleRate(sr);
+        comb2.setSampleRate(sr);
+        phaser.setSampleRate(sr);
+        phaser2.setSampleRate(sr);
         noiseHp.setSampleRate(sr); noiseLp.setSampleRate(sr);
         filterADSR.setSampleRate(sr);
         adsr.setSampleRate(sr);
@@ -169,9 +177,7 @@ public:
         fastKill = false;
 
         for (int o = 0; o < kOscs; o++) { osc[o].setWavetable(c.table[o]); modOsc[o].setWavetable(c.table[o]); }
-        smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
-        smp2.start(c.sample2, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
-        smp3.start(c.sample3, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
+        startSamples(c, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
 
         const float *P = c.pots;
         const int glideMode = (int) P[TB_P_GLIDE_MODE];
@@ -189,6 +195,10 @@ public:
         fltPrev = -1.0f;
         filter2.reset();
         fltPrev2 = -1.0f;
+        comb.reset();
+        comb2.reset();
+        phaser.reset();
+        phaser2.reset();
         noiseHp.reset(); noiseLp.reset();
         noiseHpSet = noiseLpSet = 0.0f;
         filterADSR.reset();
@@ -225,9 +235,7 @@ public:
         const float *P = c.pots;
         midiNote = note;
         velocity = vel;
-        smp.start(c.sample, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
-        smp2.start(c.sample2, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
-        smp3.start(c.sample3, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
+        startSamples(c, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
         if (glissando || portamento) {
             noteSmoother.setTime(potGlideTime(P[TB_P_GLIDE]));
             noteSmoother.setValue((float) note / 127.0f);
@@ -244,13 +252,27 @@ public:
         }
     }
 
+    /* A sample slot is either the SamplePlayer or, in its Granular kind, a GrainCloud on the same set; only one of the two is on. */
+    void startSamples(const VoiceContext &c, int note, int vel)
+    {
+        const float *P = c.pots;
+        const auto one = [&](SamplePlayer &sp, GrainCloud &gc, const std::shared_ptr<const SampleSet> &set, int kindParam) {
+            if (P[kindParam] >= 0.5f) { sp.release(); gc.start(set, note, vel); }
+            else { gc.release(); sp.start(set, note, vel); }
+        };
+        one(smp, gran, c.sample, TB_P_SMP_KIND);
+        one(smp2, gran2, c.sample2, TB_P_SMP2_KIND);
+        one(smp3, gran3, c.sample3, TB_P_SMP3_KIND);
+    }
+    void releaseSamples() { smp.release(); smp2.release(); smp3.release(); gran.release(); gran2.release(); gran3.release(); }
+
     void stop(bool allowTail)
     {
         adsr.noteOff();
         filterADSR.noteOff();
         for (auto &e : modEnv) e.noteOff();
         if (!allowTail) {
-            active = false; smp.release(); smp2.release(); smp3.release();
+            active = false; releaseSamples();
         }
     }
 
@@ -337,14 +359,19 @@ public:
          * here (the oscillator as a single voice: its table, position, pitch, sync and bend, none of its own warps); the audible Sub, if any, is its signal scaled, so
          * the two stay in step. */
         float subSig[kBlock], oscSig[kOscs][kBlock];
-        const float *srcs[4] = { nullptr, nullptr, nullptr, nullptr };
-        bool needSrc[4] = { false, false, false, false };
+        const float *srcs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+        bool needSrc[5] = { false, false, false, false, false };
         for (int o = 0; o < kOscs; o++) {
             if (!(oscGain[o] > 0.0f)) continue;
-            if (vp[o].xwarp >= 3 && vp[o].xamount > 0.0f) needSrc[vp[o].xsrc] = true;
-            if (vp[o].xwarp2 >= 3 && vp[o].xamount2 > 0.0f) needSrc[vp[o].xsrc2] = true;
+            if (vp[o].xwarp >= 3 && vp[o].xwarp <= 6 && vp[o].xamount > 0.0f) needSrc[vp[o].xsrc] = true;
+            if (vp[o].xwarp2 >= 3 && vp[o].xwarp2 <= 6 && vp[o].xamount2 > 0.0f) needSrc[vp[o].xsrc2] = true;
         }
         const bool subSigOn = needSrc[0];
+        float noiseSig[kBlock];
+        if (needSrc[4]) {                                          /* the Noise as a modulator: white, unit standard deviation, whatever the Noise level (Serum's noise warps work at level 0) */
+            for (int i = 0; i < n; i++) noiseSig[i] = modNoise.next();
+            srcs[4] = noiseSig;
+        }
         if (subSigOn) {
             float unusedR[kBlock] = {};
             for (int i = 0; i < n; i++) subSig[i] = 0.0f;
@@ -398,6 +425,24 @@ public:
             addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smp3.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, std::min((int) P[TB_P_SMP3_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP3_DET]), pot01(P[TB_P_SMP3_SPREAD])); });
         }
 
+        /* The granular kind of each sample slot (granular.h): Density / Grain Length are knobs that a route adds to, Scan Rate is a percent (a route of a adds 4a). */
+        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens) {
+            if (!gc.on || !(P[levelP] > 0.0f)) return;
+            const float knob = pot01(P[levelP]);
+            const bool fixedPitch = P[fixedP] >= 0.5f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - gc.r->root) + c.pitchBendSemis) + P[tuneP] + P[fineP] / 100.0f;
+            GrainParams gp;
+            gp.kd = std::clamp(pot01(P[densP]) + modOff[mDens], 0.0f, 1.0f);
+            gp.lenSeconds = grainLengthSeconds(pot01(P[lenP]) + modOff[mDens + 1]);
+            gp.scanPct = P[scanP] + 400.0f * modOff[mDens + 2];
+            gp.start = P[startP] * 0.01f;
+            gp.winShape = (int) P[winP]; gp.winParam = P[winpP]; gp.winSkew = P[skewP];
+            addSource(P[postP], balP, busP, [&](float *l, float *r) { gc.processAdding(gp, semis, knob * knob, (float) sampleRate, l, r, n); });
+        };
+        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS);
+        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS);
+        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS);
+
         /* velocity */
         float vgain = (P[TB_P_VCA_VLAW] >= 0.5f ? velocityToGainSerum(velocity, ampVelTrack) : velocityToGain(velocity, ampVelTrack)) * ampModGain;
         for (int i = 0; i < n; i++) {
@@ -435,7 +480,9 @@ public:
         auto runF2 = [&]() {
             const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
             if (driving2) driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget);
-            runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
+            if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
+            else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
+            else runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
             if (driving2) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
             if (P[TB_P_FLT2_GAIN] > 0.0f) {
                 const float g = std::pow(10.0f, P[TB_P_FLT2_GAIN] / 127.0f * 24.0f / 20.0f);
@@ -449,7 +496,9 @@ public:
         }
         const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
         if (driving) driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget);
-        runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
+        if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
+        else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
+        else runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
         if (driving) driveOut(preL, preR, n, driveMix, driveMixTarget);
         if (P[TB_P_FLT_GAIN] > 0.0f) {                                  /* Serum's filter Drive as the gain it is */
             const float g = std::pow(10.0f, P[TB_P_FLT_GAIN] / 127.0f * 24.0f / 20.0f);
@@ -498,7 +547,7 @@ public:
         }
 
         if (adsr.getState() == AnalogADSR::State::idle) {
-            active = false; smp.release(); smp2.release(); smp3.release();
+            active = false; releaseSamples();
         }
 
         for (int i = 0; i < n; i++) {
@@ -651,15 +700,18 @@ private:
             v.formant  = k.form < 0 ? 0.0f
                        : std::clamp(potBipolar(P[k.form]) + modOff[k.dFrm], -1.0f, 1.0f);
             /* a Dist* oscillator warp: the shaper's pre-gain 0.02..300 and output gain 0.5..60, both log over the 0..127 pot */
-            v.shape = std::clamp((int) P[k.shape], 0, 4);
+            v.shape = std::clamp((int) P[k.shape], 0, 5);
             v.shapeGain = 0.02f * std::pow(15000.0f, P[k.sgain] / 127.0f);
             v.shapeOut = 0.5f * std::pow(120.0f, P[k.sout] / 127.0f);
-            v.xwarp = std::clamp((int) P[k.xw], 0, 6);                   /* Serum's filter / FM / PD / RM / AM warps (wt_oscillator.h), the amount in thousandths */
+            /* shape 5: a measured Serum waveshaper (warp_curves.h) - Gain is its index, Out its amount over 0..127 */
+            v.curveMode = std::clamp((int) P[k.sgain], 0, 63);
+            v.curveAmt = std::clamp(P[k.sout] / 127.0f, 0.0f, 1.0f);
+            v.xwarp = std::clamp((int) P[k.xw], 0, 7);                   /* Serum's filter / FM / PD / RM / AM warps (wt_oscillator.h), the amount in thousandths */
             v.xamount = std::clamp(P[k.xa] * 0.001f, 0.0f, 1.0f);
-            v.xsrc = std::clamp((int) P[k.xs], 0, 3);
-            v.xwarp2 = std::clamp((int) P[k.xw2], 0, 6);
+            v.xsrc = std::clamp((int) P[k.xs], 0, 4);
+            v.xwarp2 = std::clamp((int) P[k.xw2], 0, 7);
             v.xamount2 = std::clamp(P[k.xa2] * 0.001f, 0.0f, 1.0f);
-            v.xsrc2 = std::clamp((int) P[k.xs2], 0, 3);
+            v.xsrc2 = std::clamp((int) P[k.xs2], 0, 4);
             oscGain[o] = v.gain;
 
             /* An oscillator counts from its pot and its routing, not its live
@@ -744,9 +796,12 @@ private:
             n += env * sens * potBipolar(P[TB_P_FLT_ENV]) * filterWidth;
             n += modOff[MD_FLT_FREQ] * filterWidth;
 
+            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 15);
+            combType = ft >= 8 ? ft - 7 : 0;                                  /* 1 Comb +, 2 Comb -, 3 Flange +, 4 Flange - */
+            if (combType) n += (P[TB_P_FLT_CFINE] - 64.0f) * 0.01f;              /* a comb is tuned in cents */
             float f = midiNoteToHz(n);
             float maxFreq = std::min(20000.0f, (float) (sampleRate / 2.0));
-            f = std::clamp(f, 4.0f, maxFreq);
+            f = std::clamp(f, combType ? 3.0f : 4.0f, maxFreq);
 
             float res = std::clamp(pot01(P[TB_P_FLT_RES]) + modOff[MD_FLT_RES],
                                    0.0f, 1.0f);
@@ -755,7 +810,8 @@ private:
             static const Filter::Type kTypes[8] = {
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
                 Filter::bandpass, Filter::bandpass, Filter::notch, Filter::notch };
-            int t = (int) P[TB_P_FLT_TYPE] & 7;
+            combRes = res;
+            int t = ft >= 8 ? 1 : ft & 7;
             filter.setType(kTypes[t]);
             filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
             fltTarget = f; fltQ = q;           /* applied in steps across the block (see runFilter) */
@@ -766,9 +822,13 @@ private:
             n2 += ((float) midiNote - 60.0f) * pot01(P[TB_P_FLT2_KEY]);
             n2 += env * sens * potBipolar(P[TB_P_FLT2_ENV]) * filterWidth;
             n2 += modOff[MD_FLT2_FREQ] * filterWidth;
-            fltTarget2 = std::clamp(midiNoteToHz(n2), 4.0f, maxFreq);
+            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 15);
+            combType2 = ft2 >= 8 ? ft2 - 7 : 0;
+            if (combType2) n2 += (P[TB_P_FLT2_CFINE] - 64.0f) * 0.01f;
+            fltTarget2 = std::clamp(midiNoteToHz(n2), combType2 ? 3.0f : 4.0f, maxFreq);
+            combRes2 = std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f);
             fltQ2 = kFilterQ / (1.0f - std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f) * 0.99f);
-            const int t2 = (int) P[TB_P_FLT2_TYPE] & 7;
+            const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
             filter2.setType(kTypes[t2]);
             filter2.setSlope((t2 & 1) ? Filter::db24 : Filter::db12);
         }
@@ -801,6 +861,7 @@ private:
     VoicedWTParams vp[kOscs];
     VoicedWTOscillator modOsc[kOscs] = { VoicedWTOscillator(1), VoicedWTOscillator(1), VoicedWTOscillator(1) };     /* the oscillators as FM / PD / RM / AM modulators */
     StereoOscillator sub, noise;
+    FastGauss modNoise { 1.0f };                               /* the Noise as the modulator of an FM / PD / RM warp */
     StereoOscillator::Params subParams, noiseParams;
     /* The filter's cutoff moves with the envelope and the LFOs, and the coefficients were set once per block: a step at each block edge,
      * which at a low cutoff on a loud low note is a click (a one-sample spike at the first block edge of a note, and at every edge while the
@@ -846,8 +907,13 @@ private:
     float drive2Gain = 1.0f, drive2Mix = 0.0f, drive2GainTarget = 1.0f, drive2MixTarget = 0.0f;
 
     Filter filter, filter2, noiseHp, noiseLp;
+    CombFilter comb, comb2;                       /* the comb / flange / phaser filter types (comb.h); 0 = the biquad is used, 1..4 = Comb +, Comb -, Flange +, Flange -, 5..8 = Phase 12..48 + */
+    PhaserFilter phaser, phaser2;
+    int combType = 0, combType2 = 0;
+    float combRes = 0.0f, combRes2 = 0.0f;
     float noiseHpHz = 0.0f, noiseHpSet = 0.0f, noiseLpHz = 0.0f, noiseLpSet = 0.0f, noisePan = 0.0f;
     SamplePlayer smp, smp2, smp3;
+    GrainCloud gran, gran2, gran3;      /* the same slots in their Granular kind */
     AnalogADSR filterADSR, adsr;
     AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */

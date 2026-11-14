@@ -262,7 +262,9 @@ def physical(tree: dict, header: dict) -> dict:
             "id": i,
             "enabled": bool(p.get("kParamEnable", 1.0 if i == 0 else 0.0)),
             "kind": kind,
-            "sample": SE.sample_osc(tree, i),                      # a Sample / Multisample oscillator's file and settings (sample_export.py)
+            "sample": SE.sample_osc(tree, i) or SE.granular_osc(tree, i),      # a Sample / Multisample oscillator's file and settings, or a Granular one's file (sample_export.py)
+            "gran": ({"osc": p, "gran": _pp(tree.get(f"Oscillator{i}", {}).get(f"GranularOsc{i}", {})), "node": {k: v for k, v in tree.get(f"Oscillator{i}", {}).get(f"GranularOsc{i}", {}).items() if k in ("gain", "trimHead", "edgeFadeMs", "baseDetune")}}
+                     if kind == "kOsc_Granular" else None),          # the grain settings, read by granular_pots
             "level": p.get("kParamVolume", DEFAULTS["osc_level"]),
             "octave": p.get("kParamOctave", 0.0),
             "semitone": p.get("kParamPitch", p.get("kParamCoarsePit", 0.0)),
@@ -554,7 +556,8 @@ def noise_type_for(sample: str | None) -> tuple[int, str | None]:
 
 ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune": 5, "WT2 Tune": 6, "WT1 Pan": 11, "WT2 Pan": 12,
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
-          "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26}
+          "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
+          "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35}
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -595,7 +598,10 @@ CAL = {
 }
 SUB_WAVE = {"kSine": 0, "kTriangle": 1, "kSaw": 2, "kSquare": 3, "kRoundRect": 0, "kPulse": 4}
 # Serum filter model -> (Tablor flt_type index, exact?)
+# Serum's comb and flanger models are the engine's own filter types 8..11 (comb.h; laws measured on noise in calibration/probe_comb.py, the Comb2 / Combs / L6 / H6 / Dist / Phase variants are not carried)
+COMB_MODELS = {"CombP": 8, "CombN": 9, "FlangeP": 10, "FlangeN": 11, "Phase12P": 12, "Phase24P": 13, "Phase36P": 14, "Phase48P": 15}
 FILTER_MAP = {
+    **{m: (i, True) for m, i in COMB_MODELS.items()},
     "MgL24": (1, True), "L24": (1, True),
     "MgL18": (1, False), "L18": (1, False), "DirtyMg": (1, False), "LadderAcid": (1, False), "ZDF_A": (1, False),
     "MgL12": (0, False), "L12": (0, True), "MgL6": (0, False), "L6": (0, False),
@@ -670,18 +676,26 @@ FILTER_DRIVE_MAKEUP_DB = [(0.0, 0.0), (10.0, 2.8), (25.0, 5.7), (50.0, 10.6), (7
 # Serum's drive makes no harmonics on a saw at 50-100 % (every harmonic moves by the same dB), so the engine's saturating pot stops at its 25 % value.
 FILTER_DRIVE_POT_USED = [(0.0, 0.0), (10.0, 4.0), (25.0, 8.0), (100.0, 8.0)]
 BEND_POT = [(0.0, 64.0), (0.03, 65.0), (0.12, 65.0), (0.2, 66.0), (0.3, 67.0), (0.4, 70.0), (0.5, 74.0), (0.7, 86.0), (0.85, 100.0), (1.0, 116.0)]
-BEND_WARPS = {"kBendPos": +1, "kBendPosNeg": +1, "kBendNeg": -1, "kASYMPos": +1, "kPWM": +1}
+BEND_WARPS = {"kBendPos": +1, "kBendNeg": -1, "kASYMPos": +1, "kASYMNeg": -1, "kPWM": +1}
+# The "PosNeg" warps are one bipolar knob (calibration/probe_warp_phase.py: BendPosNeg 0.25 is BendPos 0.5 to the sample, 0.75 is BendNeg 0.5, 0.5 is the table as it is; the same for ASYMPosNeg):
+# below the middle the Pos warp at 2 (0.5 - a), above it the Neg warp at 2 (a - 0.5).
+BIPOLAR_WARPS = {"kBendPosNeg": ("kBendPos", "kBendNeg"), "kASYMPosNeg": ("kASYMPos", "kASYMNeg")}
 # Serum's PWM warp on a saw (calibration/probe_pwm.py): the harmonics 2..9 match the engine's Bend at these pots to within 1-2.5 dB (amount 0.2: pot 90 or 38,
 # 0.4: 104 or 24, 0.6: 122 or 6; 0.8 is beyond the engine's range). A pulse-width warp and a bend are both an asymmetric phase map; the phases differ, the magnitudes do not.
 # Serum's Sync warp on a saw (calibration/probe_sync.py): the engine's sync pot whose harmonics are closest, 0.2 to 0.7 within 0.3-2.2 dB. Amounts under 0.15 are no sync.
 SYNC_POT = [(0.0, 0.0), (0.15, 0.0), (0.2, 6.0), (0.3, 20.0), (0.4, 44.0), (0.5, 64.0), (0.6, 88.0), (0.7, 108.0), (0.8, 124.0), (1.0, 127.0)]
 PWM_BEND_POT = [(0.0, 64.0), (0.2, 90.0), (0.4, 104.0), (0.6, 122.0), (0.8, 127.0), (1.0, 127.0)]
 WARP_NOISE_FLOOR = 0.02    # a warp mode with ~0 amount is not audible
+# Warps whose modulator is a noise or a filter do nothing up to an amount, then switch on (calibration/probe_warp_noise.py, probe_warp_filt.py: the carrier of a sine is within 0.3 dB and the
+# skirt under -17 dB up to there): FM / FMX from the Noise 0.45 (carrier -1.1 dB at 0.5, -10 dB at 0.6), PD from the Noise 0.55 (-0.25 dB at 0.6, -14 dB at 0.8), FM from Filter 1 0.16.
+WARP_DEADZONE = {"kFM_NOISE": 0.45, "kFMX_NOISE": 0.45, "kPD_NOISE": 0.55, "kFM_FILT1": 0.16}
 # Serum's Filter LP / HP warps and its FM / PD / RM warps from the Sub, which the engine carries as one more warp per oscillator (wtN_xw, wtN_xa = Serum's amount in
 # thousandths; the laws are in wt_oscillator.h: calibration/probe_filterwarp.py, probe_warp_fm.py). One per oscillator: a second one stays unsupported.
-XWARP_MODES = {"kFilterLPF": 1, "kFilterHPF": 2, "kFM_SUB": 3, "kPD_SUB": 4, "kRM_SUB": 5}
+XWARP_MODES = {"kFilterLPF": 1, "kFilterHPF": 2, "kFM_SUB": 3, "kPD_SUB": 4, "kRM_SUB": 5, "kSelfPD": 7}
+SELFPD_LIMIT = 0.4          # SelfPD is the implicit y = x(p + z y), z = 0.62 a^2 cycles: fitted to a sine to 0.01 rms up to there (out/scratch/fit_selfpd.py), not beyond
 # The same warps with another oscillator as the modulator (calibration/probe_warp_osc.py): the menu's "Osc" is the first of the other two oscillators (A for B and C, B for A),
 # "Osc 2" the second (C for A and B, B for C); a modulator that is switched off gives no modulation at all. PD_OSC was a Bend stand-in before this. {mode: (warp kind, which of the other two)}; the engine's xs value is that oscillator's index + 1. AM (kind 6) is the Osc-only one.
+XWARP_NOISE_MODES = {"kFM_NOISE": 3, "kFMX_NOISE": 3, "kPD_NOISE": 4, "kRM_NOISE": 5}     # driven by the Noise: engine source 4 (calibration/probe_noise_warp_law.py)
 XWARP_OSC_MODES = {"kPD_OSC": (4, 0), "kFM_OSC": (3, 0), "kFM_OSC2": (3, 1), "kPD_OSC2": (4, 1), "kRM_OSC": (5, 0), "kRM_OSC2": (5, 1), "kAM_OSC": (6, 0), "kAM_OSC2": (6, 1)}
 WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves.json"
 
@@ -689,6 +703,20 @@ WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves
 def WARP_SHAPERS() -> dict:
     """Serum's Dist* oscillator warps the engine can shape (calibration/warp_dist_curves.json: curve family, pre-gain G and output gain K per amount)."""
     return json.loads(WARP_DIST_FILE.read_text(encoding="utf-8"))
+
+
+WARP_CURVE_FILE = Path(__file__).resolve().parent / "calibration/warp_curve_modes.json"
+
+
+def WARP_CURVES() -> dict:
+    """Serum's static waveshaper warps the engine carries as measured transfer curves (wtN_wshape 5; schwung-tablor/tools/gen_warp_curves.py from calibration/probe_warp_curves.py):
+    the mode order (= the engine's curve index), the largest amount each was measured to follow Serum (10 % rms on a second waveform) and the amount up to which it is the identity."""
+    return json.loads(WARP_CURVE_FILE.read_text(encoding="utf-8"))
+
+
+def warp_curve_pots(k: str, mode: str, amount: float) -> dict:
+    """wtN_wshape 5 with the curve's index in wtN_sgain and Serum's amount over 0..127 in wtN_sout (voice.h)."""
+    return {f"{k}_wshape": 5, f"{k}_sgain": WARP_CURVES()["modes"].index(mode), f"{k}_sout": int(round(_clamp(amount, 0.0, 1.0) * 127))}
 
 
 def warp_shaper_pots(k: str, mode: str, amount: float) -> dict:
@@ -1030,6 +1058,69 @@ def reverse_table(move_path: str, wt_out: Path) -> str | None:
     return move_path[:len(move_path) - len(src.name)] + dest.name
 
 
+EVENODD_TOLERANCE = 0.01   # Serum's Even/Odd warp is y(p) = x(p) + (2 a - 1) x(p + 1/2) (calibration/probe_evenodd.py: exact on two tables, every amount 0..1); at 0.5 it is the table as it is
+LTI_WARPS = ("kFilterLPF", "kFilterHPF", "kFlip", "kEvenOdd")   # a warp that is a filter or a time shift of the whole cycle commutes with the half-cycle mix, so the baked table may come before it
+
+
+def evenodd_table(move_path: str, amount: float, wt_out: Path) -> str | None:
+    """A copy of a mono wavetable (float32 or 16-bit) with Even/Odd baked in: every frame x becomes x(p) + (2 a - 1) x(p + 1/2) (half a frame later), written as float32 with the
+    other chunks kept (the sum can reach twice full scale), the amount in whole percent in the name. It is linear, so it holds at every table position (frames interpolate); a table
+    without a frame size (`clm ` chunk), a stereo one or any other format gives None."""
+    from array import array
+    if not move_path.startswith(MOVE_WT_ROOT + "/"):
+        return None
+    src = wt_out / move_path[len(MOVE_WT_ROOT) + 1:]
+    if not src.is_file():
+        return None
+    raw = src.read_bytes()
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        return None
+    pos, tag, bits, chans, frame, chunks = 12, 0, 0, 0, 0, []
+    while pos + 8 <= len(raw):
+        cid, size = raw[pos:pos + 4], struct.unpack("<I", raw[pos + 4:pos + 8])[0]
+        body = raw[pos + 8:pos + 8 + size]
+        if cid == b"fmt " and len(body) >= 16:
+            tag, chans, _, _, _, bits = struct.unpack("<HHIIHH", body[:16])
+        elif cid == b"clm ":
+            m = re.match(rb"<!>(\d+)", body)
+            frame = int(m.group(1)) if m else 0
+        chunks.append([cid, body])
+        pos += 8 + size + (size & 1)
+    data = next((c for c in chunks if c[0] == b"data"), None)
+    fmt = next((c for c in chunks if c[0] == b"fmt "), None)
+    if not (chans == 1 and 32 <= frame <= 4096 and frame % 2 == 0 and data and fmt and (tag, bits) in ((3, 32), (1, 16))):
+        return None
+    if (tag, bits) == (3, 32):
+        x = array("f")
+        x.frombytes(data[1][:len(data[1]) // 4 * 4])
+        if sys.byteorder == "big":
+            x.byteswap()
+    else:
+        h = array("h")
+        h.frombytes(data[1][:len(data[1]) // 2 * 2])
+        if sys.byteorder == "big":
+            h.byteswap()
+        x = array("f", (v / 32768.0 for v in h))
+    n = len(x) // frame * frame
+    c, half = 2.0 * amount - 1.0, frame // 2
+    y = array("f", bytes(4 * n))
+    for f0 in range(0, n, frame):
+        for i in range(frame):
+            y[f0 + i] = x[f0 + i] + c * x[f0 + (i + half) % frame]
+    if sys.byteorder == "big":
+        y.byteswap()
+    rate = struct.unpack("<I", fmt[1][4:8])[0]
+    fmt[1] = struct.pack("<HHIIHH", 3, 1, rate, rate * 4, 4, 32) + fmt[1][16:]
+    data[1] = y.tobytes()
+    # the engine's loader normalises a table to its own peak: the mix can reach twice that, so a "tbpk" chunk tells it the peak of the table this was made from
+    chunks = [c for c in chunks if c[0] != b"tbpk"] + [[b"tbpk", struct.pack("<f", max(abs(v) for v in x) or 1.0)]]
+    body = b"WAVE" + b"".join(cid + struct.pack("<I", len(bd)) + bd + (b"\x00" if len(bd) & 1 else b"") for cid, bd in chunks)
+    dest = src.with_name(f"{src.stem}_eo{int(round(amount * 100)):03d}{src.suffix}")
+    if not dest.exists():
+        dest.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    return move_path[:len(move_path) - len(src.name)] + dest.name
+
+
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 # A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
@@ -1066,6 +1157,63 @@ def lfo_sync_hz(rate: float, triplets: bool) -> float | None:
 
 LFO_SCALES = Path(__file__).resolve().parent / "calibration/lfo_scales.json"
 LFO_SCALE: dict = json.loads(LFO_SCALES.read_text(encoding="utf-8")) if LFO_SCALES.exists() else {}
+
+
+# ---------------------------------------------------------------------------
+# Serum's Granular oscillator (docs/GRANULAR_PROBE_NOTES.md, docs/GRANULAR_DESIGN.md): a mode of the engine's sample slots. Density and Grain Length are held as Serum's KNOB
+# positions k (plain Density = 1000 k^4, Free-mode length = 10 k^4 seconds), so a route adds to k. Scan Rate is -200..200 % and a route of a adds 400 a %, Start 0..100 %.
+GRAN_ROUTE_KEYS = {("GranularOsc", "kParamDensity"), ("GranularOsc", "kParamGrainLength"), ("Oscillator", "kParamScanRate")}
+GRAN_ROUTE_NAME = {"kParamDensity": "Density", "kParamGrainLength": "Length", "kParamScanRate": "Scan"}      # the engine's destination names are "Smp<slot> <name>"
+GRAN_WINDOW = {"kWindowTukey": 0, "kWindowExpDec": 1, "kWindowTriangle": 2, "kWindowBlackmanHarris": 3, "kWindowGaussian": 4}
+GRAN_DENSITY_KNOB, GRAN_LENGTH_KNOB = 0.25, 0.5          # Serum's defaults when the preset does not store them (Density 3.9, Length 0.625 s)
+# The settings the engine does not carry yet, each a sound gap until its probe (name in the message, then the keys). The probe numbers are in docs/GRANULAR_DESIGN.md section 6.
+GRAN_OSC_GAPS = (("loop settings (P4)", ("kParamLoopMode", "kParamLoopStart", "kParamLoopEnd", "kParamLoopCrossfade", "kParamLoopStartLink")),
+                 ("scan range / position / reverse (P4)", ("kParamEnd", "kParamScanRange", "kParamManualPositionMode", "kParamPosition", "kParamReverse")),
+                 ("random start (P5)", ("kParamRandomStart",)),
+                 ("tempo-synced scan (P4)", ("kParamScanBPMDivide", "kParamScanBPMRate", "kParamScanTempoLock", "kParamBaseTempo")),
+                 ("key / velocity zone", ("kParamKeyZoneMin", "kParamKeyZoneMax", "kParamVelocityZoneMin", "kParamVelocityZoneMax")))
+
+
+def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, list, list]:
+    """(engine params, sound gaps, approximations) for one Granular oscillator carried in sample slot `sk` ("smp", "smp2", "smp3"). g is physical()'s "gran" record, oid the
+    oscillator's id, fold the static route offsets (a macro, wheel, velocity or note route into a knob is added to it at its saved value; fractions of the knob's range)."""
+    osc, gr, node = g["osc"], g["gran"], g["node"]
+    gaps, appr = [], []
+    kd = (max(float(gr["kParamDensity"]), 0.0) / 1000.0) ** 0.25 if "kParamDensity" in gr else GRAN_DENSITY_KNOB      # a stored 0 stays 0: silent, as in Serum (unless a route lifts it)
+    kd = _clamp(kd + fold[("GranularOsc", "kParamDensity", oid)], 0.0, 1.0)
+    kl = (max(float(gr["kParamGrainLength"]), 0.0) / 10.0) ** 0.25 if "kParamGrainLength" in gr else GRAN_LENGTH_KNOB
+    kl = _clamp(kl + fold[("GranularOsc", "kParamGrainLength", oid)], 0.0, 1.0)
+    scan = _clamp(float(osc.get("kParamScanRate", 100.0)) + 400.0 * fold[("Oscillator", "kParamScanRate", oid)], -200.0, 200.0)
+    start = _clamp(float(osc.get("kParamStart", 0.0)) + 100.0 * fold[("Oscillator", "kParamStart", oid)], 0.0, 100.0)
+    shape = gr.get("kParamWindowShape", "kWindowTukey")
+    if shape not in GRAN_WINDOW:
+        gaps.append(f"window {shape[7:]}")
+    pots = {f"{sk}_kind": 1, f"{sk}_gdens": round(127.0 * kd, 2), f"{sk}_glen": round(127.0 * kl, 2), f"{sk}_gscan": round(scan, 2), f"{sk}_gstart": round(start, 2),
+            f"{sk}_gwin": GRAN_WINDOW.get(shape, 0), f"{sk}_gwinp": round(_clamp(float(gr.get("kParamWindowParam", 100.0)), 0.0, 100.0), 2),
+            f"{sk}_gskew": round(_clamp(float(gr.get("kParamWindowSkew", 0.0)), -100.0, 100.0), 2)}
+    if osc.get("kParamPitchTrack", 1.0) == 0.0:
+        pots[f"{sk}_fixed"] = 1                           # the pitch does not follow the key
+    for label, keys in GRAN_OSC_GAPS:
+        if any(k in osc for k in keys):
+            gaps.append(label)
+    if gr.get("kParamLengthMode") == "kLengthBPM":
+        gaps.append("tempo-synced grain length (P9)")
+    if gr.get("kParamDensityMode") == "kDensityBPM":
+        gaps.append("tempo-synced density (P9)")
+    rnd = [k[12:] for k, v in gr.items() if k.startswith("kParamRandom") and isinstance(v, (int, float)) and v > 0]
+    if rnd:
+        gaps.append("Random " + " / ".join(rnd) + " (P5)")
+    if gr.get("kParamWarpMenu") or gr.get("kParamWarpMenu2"):
+        gaps.append("warp on the grains (P8)")
+    if unison > 1:
+        gaps.append(f"unison {unison} (P7)")
+    if abs(float(osc.get("kParamPan", 0.0))) >= 10.0:
+        gaps.append("pan (P11)")
+    if "gain" in node or "trimHead" in node:
+        gaps.append("sample gain / trim")
+    if "edgeFadeMs" in node or "baseDetune" in node:
+        appr.append("the sample's edge fade / base detune is not carried")
+    return pots, gaps, appr
 
 
 def lfo_class(dest_name: str) -> str:
@@ -1133,10 +1281,12 @@ def lfo_shape_pots(l: dict) -> list:
     return [round(127 * curve_value(xs, ys, cs, k / (15 if one_shot else 16))) for k in range(16)]
 
 
-def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list) -> list:
-    """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried."""
+def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list, gslot: dict | None = None) -> list:
+    """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried. gslot: Serum id of a carried Granular oscillator -> sample slot."""
     def dest(key):
         slot = slot_of.get(key[2])
+        if key[:2] in GRAN_ROUTE_KEYS and gslot and key[2] in gslot:        # a Granular oscillator's Density / Grain Length / Scan Rate: whole-knob depth (a route of a adds a to the knob; Scan 4a x 100 %, the engine's 400 x offset)
+            return f"Smp{gslot[key[2]]} {GRAN_ROUTE_NAME[key[1]]}", 1.0
         if key[0] == "FXFilter" and key[1] == "kParamFreq":              # the effects block's Filter FX (fxmap.dynamic_filter): same cutoff units as the voice filter
             return "FX Filter Freq", CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "FXDistortion" and key[1] == "kParamWet":           # the effects block's Distortion Wet (fxmap.dist_dynamic): Serum's route moves the Wet knob, 1.0 x the depth
@@ -1394,6 +1544,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             mod_wheel_idle += 1
         elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/probe_venv.py)
             routes.append((src - 2, key, a))
+            if m.get("bipolar") and key[:2] in GRAN_ROUTE_KEYS:
+                fold[key] += a * -0.5                     # the same rule for a granular knob: the engine's route adds the envelope x depth, a bipolar Serum route the envelope minus a half
             if m.get("bipolar") and key == ("VoiceFilter", "kParamFreq", 0):
                 # A bipolar route is the source minus one half, so once the envelope has fallen the cutoff sits half the depth below the stored one and the
                 # engine's unipolar envelope only gets the depth: fold the offset into the base (Lead - Let It Go: Env2 -> cutoff +17 % bipolar, sustain 0)
@@ -1442,6 +1594,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             smps.append((o, got[0], got[1]))
             if len(smps) == 3:
                 break
+    gslot = {s_[0]["id"]: n for n, s_ in enumerate(smps, 1) if s_[0].get("gran")}         # Serum id of each carried Granular oscillator -> the engine's sample slot (1..3)
     if not smps and ph["noise"].get("click") and ph["noise"].get("sample"):
         # a one-shot click or hit in the noise slot (a kick attack): the sample oscillator plays it once, at its own pitch
         nz0 = ph["noise"]
@@ -1455,7 +1608,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             continue                                   # an oscillator that is on but silent adds nothing
         crit.append(f"osc {'ABC'[o['id']]} is a {o['kind'][5:]} oscillator (Tablor has three sample oscillators and no other kind)")
     def bent(o):
-        return any(w["mode"] in BEND_WARPS and w["amount"] >= WARP_NOISE_FLOOR for w in o["warp"])
+        return any((w["mode"] in BEND_WARPS and w["amount"] >= WARP_NOISE_FLOOR) or (w["mode"] in BIPOLAR_WARPS and abs(1.0 - 2.0 * w["amount"]) >= WARP_NOISE_FLOOR) for w in o["warp"])
 
     wt_oscs.sort(key=lambda o: -eff_level(o))
     keep = wt_oscs[:3]                     # Serum has three wavetable oscs, so did the fork
@@ -1501,26 +1654,53 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                             if P[f"{k}_uni"] > 1 else 0)
         P[f"{k}_pan"] = round(_clamp(64 + 63 * o["pan"] / 100, 0, 127))
         flip_rev = None                   # the Flip warp at 0.5: the table is read backwards (reverse_table, once the table's path is known)
+        eo_bake = None                    # the Even/Odd warp: baked into a copy of the table (evenodd_table)
+        curves = WARP_CURVES()
         for wi, w in enumerate(o["warp"]):
+            if w["mode"] in BIPOLAR_WARPS:
+                w = {**w, "mode": BIPOLAR_WARPS[w["mode"]][0 if w["amount"] < 0.5 else 1], "amount": abs(1.0 - 2.0 * w["amount"])}
             if w["mode"] == "kFlip" and w["amount"] >= 1 - FLIP_TOLERANCE:
                 continue                  # Flip at its end is the table as it is
-            if w["amount"] < WARP_NOISE_FLOOR:
+            if w["mode"] in WARP_DEADZONE and WARP_NOISE_FLOOR <= w["amount"] <= WARP_DEADZONE[w["mode"]]:
+                appr.append(f"{k} warp {w['mode'][1:]} at {w['amount']:.2f} left out (Serum's effect there is below -17 dB: measured, the carrier is unchanged to 0.3 dB)")
                 continue
+            if w["mode"] in curves["modes"]:
+                if curves["noop_below"].get(w["mode"]) is not None and w["amount"] <= curves["noop_below"][w["mode"]]:
+                    continue              # the measured curve is the identity there
+            elif w["mode"] != "kEvenOdd" and w["amount"] < WARP_NOISE_FLOOR:
+                continue                  # (the measured waveshapers and Even/Odd act at amount 0 too: Rectify is a full-wave rectifier there, Even/Odd keeps only the odd harmonics)
             if w["mode"] == "kFlip" and abs(w["amount"] - 0.5) <= FLIP_TOLERANCE and not any(
                     v["amount"] >= WARP_NOISE_FLOOR for v in o["warp"][:wi]):       # only as the first warp: a warp after it reads the reversed table, as it does in Serum
                 flip_rev = {"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]}
-            elif w["mode"] == "kEvenOdd" and w["amount"] >= 0.9:
-                # Even/Odd at its end keeps only the even harmonics (calibration/osc_survey.py: Lead - HotLap's oscillator starts at the second harmonic in Serum): the
-                # same wave an octave up. The harmonic amplitudes are those of the table's even harmonics, which the engine cannot take out; the pitch is right.
-                P[f"{k}_tune"] = round(_clamp(P[f"{k}_tune"] + 12, -48, 48))
-                appr.append(f"{k} warp EvenOdd approximated by an octave up (the engine cannot remove the odd harmonics)")
-            elif w["mode"] in WARP_SHAPERS() and not P.get(f"{k}_shape"):
+            elif w["mode"] == "kEvenOdd":
+                if abs(w["amount"] - 0.5) <= EVENODD_TOLERANCE:
+                    continue              # Even/Odd at 0.5 is the table as it is
+                if all(v["mode"] in LTI_WARPS or v["amount"] < WARP_NOISE_FLOOR for v in o["warp"][:wi]):
+                    eo_bake = {"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]}
+                else:
+                    crit.append(f"{k} warp EvenOdd unsupported (it follows a warp that is not a filter or a time shift, which the half-cycle mix does not commute with)")
+                    unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+            elif w["mode"] in curves["modes"] and not P.get(f"{k}_wshape"):
+                if w["amount"] > curves["limit"][w["mode"]]:
+                    crit.append(f"{k} warp {w['mode'][1:]} unsupported above amount {curves['limit'][w['mode']]:g} (measured only up to there)")
+                    unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+                else:
+                    P.update(warp_curve_pots(k, w["mode"], w["amount"]))
+                    note.append(f"{k} warp {w['mode'][1:]} carried as Serum's measured waveshaper curve (amount {w['amount']:.2f})")
+            elif w["mode"] in WARP_SHAPERS() and not P.get(f"{k}_wshape"):
                 P.update(warp_shaper_pots(k, w["mode"], _clamp(w["amount"], 0, 1)))
                 appr.append(f"{k} warp {w['mode'][1:]} carried as a static waveshaper (fitted to Serum's harmonics, a few dB)")
-            elif (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES) and not (P.get(f"{k}_xw") and P.get(f"{k}_xw2")):
+            elif w["mode"] == "kSelfPD" and w["amount"] > SELFPD_LIMIT:
+                crit.append(f"{k} warp SelfPD unsupported above amount {SELFPD_LIMIT:g} (measured only up to there)")
+                unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+            elif (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES or w["mode"] in XWARP_NOISE_MODES) and not (P.get(f"{k}_xw") and P.get(f"{k}_xw2")):
                 slot = "xw2" if P.get(f"{k}_xw") else "xw"
                 sfx = "2" if slot == "xw2" else ""
-                if w["mode"] in XWARP_OSC_MODES:
+                if w["mode"] in XWARP_NOISE_MODES:
+                    kind = XWARP_NOISE_MODES[w["mode"]]
+                    P[f"{k}_xs{sfx}"] = 4
+                    appr.append(f"{k} warp {w['mode'][1:]} carried with the Noise as the modulator (random, so matched in power: the carrier's share and the spread, not the waveform)")
+                elif w["mode"] in XWARP_OSC_MODES:
                     kind, which = XWARP_OSC_MODES[w["mode"]]
                     target = [i for i in range(3) if i != o["id"]][which]        # the Serum oscillator (A, B, C = 0, 1, 2) that modulates this one
                     if target not in slot_of:
@@ -1556,6 +1736,17 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             else:
                 crit.append(f"{k} warp Flip unsupported (the wavetable could not be reversed: no frame size in the file)")
                 unsup_warps.append(flip_rev)
+        if eo_bake and path:
+            eo = evenodd_table(path, eo_bake["amount"], wt_out)
+            if eo:
+                path = eo
+                note.append(f"{k} warp EvenOdd carried exactly: the table copy holds x(p) {2 * eo_bake['amount'] - 1:+.2f} x(p + 1/2) (measured law)")
+            else:
+                crit.append(f"{k} warp EvenOdd unsupported (the wavetable could not be rewritten: not a float mono table with a frame size)")
+                unsup_warps.append(eo_bake)
+        elif eo_bake:
+            crit.append(f"{k} warp EvenOdd unsupported (no wavetable file to rewrite)")
+            unsup_warps.append(eo_bake)
         paths[f"{k}_table"] = path or "Init"
         if path is None and ref:
             missing.append(ref)
@@ -1650,7 +1841,13 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{sk}_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
         P[f"{sk}_fine"] = round(_clamp(sinfo["fine"], -100, 100))
         P[f"{sk}_post"] = post_of(so["id"])
-        if not so.get("noise") and so["unison"] > 1:
+        if so.get("gran"):                                  # a Granular oscillator: the slot's granular mode (granular_pots); no unison in granular mode yet
+            gp, ggaps, gappr = granular_pots(sk, so["gran"], so["id"], so["unison"], fold)
+            P.update(gp)
+            if ggaps:
+                crit.append(f"osc {'ABC'[so['id']]} (granular): {', '.join(ggaps)} not carried")
+            appr.extend(f"osc {'ABC'[so['id']]} (granular): {x}" for x in gappr)
+        if not so.get("noise") and not so.get("gran") and so["unison"] > 1:
             # Serum's Unison on a Sample / Multisample oscillator: the same stack as a wavetable's (detune across the stack, stereo spread), up to the engine's 8 streams
             P[f"{sk}_uni"] = _clamp(so["unison"], 1, 8)
             sdet = _clamp(so["detune"] + fold[("Oscillator", "kParamDetune", so["id"])], 0.0, 1.0) ** CAL["detune_exp"] * CAL["detune_scale"]
@@ -1661,7 +1858,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P[f"{sk}_spread"] = round(_clamp(sst / 100 * CAL["width_scale"], 0, 1) * 127)
             if so["unison"] > 8:
                 appr.append(f"sample unison {so['unison']} fits as 8")
-        note.append(f"sample oscillator carried: {sinfo['file']} ({'multisample' if sinfo['multi'] else 'spectral oscillator played as a sample: scan and spectral filter not carried' if sinfo.get('spectral') else 'sample'})")
+        note.append(f"{'granular' if so.get('gran') else 'sample'} oscillator carried: {sinfo['file']} ({'granular, the file read by grains' if so.get('gran') else 'multisample' if sinfo['multi'] else 'spectral oscillator played as a sample: scan and spectral filter not carried' if sinfo.get('spectral') else 'sample'})")
     # ---- FX buses: each source's send to Bus 1 / Bus 2 (Serum's level cubed is the gain, probe_bus.py) ----
     send_keys = {**{oid: f"wt{slot}" for oid, slot in slot_of.items()}, 4: "sub", 3: "noise"}
     for sk, s_ in zip(("smp", "smp2", "smp3"), smps):
@@ -1727,8 +1924,16 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         # the keyboard and Tablor's at note 60, so the base cutoff has to move to match.
         key = _clamp(abs(fl["keytrack"]), 0, 1) * CAL["key_scale"]
         pivot = (60 - CAL["key_pivot"]) * key
-        P[f"{prefix}_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] + pivot - 8 + filter_cutoff_delta(fkey, cut), 0, 127))
-        P[f"{prefix}_res"] = filter_res_pot(fl["model"], _clamp(fl["reso_pct"] + 100.0 * fold[("VoiceFilter", "kParamReso", key_id)], 0, 100))
+        reso_pct = _clamp(fl["reso_pct"] + 100.0 * fold[("VoiceFilter", "kParamReso", key_id)], 0, 100)
+        if idx >= 8:
+            # a comb is tuned to the cutoff itself: the knob's note, no calibration offset; the pot is whole semitones, so the rest goes to the cents pot (64 = 0)
+            note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
+            P[f"{prefix}_freq"] = int(math.floor(note_pot))
+            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
+            P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
+        else:
+            P[f"{prefix}_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] + pivot - 8 + filter_cutoff_delta(fkey, cut), 0, 127))
+            P[f"{prefix}_res"] = filter_res_pot(fl["model"], reso_pct)
         P[f"{prefix}_key"] = round(_clamp(key + keyfold[key_id], 0, 1) * 127)
         if fl["keytrack"] < 0:
             note.append(f"negative {label} key tracking not representable")
@@ -1806,6 +2011,16 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             # Filter 2 follows the filter envelope as before
             f2_me = (e2, tot2[e2] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"])
     synced = {o["id"] for o in keep if any(w["mode"] == "kSync" for w in o["warp"])}
+    # Routes into a carried Granular oscillator's knobs that the engine cannot move (an unsupported setting, or a source it has no route for) are a sound gap, like the
+    # setting itself. Density / Grain Length / Scan Rate are carried: macro, wheel, velocity and note routes folded in, LFO and envelope routes through the slot's destinations.
+    for m in ph["mods"]:
+        gid = m["dest_id"]
+        if gid in gslot and abs(m["amount_pct"]) >= 5.0 and ((m["dest_type"] == "GranularOsc" and m["dest_param"] not in ("kParamDensity", "kParamGrainLength"))
+                                                            or (m["dest_type"] == "Oscillator" and m["dest_param"] in ("kParamPosition", "kParamStart", "kParamScanRange", "kParamLoopStart", "kParamLoopEnd"))):
+            if not (m["dest_param"] == "kParamStart" and (25 <= m["source"] <= 32 or m["source"] in (1, 16, 17))):         # a static route into Start is folded in
+                msg = f"osc {'ABC'[gid]} (granular): a route into {m['dest_param'][6:]} not carried"
+                if msg not in crit:
+                    crit.append(msg)
     mod_routes = []
     for e, key, a in routes:
         # Serum addresses oscillators by id, and they may sit in any Tablor slot.
@@ -1820,6 +2035,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = "Dist Wet"
         elif key[0] == "FXComp" and key[1] == "kParamWet":
             dest = "Comp Wet"
+        elif key[:2] in GRAN_ROUTE_KEYS and key[2] in gslot:
+            dest = f"Smp{gslot[key[2]]} {GRAN_ROUTE_NAME[key[1]]}"
         if dest:
             mod_routes.append((abs(a), e, dest, a))
         elif key not in (("VoiceFilter", "kParamFreq", 0), ("VoiceFilter", "kParamFreq", 1)):
@@ -1856,7 +2073,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if a > 0 and level_pot(dest) and P[level_pot(dest)] == 0:
                 P[level_pot(dest)] = round(127 * _clamp(a * MOD_LEVEL_HOLD, 0, 1))
 
-    other = map_lfos(ph, P, other, slot_of, appr, note)          # the LFO routes the engine's LFOs can carry
+    other = map_lfos(ph, P, other, slot_of, appr, note, gslot)   # the LFO routes the engine's LFOs can carry
     audible = [o for o in other if abs(o[2]) >= 0.25 and o[1][0] in ("VoiceFilter", "WTOsc", "Oscillator")]
     if audible:
         appr.append(f"{len(audible)} velocity/LFO route(s) >=25% not carried (an LFO beyond the engine's four, or a destination it lacks)")

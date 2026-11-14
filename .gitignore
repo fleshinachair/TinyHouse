@@ -104,5 +104,10 @@ calibration/*.json
 !calibration/level_law.json
 !calibration/lfo_scales.json
 !calibration/warp_dist_curves.json
+!calibration/warp_curve_modes.json
+!calibration/warp_curves_measured.json
+!calibration/evenodd_measured.json
+!calibration/probe_comb_saw.json
+!calibration/probe_phase_saw.json
 # the original Tablor wavetable packs are third-party: never commit wavetables
 schwung-tablor/src/wavetables/

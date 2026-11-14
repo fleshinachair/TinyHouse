@@ -137,3 +137,11 @@ Not done (resume here): step 4, the converter (`deephouse2move.py`: kOsc_Granula
   or into Position / Start from an LFO or envelope.
 - Run over the 58 granular presets in the Presets folder (scratch output): 43 carry a granular slot; none is free of gaps yet. Nothing was auditioned or put through the render gate (step 5).
 - Assumptions to check: baseNote means the same as for a Sample oscillator; a route into Start adds 100 a % (linear); Pitch Track 0 means fixed pitch as for the sample slot.
+
+## 11. Status after P4 and P5 (2026-11-14)
+Measured (see the notes): the Random settings (P5) and the scan range, loops, manual position and Reverse (P4). Built: `granular.h` (scan from Start to End, negative rate from End, Forward / PingPong loops, manual position;
+Random Direction / Gain / Pitch / Offset / Length / Pan drawn per grain by an unseeded xorshift), 36 more params appended (bank "Granular 2", `smpN_gloop` ... `gpan`, indices 459..494, contiguous per slot, hidden from the Move's pages),
+converter (`granular_pots`: loop, End, manual position, Reverse, the five Random amounts, Random Pitch capped at 12; static routes into Start, Position and the Random amounts are folded). `test_granular.cpp` has the ramp-file tests.
+Result over the 58 granular presets in the Presets folder: 43 carry a granular slot, **19 have no granular gap left, 18 of them no gap at all**. Still gaps: warp on the grains (11), ScanRange (7), unison (5), a route into Random Pitch (5), Random Start (4),
+tempo-synced scan / length / density (6), Warp routes, pan, zones. The engine's grain count is unlimited by design; the PC bench varies 5-19 % of a core for 8 voices x Density 800 depending on the load of the machine: **the Move figure is still needed**.
+Next: the render gate against Serum for the 18-19 clean presets (needs the user), the Move CPU, then P8 (warps on the grains), P7 (unison), P9 (BPM modes).

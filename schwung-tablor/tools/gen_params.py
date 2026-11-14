@@ -302,6 +302,24 @@ def _gran(slot, tag, name):
         skew  = num(f"{slot}_gskew",  f"GR{tag}X", f"{name} Grain Window Skew", -100, 100, 0),
     )
 GRAN1, GRAN2, GRAN3 = _gran("smp", "A", "Sample"), _gran("smp2", "B", "Sample 2"), _gran("smp3", "C", "Sample 3")
+# The scan range, loop and Random settings of the granular mode (granular.h; docs/GRANULAR_PROBE_NOTES.md P4 / P5). Appended after the first granular bank. The Random values are Serum's own
+# (percent; pitch in semitones, capped at 12 by Serum). Order matters: voice.h reads the 12 of a slot as TB_P_<slot>_GLOOP + 0..11.
+def _gran2(slot, tag, name):
+    return dict(
+        loop  = enum(f"{slot}_gloop",   f"GQ{tag}O", f"{name} Grain Loop", ["Off", "Forward", "PingPong"], 0),
+        loops = num(f"{slot}_gloops",   f"GQ{tag}S", f"{name} Grain Loop Start", 0, 100, 0),
+        loope = num(f"{slot}_gloope",   f"GQ{tag}E", f"{name} Grain Loop End", 0, 100, 100),
+        end   = num(f"{slot}_gend",     f"GQ{tag}N", f"{name} Grain End", 0, 100, 100),
+        man   = enum(f"{slot}_gman",    f"GQ{tag}M", f"{name} Grain Manual Position", ["Off", "On"], 0),
+        pos   = num(f"{slot}_gpos",     f"GQ{tag}P", f"{name} Grain Position", 0, 100, 0),
+        rdir  = num(f"{slot}_grdir",    f"GQ{tag}D", f"{name} Random Direction", 0, 100, 0),
+        rgain = num(f"{slot}_grgain",   f"GQ{tag}G", f"{name} Random Gain", 0, 100, 0),
+        rpit  = num(f"{slot}_grpitch",  f"GQ{tag}H", f"{name} Random Pitch", 0, 12, 0),
+        roff  = num(f"{slot}_groff",    f"GQ{tag}F", f"{name} Random Offset", 0, 100, 0),
+        rlen  = num(f"{slot}_grlen",    f"GQ{tag}L", f"{name} Random Length", 0, 100, 0),
+        rpan  = num(f"{slot}_grpan",    f"GQ{tag}W", f"{name} Random Pan", 0, 100, 0),
+    )
+GRANB1, GRANB2, GRANB3 = _gran2("smp", "A", "Sample"), _gran2("smp2", "B", "Sample 2"), _gran2("smp3", "C", "Sample 3")
 SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
     wave  = enum("sub_wave", "SUBW", "Sub Wave", SUB_WAVES, 0),
@@ -668,6 +686,8 @@ BANKS = [
     ("CombTune", False, [row(CTUNE["f1"], CTUNE["f2"])]),
     # After the CombTune, for the same reason. The granular mode of the three sample slots; set by the converter, no page on the device.
     ("Granular", False, [row(*G.values()) for G in (GRAN1, GRAN2, GRAN3)]),
+    # After the Granular bank, for the same reason: the scan range, loop and Random settings of the granular mode. Set by the converter; no page on the device.
+    ("Granular 2", False, [row(*list(G.values())[i:i + 6]) for G in (GRANB1, GRANB2, GRANB3) for i in (0, 6)]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

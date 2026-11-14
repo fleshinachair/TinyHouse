@@ -50,11 +50,24 @@ p, _, _ = D.granular_pots("smp3", d, 2, 1, fold)
 check("a folded route adds to the knob (Density +10 %, Length -10 %), Scan +400 x, Start +100 x",
       abs(p["smp3_gdens"] - 127 * 0.35) < 0.01 and abs(p["smp3_glen"] - 127 * 0.4) < 0.01 and p["smp3_gscan"] == 200.0 and abs(p["smp3_gstart"] - 10.0) < 1e-6, str(p))
 
-# 3. what is flagged
-d = {"osc": {"kParamLoopMode": "kForward", "kParamPan": 40.0, "kParamPitchTrack": 0.0}, "gran": {"kParamRandomPan": 30.0, "kParamRandomGain": 0.0, "kParamWarpMenu": "kFM_OSC", "kParamLengthMode": "kLengthBPM"}, "node": {"gain": 3.0}}
+# 3. loops, scan range, manual position, Random settings
+d = {"osc": {"kParamLoopMode": "kPingPong", "kParamLoopStart": 25.0, "kParamLoopEnd": 50.0, "kParamEnd": 80.0, "kParamReverse": 1.0}, "gran": {"kParamRandomPan": 30.0, "kParamRandomDir": 50.0, "kParamRandomGain": 20.0,
+     "kParamRandomOffset": 70.0, "kParamRandomGrainLength": 10.0, "kParamRandomPitch": 24.0}, "node": {}}
+p, gaps, _ = D.granular_pots("smp", d, 0, 1, nofold)
+check("PingPong loop 25..50, End 80, Reverse (scan sign flips)", p["smp_gloop"] == 2 and p["smp_gloops"] == 25.0 and p["smp_gloope"] == 50.0 and p["smp_gend"] == 80.0 and p["smp_gscan"] == -100.0, str(p))
+check("Random Pan / Dir / Gain / Offset / Length carried as stored, Pitch capped at 12", p["smp_grpan"] == 30.0 and p["smp_grdir"] == 50.0 and p["smp_grgain"] == 20.0 and p["smp_groff"] == 70.0 and p["smp_grlen"] == 10.0 and p["smp_grpitch"] == 12.0, str(p))
+check("... and none of that is a gap", gaps == [], str(gaps))
+p, _, _ = D.granular_pots("smp", {"osc": {}, "gran": {}, "node": {}}, 0, 1, nofold)
+check("an untouched oscillator writes no loop / random keys", not any(k.startswith(("smp_gloop", "smp_gr", "smp_gend", "smp_gman", "smp_gpos")) for k in p), str(p))
+d = {"osc": {"kParamManualPositionMode": 1.0, "kParamPosition": 40.0}, "gran": {}, "node": {}}
+p, _, _ = D.granular_pots("smp", d, 3, 1, Counter({("Oscillator", "kParamPosition", 3): 0.1, ("GranularOsc", "kParamRandomPan", 3): 0.25}))
+check("manual position 40 + a folded route of 10 %; a folded route adds to Random Pan", p["smp_gman"] == 1 and abs(p["smp_gpos"] - 50.0) < 1e-6 and p["smp_grpan"] == 25.0, str(p))
+
+# 4. what is still flagged
+d = {"osc": {"kParamScanRange": 1.0, "kParamPan": 40.0, "kParamPitchTrack": 0.0, "kParamScanBPMRate": 2.0}, "gran": {"kParamRandomWindowSkew": 30.0, "kParamWarpMenu": "kFM_OSC", "kParamLengthMode": "kLengthBPM"}, "node": {"gain": 3.0}}
 p, gaps, _ = D.granular_pots("smp", d, 0, 3, nofold)
 g = " | ".join(gaps)
-check("flags loop, BPM length, Random Pan (not Random Gain at 0), warp, unison, pan, gain", all(s in g for s in ("loop", "grain length", "Random Pan", "warp", "unison 3", "pan", "gain")) and "Random Gain" not in g, g)
+check("flags scan range option, tempo scan, BPM length, Random Window Skew, warp, unison, pan, gain", all(s in g for s in ("scan range", "tempo-synced scan", "grain length", "WindowSkew", "warp", "unison 3", "pan", "gain")), g)
 check("pitch track off -> fixed pitch", p.get("smp_fixed") == 1)
 
 print("\n%d failure(s)" % fails)

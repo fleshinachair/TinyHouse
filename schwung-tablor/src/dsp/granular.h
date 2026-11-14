@@ -7,13 +7,15 @@
  *   - Each grain is scaled by kGrainGain[M], M = floor(N) + 1, the measured fall in level as grains pile up.
  *   - The grid begins at note-on. Grains of the grid from before the note exist only when their birth read position lies inside the file (Scan 0, or a Start offset).
  *
- * Rendered grain-major: one tight loop per live grain over the block, like SamplePlayer::stream. Not here yet (probe plan P4, P5, P7-P11): loop modes, the random amounts,
- * unison, BPM-mode lengths, warps on the grains, stereo pan. A negative scan rate is a guess (it runs from the file's end) until P4. */
+ * Rendered grain-major: one tight loop per live grain over the block, like SamplePlayer::stream. The scan runs from Start to End (a negative rate from End down to Start), wraps at the
+ * loop (Forward / PingPong), or is held at a manual Position; the Random settings are drawn at each grain's birth (P4, P5 in the notes). Not here yet (P7-P11): unison, BPM-mode
+ * lengths, warps on the grains, the pan of a stereo file. */
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 
 #include "sample.h"
 
@@ -64,6 +66,16 @@ inline float grainWindow(int shape, float param, float skew, float x)
     }
 }
 
+/* Serum's Random Pan: a pan x = g(p), p uniform in +-v, and the gains L = (1 - x) c, R = (1 + x) c, c = 1 / sqrt(1 + 0.462 x^2) (measured, fits within 0.5 %). */
+inline void grainPanGains(float p, float &gl, float &gr)
+{
+    const float x = p * (0.83f + 0.16f * p * p);
+    const float c = 1.0f / std::sqrt(1.0f + 0.462f * x * x);
+    gl = (1.0f - x) * c; gr = (1.0f + x) * c;
+}
+
+enum GrainLoop { kLoopOff = 0, kLoopForward, kLoopPingPong };
+
 struct GrainParams {
     float kd = 0.25f;                 /* Density knob (Serum default 0.25: N = 7.5) */
     float lenSeconds = 0.625f;        /* grain length, seconds of output time (Serum default: knob 0.5). Free mode: grainLengthSeconds(kl) */
@@ -72,6 +84,13 @@ struct GrainParams {
     int   winShape = kWinTukey;
     float winParam = 100.0f;          /* Tukey 100 = Hann */
     float winSkew = 0.0f;
+    float end = 1.0f;                 /* End of the scan range, 0..1 of the file (the scan stops there; a negative rate starts there) */
+    int   loopMode = kLoopOff;        /* Forward / PingPong wrap the scan between loopStart and loopEnd once it crosses the end (Start inside the loop); Tailed plays once, as Off */
+    float loopStart = 0.0f, loopEnd = 1.0f;
+    bool  manual = false;             /* Manual Position: every grain reads at `position`, the scan and Start are ignored */
+    float position = 0.0f;
+    /* the Random settings as Serum stores them / 100 (pitch: semitones, capped at 12) */
+    float rDir = 0.0f, rGain = 0.0f, rPitch = 0.0f, rOffset = 0.0f, rLen = 0.0f, rPan = 0.0f;
 };
 
 struct GrainCloud {
@@ -88,7 +107,9 @@ struct GrainCloud {
         r = set ? set->pick(note, vel) : nullptr;
         on = r != nullptr;
         for (auto &g : grains) g.alive = false;
-        scanSec = 0.0; phase = 1.0; prerolled = false;       /* phase 1: a birth exactly at note-on. The window table is kept: it depends only on the shape settings */
+        scanSec = 0.0; phase = 1.0; prerolled = false;
+        static uint32_t seedCounter = 0x9E3779B9u;               /* Serum draws a fresh sequence for every note (two renders of the same settings differ) */
+        seedCounter = seedCounter * 1664525u + 1013904223u; rng = seedCounter | 1u;       /* phase 1: a birth exactly at note-on. The window table is kept: it depends only on the shape settings */
     }
 
     void release() { on = false; r = nullptr; own.reset(); for (auto &g : grains) g.alive = false; }
@@ -115,14 +136,47 @@ struct GrainCloud {
 
         /* sinceSec: the birth's time relative to the start of this block (negative for the pre-roll). The scan position is integrated (scanSec), so a modulated Scan Rate
          * changes the speed, not the place. */
+        const double fileF = fileSec, a = (double) gp.start * fileSec, b = std::clamp((double) gp.end, 0.0, 1.0) * fileSec;
+        const double ls = std::clamp((double) gp.loopStart, 0.0, 1.0) * fileSec, le = std::clamp((double) gp.loopEnd, 0.0, 1.0) * fileSec, loopLen = le - ls;
+        const bool loopOn = gp.loopMode != kLoopOff && loopLen > 1e-4;
+        const float vDir = gp.rDir, vGain = gp.rGain, vPan = gp.rPan;
+        const double v4Off = std::pow((double) gp.rOffset, 4.0), v4Len = std::pow((double) gp.rLen, 4.0);
+        const float stMax = std::min(gp.rPitch, 12.0f);
         auto spawn = [&](double sinceSec, int offset, double ageSamples) {
-            const double sp = scanSec + scan * sinceSec;            /* seconds the scan has moved by at the birth */
-            double ps = (double) gp.start * fileSec + sp;
-            if (scan < 0.0) ps = fileSec - (double) gp.start * fileSec + sp;     /* guess until P4: a negative scan runs back from the end */
-            if (ps < 0.0 || ps >= fileSec) return;                  /* outside the file there is no grain (this is the measured note-on rule) */
+            const double sp = scanSec + scan * sinceSec;            /* seconds the scan has moved by at the birth (signed) */
+            double ps;
+            if (gp.manual) ps = (double) gp.position * fileF;
+            else if (scan >= 0.0) {
+                ps = a + sp;
+                if (ps < 0.0) return;                               /* before the file: no grain (the measured note-on rule) */
+                if (loopOn && a < le) {
+                    if (ps >= le) {
+                        if (gp.loopMode == kLoopPingPong) { const double q = std::fmod(ps - le, 2.0 * loopLen); ps = q < loopLen ? le - q : ls + (q - loopLen); }
+                        else ps = ls + std::fmod(ps - ls, loopLen);
+                    }
+                } else if (ps >= b) return;                         /* past End there is no grain */
+            } else {
+                ps = b + sp;                                        /* a negative rate starts at End and runs down */
+                if (ps >= fileF) return;
+                if (loopOn) {
+                    if (ps < ls) {
+                        if (gp.loopMode == kLoopPingPong) { const double q = std::fmod(ls - ps, 2.0 * loopLen); ps = q < loopLen ? ls + q : le - (q - loopLen); }
+                        else ps = le - std::fmod(ls - ps, loopLen);
+                    }
+                } else if (ps < a) return;                          /* ... and stops at Start */
+            }
+            if (gp.rOffset > 0.0f) ps += (double) rnd2() * 0.15 * fileF * v4Off;
+            if (ps < 0.0 || ps >= fileF) return;                    /* outside the file there is no grain */
+            const bool back = vDir > 0.0f && rnd01() < vDir;
+            double gstep = back ? -step : step;
+            if (stMax > 0.0f) gstep *= std::pow(2.0, (double) (rnd2() * stMax) / 12.0);
+            double ls2 = lenSamp;
+            if (gp.rLen > 0.0f) ls2 = std::max(2.0, lenSamp * (1.0 + (double) rnd2() * v4Len));
             for (auto &g : grains) if (!g.alive) {
-                g.alive = true; g.pos = ps * (double) r->rate + ageSamples * step; g.step = step; g.age = (int) ageSamples; g.invLen = (float) (1.0 / lenSamp);
-                g.lenSamp = (int) lenSamp; g.amp = amp; g.off = offset;
+                g.alive = true; g.pos = ps * (double) r->rate + ageSamples * gstep; g.step = gstep; g.age = (int) ageSamples; g.invLen = (float) (1.0 / ls2);
+                g.lenSamp = (int) ls2; g.amp = amp * (vGain > 0.0f ? 1.0f - vGain * rnd01() : 1.0f); g.off = offset;
+                g.gl = g.gr = 1.0f;
+                if (vPan > 0.0f) grainPanGains(rnd2() * vPan, g.gl, g.gr);
                 return;
             }
         };
@@ -150,7 +204,7 @@ struct GrainCloud {
             const float ga = g.amp * gain;                          /* the birth factor times the slot level of this block */
             int i = g.off;
             for (; i < n; i++) {
-                if (age >= g.lenSamp || pos >= (double) fr) { g.alive = false; break; }
+                if (age >= g.lenSamp || pos >= (double) fr || pos < 0.0) { g.alive = false; break; }
                 const float fx = (float) age * g.invLen * (float) kWinN;
                 const int wi = std::min((int) fx, kWinN - 1);
                 const float w = win[wi] + (win[wi + 1] - win[wi]) * (fx - (float) wi);
@@ -164,7 +218,7 @@ struct GrainCloud {
                     a = l0 + (l1 - l0) * f1; b = r0 + (r1 - r0) * f1;
                 }
                 const float k = ga * w;
-                l[i] += a * k; rt[i] += b * k;
+                l[i] += a * k * g.gl; rt[i] += b * k * g.gr;
                 pos += g.step; age++;
             }
             g.pos = pos; g.age = age; g.off = 0;
@@ -173,7 +227,10 @@ struct GrainCloud {
     }
 
 private:
-    struct Grain { double pos = 0.0, step = 0.0; int age = 0, lenSamp = 0, off = 0; float invLen = 0.0f, amp = 0.0f; bool alive = false; };
+    struct Grain { double pos = 0.0, step = 0.0; int age = 0, lenSamp = 0, off = 0; float invLen = 0.0f, amp = 0.0f, gl = 1.0f, gr = 1.0f; bool alive = false; };
+    uint32_t rng = 1u;
+    float rnd01() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (float) (rng >> 8) * (1.0f / 16777216.0f); }
+    float rnd2() { return rnd01() * 2.0f - 1.0f; }
     Grain grains[kPool];
     float win[kWinN + 1] = {};
     int   winShape = -1;

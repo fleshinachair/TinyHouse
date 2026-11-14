@@ -212,12 +212,121 @@ static void benchmark()
     printf("  8 voices x Density 800 (%d grains live), 6 s of audio in %.3f s = %.1f %% of one core here\n", live, sec, 100.0 * sec / 6.0);
 }
 
+/* A ramp file (value = position in the file, 0..0.9 over 8 s): the first samples of a grain say where it started reading. One grain at a time (N 0.949), T = 0.1 s, rectangular window. */
+static std::vector<float> rampFile()
+{
+    std::vector<float> x(8 * 44100);
+    for (size_t i = 0; i < x.size(); i++) x[i] = 0.9f * (float) i / (float) x.size();
+    return x;
+}
+
+static GrainParams oneAtATime()
+{
+    GrainParams gp;
+    gp.kd = 0.9487f / 30.0f; gp.lenSeconds = 0.1f; gp.winShape = kWinTukey; gp.winParam = 0.0f;
+    return gp;
+}
+
+/* Where each grain on the grid starts reading (seconds into the file), from its first samples; -1 where the grain is absent. */
+static std::vector<double> startPositions(const std::vector<float> &y, double T)
+{
+    const double spacing = T / 0.9487 * SR;
+    std::vector<double> pos;
+    for (int k = 0; (k + 1) * spacing + 8 < (double) y.size(); k++) {
+        const int i = (int) std::lround(k * spacing) + 3;
+        pos.push_back(std::fabs(y[(size_t) i]) < 1e-4f ? -1.0 : std::fabs(y[(size_t) i]) / 0.9 * 8.0);
+    }
+    return pos;
+}
+
+static void testScanRangeAndLoops()
+{
+    printf("== scan range, loops, manual position, Random settings (ramp file) ==\n");
+    auto ramp = makeSet(rampFile());
+    const double SP = 0.1 / 0.9487;
+    auto at = [&](const std::vector<double> &p, double t) { return p[(size_t) std::lround(t / SP)]; };
+    auto tk = [&](double t) { return (double) std::lround(t / SP) * SP; };     /* the birth time on the grid nearest t */
+    {   /* End 50 %: the scan stops at 4 s */
+        GrainParams gp = oneAtATime(); gp.scanPct = 100.0f; gp.end = 0.5f;
+        GrainCloud c; c.start(ramp, 60);
+        auto p = startPositions(render(c, gp, 7.0), 0.1);
+        CHECK(std::fabs(at(p, 2.0) - tk(2.0)) < 0.02 && at(p, 5.0) < 0.0, "End 50 %%: at 2 s the grain reads its time (%.3f of %.3f), at 5 s there is none (%.3f)", at(p, 2.0), tk(2.0), at(p, 5.0));
+    }
+    {   /* a negative rate starts at End and stops at Start */
+        GrainParams gp = oneAtATime(); gp.scanPct = -100.0f; gp.start = 0.25f;
+        GrainCloud c; c.start(ramp, 60);
+        auto p = startPositions(render(c, gp, 7.0), 0.1);
+        CHECK(std::fabs(at(p, 1.0) - (8.0 - tk(1.0))) < 0.03 && at(p, 5.0) > 2.9 && at(p, 6.5) < 0.0, "scan -100 %%: at 1 s the grain reads 8 s minus its time (%.3f), still at 5 s (%.3f), stopped at Start (2 s) by 6.5 s (%.3f)", at(p, 1.0), at(p, 5.0), at(p, 6.5));
+    }
+    {   /* Forward loop 25..50 %, Start 25 % */
+        GrainParams gp = oneAtATime(); gp.scanPct = 100.0f; gp.start = 0.25f; gp.loopMode = kLoopForward; gp.loopStart = 0.25f; gp.loopEnd = 0.5f;
+        GrainCloud c; c.start(ramp, 60);
+        auto p = startPositions(render(c, gp, 7.0), 0.1);
+        CHECK(std::fabs(at(p, 1.0) - (2.0 + tk(1.0))) < 0.03 && std::fabs(at(p, 2.2) - tk(2.2)) < 0.05 && std::fabs(at(p, 6.3) - (2.0 + std::fmod(tk(6.3), 2.0))) < 0.05, "Forward loop 2..4 s: %.3f at 1 s, wrapped to %.3f at 2.2 s, %.3f at 6.3 s (the loop position of the time)", at(p, 1.0), at(p, 2.2), at(p, 6.3));
+    }
+    {   /* PingPong loop 25..50 %, Start 0: runs to 4 s, then back to 2 s, then forward */
+        GrainParams gp = oneAtATime(); gp.scanPct = 100.0f; gp.loopMode = kLoopPingPong; gp.loopStart = 0.25f; gp.loopEnd = 0.5f;
+        GrainCloud c; c.start(ramp, 60);
+        auto p = startPositions(render(c, gp, 8.0), 0.1);
+        CHECK(std::fabs(at(p, 3.0) - tk(3.0)) < 0.03 && std::fabs(at(p, 4.5) - (4.0 - (tk(4.5) - 4.0))) < 0.05 && std::fabs(at(p, 6.4) - (2.0 + tk(6.4) - 6.0)) < 0.05, "PingPong loop: %.3f at 3 s, back at %.3f at 4.5 s, forward again %.3f at 6.4 s", at(p, 3.0), at(p, 4.5), at(p, 6.4));
+    }
+    {   /* Start past the loop end: no loop, it plays straight to the file end */
+        GrainParams gp = oneAtATime(); gp.scanPct = 100.0f; gp.start = 0.6f; gp.loopMode = kLoopForward; gp.loopStart = 0.25f; gp.loopEnd = 0.5f;
+        GrainCloud c; c.start(ramp, 60);
+        auto p = startPositions(render(c, gp, 5.0), 0.1);
+        CHECK(std::fabs(at(p, 1.0) - (4.8 + tk(1.0))) < 0.03 && at(p, 4.0) < 0.0, "Start past the loop end plays on to the end: %.3f at 1 s, none at 4 s (%.3f)", at(p, 1.0), at(p, 4.0));
+    }
+    {   /* manual position */
+        GrainParams gp = oneAtATime(); gp.scanPct = 100.0f; gp.start = 0.25f; gp.manual = true; gp.position = 0.5f;
+        GrainCloud c; c.start(ramp, 60);
+        auto p = startPositions(render(c, gp, 5.0), 0.1);
+        CHECK(std::fabs(at(p, 0.5) - 4.0) < 0.03 && std::fabs(at(p, 4.0) - 4.0) < 0.03, "Manual Position 50 %%: every grain reads 4.0 s (%.3f, %.3f)", at(p, 0.5), at(p, 4.0));
+    }
+    {   /* Random Offset: v = 1 spreads the start by up to +-0.15 of the file; Random Gain only turns grains down; Random Direction reverses a share of the grains */
+        GrainParams gp = oneAtATime(); gp.scanPct = 0.0f; gp.start = 0.5f;
+        GrainCloud c; c.start(ramp, 60);
+        auto base = startPositions(render(c, gp, 6.0), 0.1);
+        gp.rOffset = 1.0f; GrainCloud c2; c2.start(ramp, 60);
+        auto ro = startPositions(render(c2, gp, 6.0), 0.1);
+        double lo = 99, hi = -99, lo0 = 99, hi0 = -99;
+        for (double v : ro) if (v >= 0) { lo = std::min(lo, v); hi = std::max(hi, v); }
+        for (double v : base) if (v >= 0) { lo0 = std::min(lo0, v); hi0 = std::max(hi0, v); }
+        CHECK(hi0 - lo0 < 0.01 && hi - lo > 1.8 && lo > 4.0 - 1.25 && hi < 4.0 + 1.25, "Random Offset 100 %%: the start spreads over %.2f..%.2f s (none: %.3f..%.3f), within +-1.2 s", lo, hi, lo0, hi0);
+        gp.rOffset = 0.0f; gp.rGain = 0.5f; GrainCloud c3; c3.start(ramp, 60);
+        auto rg = startPositions(render(c3, gp, 6.0), 0.1);
+        double mn = 99, mx = 0; for (double v : rg) if (v >= 0) { mn = std::min(mn, v); mx = std::max(mx, v); }
+        CHECK(mx <= 4.0 * 1.005 && mn >= 4.0 * 0.5 * 0.99 && mn < 4.0 * 0.7, "Random Gain 50 %%: grain levels between 0.5 and 1 of the plain (%.3f..%.3f of 4.0)", mn, mx);
+        gp.rGain = 0.0f; gp.rDir = 1.0f; GrainCloud c4; c4.start(ramp, 60);
+        auto y = render(c4, gp, 3.0);
+        int fwd = 0, back = 0; const double spacing = 0.1 / 0.9487 * SR;
+        for (int k = 1; k < 25; k++) { const int i = (int) std::lround(k * spacing) + 3; (y[(size_t) i + 40] > y[(size_t) i] ? fwd : back)++; }
+        CHECK(fwd == 0 && back == 24, "Random Direction 100 %%: every grain reads backwards (%d forward, %d backwards)", fwd, back);
+        gp.rDir = 0.5f; GrainCloud c5; c5.start(ramp, 60);
+        y = render(c5, gp, 12.0); fwd = back = 0;
+        for (int k = 1; k < 110; k++) { const int i = (int) std::lround(k * spacing) + 3; (y[(size_t) i + 40] > y[(size_t) i] ? fwd : back)++; }
+        CHECK(fwd > 35 && back > 35, "Random Direction 50 %%: about half reversed (%d forward, %d backwards)", fwd, back);
+    }
+    {   /* Random Pan: the sides differ, the louder side up to 1.65 of the centre, the quieter down towards 0 */
+        GrainParams gp = oneAtATime(); gp.scanPct = 0.0f; gp.start = 0.5f; gp.rPan = 1.0f;
+        std::vector<float> l(6 * 44100), r(l.size());
+        GrainCloud c; c.start(ramp, 60);
+        for (size_t i = 0; i < l.size(); i += 128) c.processAdding(gp, 0.0f, 1.0f, SR, l.data() + i, r.data() + i, (int) std::min<size_t>(128, l.size() - i));
+        const double spacing = 0.1 / 0.9487 * SR;
+        double minx = 9, maxx = -9, maxs = 0, mins = 9;
+        for (int k = 1; k < 55; k++) { const int i = (int) std::lround(k * spacing) + 3; const double L = l[(size_t) i], R = r[(size_t) i], x = (R - L) / (R + L); minx = std::min(minx, x); maxx = std::max(maxx, x); maxs = std::max(maxs, std::max(L, R) / 0.45); mins = std::min(mins, std::min(L, R) / 0.45); }
+        CHECK(minx < -0.7 && maxx > 0.7 && maxs > 1.4 && maxs < 1.66 && mins < 0.35, "Random Pan 100 %%: pan x spreads %.2f..%.2f, louder side up to %.2f, quieter side down to %.2f of the centre level", minx, maxx, maxs, mins);
+        float gl, gr; grainPanGains(1.0f, gl, gr);
+        CHECK(std::fabs(gl - 0.0f) < 0.01 && std::fabs(gr - 1.654f) < 0.01, "pan law at the extreme: L %.3f R %.3f (measured 0 and 1.654)", gl, gr);
+    }
+}
+
 int main()
 {
     testGrid();
     testNoteOn();
     testWindows();
     testModulated();
+    testScanRangeAndLoops();
     benchmark();
     printf(g_fail ? "\n%d FAILED\n" : "\nall passed\n", g_fail);
     return g_fail ? 1 : 0;

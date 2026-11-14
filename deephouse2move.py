@@ -1167,11 +1167,13 @@ GRAN_ROUTE_NAME = {"kParamDensity": "Density", "kParamGrainLength": "Length", "k
 GRAN_WINDOW = {"kWindowTukey": 0, "kWindowExpDec": 1, "kWindowTriangle": 2, "kWindowBlackmanHarris": 3, "kWindowGaussian": 4}
 GRAN_DENSITY_KNOB, GRAN_LENGTH_KNOB = 0.25, 0.5          # Serum's defaults when the preset does not store them (Density 3.9, Length 0.625 s)
 # The settings the engine does not carry yet, each a sound gap until its probe (name in the message, then the keys). The probe numbers are in docs/GRANULAR_DESIGN.md section 6.
-GRAN_OSC_GAPS = (("loop settings (P4)", ("kParamLoopMode", "kParamLoopStart", "kParamLoopEnd", "kParamLoopCrossfade", "kParamLoopStartLink")),
-                 ("scan range / position / reverse (P4)", ("kParamEnd", "kParamScanRange", "kParamManualPositionMode", "kParamPosition", "kParamReverse")),
+GRAN_OSC_GAPS = (("scan range option (P4: ScanRange 1 doubles the scan speed, its meaning is unknown)", ("kParamScanRange",)),
                  ("random start (P5)", ("kParamRandomStart",)),
                  ("tempo-synced scan (P4)", ("kParamScanBPMDivide", "kParamScanBPMRate", "kParamScanTempoLock", "kParamBaseTempo")),
                  ("key / velocity zone", ("kParamKeyZoneMin", "kParamKeyZoneMax", "kParamVelocityZoneMin", "kParamVelocityZoneMax")))
+# The Random settings the engine carries (engine param, Serum key, top of its range); a static route into one is folded in (percent = 100 x the route's share of the knob).
+GRAN_RANDOM = (("grdir", "kParamRandomDir"), ("grgain", "kParamRandomGain"), ("groff", "kParamRandomOffset"), ("grlen", "kParamRandomGrainLength"), ("grpan", "kParamRandomPan"))
+GRAN_FOLDED_PARAMS = ("kParamStart", "kParamPosition") + tuple(k for _, k in GRAN_RANDOM)           # a macro, wheel, velocity or note route into one of these is folded in; an LFO or envelope route is a gap
 
 
 def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, list, list]:
@@ -1188,21 +1190,46 @@ def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, 
     shape = gr.get("kParamWindowShape", "kWindowTukey")
     if shape not in GRAN_WINDOW:
         gaps.append(f"window {shape[7:]}")
+    if osc.get("kParamReverse", 0.0):
+        scan = -scan                                      # Reverse runs the scan backwards from the end (measured: the same as a scan rate of -100 % at 100 %)
     pots = {f"{sk}_kind": 1, f"{sk}_gdens": round(127.0 * kd, 2), f"{sk}_glen": round(127.0 * kl, 2), f"{sk}_gscan": round(scan, 2), f"{sk}_gstart": round(start, 2),
             f"{sk}_gwin": GRAN_WINDOW.get(shape, 0), f"{sk}_gwinp": round(_clamp(float(gr.get("kParamWindowParam", 100.0)), 0.0, 100.0), 2),
             f"{sk}_gskew": round(_clamp(float(gr.get("kParamWindowSkew", 0.0)), -100.0, 100.0), 2)}
+    mode = osc.get("kParamLoopMode")                      # Forward and PingPong loop the scan (P4); Off, Tailed and an unwritten mode play the file once
+    if mode in ("kForward", "kPingPong"):
+        pots[f"{sk}_gloop"] = 1 if mode == "kForward" else 2
+        pots[f"{sk}_gloops"] = round(_clamp(float(osc.get("kParamLoopStart", 0.0)), 0.0, 100.0), 2)
+        pots[f"{sk}_gloope"] = round(_clamp(float(osc.get("kParamLoopEnd", 100.0)), 0.0, 100.0), 2)
+    elif mode == "kTailed":
+        appr.append("loop mode Tailed plays the file once (its tail behaviour is not measured)")
+    if "kParamLoopCrossfade" in osc and mode in ("kForward", "kPingPong"):
+        appr.append("the loop crossfade is not carried")
+    if "kParamEnd" in osc:
+        pots[f"{sk}_gend"] = round(_clamp(float(osc["kParamEnd"]), 0.0, 100.0), 2)
+    if osc.get("kParamManualPositionMode", 0.0):
+        pots[f"{sk}_gman"] = 1
+        pots[f"{sk}_gpos"] = round(_clamp(float(osc.get("kParamPosition", 0.0)) + 100.0 * fold[("Oscillator", "kParamPosition", oid)], 0.0, 100.0), 2)
+    for pk, key in GRAN_RANDOM:                           # Random Direction / Gain / Offset / Grain Length / Pan, percent (P5)
+        v = _clamp(float(gr.get(key, 0.0)) + 100.0 * fold[("GranularOsc", key, oid)], 0.0, 100.0)
+        if v > 0.0:
+            pots[f"{sk}_{pk}"] = round(v, 2)
+    rp = float(gr.get("kParamRandomPitch", 0.0))
+    if rp > 0.0:
+        pots[f"{sk}_grpitch"] = round(min(rp, 12.0), 2)    # semitones, Serum stops at 12
     if osc.get("kParamPitchTrack", 1.0) == 0.0:
         pots[f"{sk}_fixed"] = 1                           # the pitch does not follow the key
     for label, keys in GRAN_OSC_GAPS:
         if any(k in osc for k in keys):
             gaps.append(label)
+    if "kParamLoopMode" in osc and mode not in ("kForward", "kPingPong", "kTailed", "kOff"):
+        gaps.append(f"loop mode {mode}")
     if gr.get("kParamLengthMode") == "kLengthBPM":
         gaps.append("tempo-synced grain length (P9)")
     if gr.get("kParamDensityMode") == "kDensityBPM":
         gaps.append("tempo-synced density (P9)")
-    rnd = [k[12:] for k, v in gr.items() if k.startswith("kParamRandom") and isinstance(v, (int, float)) and v > 0]
+    rnd = [k[12:] for k, v in gr.items() if k in ("kParamRandomWindowSkew", "kParamRandomWindowAmount", "kParamRandomWarp") and isinstance(v, (int, float)) and v > 0]
     if rnd:
-        gaps.append("Random " + " / ".join(rnd) + " (P5)")
+        gaps.append("Random " + " / ".join(rnd) + " (not measured)")
     if gr.get("kParamWarpMenu") or gr.get("kParamWarpMenu2"):
         gaps.append("warp on the grains (P8)")
     if unison > 1:
@@ -2017,7 +2044,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         gid = m["dest_id"]
         if gid in gslot and abs(m["amount_pct"]) >= 5.0 and ((m["dest_type"] == "GranularOsc" and m["dest_param"] not in ("kParamDensity", "kParamGrainLength"))
                                                             or (m["dest_type"] == "Oscillator" and m["dest_param"] in ("kParamPosition", "kParamStart", "kParamScanRange", "kParamLoopStart", "kParamLoopEnd"))):
-            if not (m["dest_param"] == "kParamStart" and (25 <= m["source"] <= 32 or m["source"] in (1, 16, 17))):         # a static route into Start is folded in
+            if not (m["dest_param"] in GRAN_FOLDED_PARAMS and (25 <= m["source"] <= 32 or m["source"] in (1, 16, 17))):         # a static route into Start / Position / a Random amount is folded in
                 msg = f"osc {'ABC'[gid]} (granular): a route into {m['dest_param'][6:]} not carried"
                 if msg not in crit:
                     crit.append(msg)

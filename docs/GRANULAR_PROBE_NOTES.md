@@ -91,3 +91,16 @@ Every Random value is a percent (0..100), the amount v = Random / 100. The grain
   are L = (1 - x) c and R = (1 + x) c with c = 1 / sqrt(1 + 0.462 x^2), relative to the centre's L = R = 1 (mono file; fit within 0.5 %). It is not constant power: at the extreme one side is 1.65 and the other 0.
   Stereo files and the pan of a stereo grain: not yet measured (P11).
 - Not measured: Random Window Amount / Skew and Random Warp (4 oscillators each), Random Start on the oscillator (4).
+
+## Scan range, loops, manual position (P4, measured 2026-11-14, `chirp.wav`: f = 300 + 337.5 t Hz over 8 s, one rectangular-window grain at a time, the grain's frequency is where it reads)
+Positions in percent of the file; the scan position p(t) = Start + Scan x t (t since note-on, signed).
+- No loop (mode absent, Off, Tailed): grains exist while p < End (End default 100 %, the file end); past it there are none. A negative rate starts at End and runs down to Start, where the grains stop.
+  Tailed behaved as Off up to the file end; two odd grains at the very end were seen (not understood).
+- **Forward loop** (LoopStart / LoopEnd, 25..50 % = 2..4 s): from a Start below the loop end the position runs on to the loop end and wraps to the loop start (p = ls + (p - ls) mod (le - ls));
+  before the loop end it is plain. **PingPong**: at the loop end it reverses to the loop start and goes forward again (triangle). With a negative rate: starts at End, runs down, and once below the loop end
+  keeps going to the loop start, where it wraps to the loop end (Forward: 1.99 -> 3.99) or reflects (PingPong); the Start bound does not apply inside a loop.
+- A **Start at or beyond the loop end**: no loop at all, the scan plays straight to the file end. LoopEnd absent = 100 % (the loop then wraps at the file end: Start 60 %, LoopStart 25 %, scan 200 -> wraps to 2.38 s at p = 8.38).
+- **Reverse** (osc `kParamReverse` = 1): the same as a negative scan rate (starts at End, runs down to Start).
+- **Manual Position** (`kParamManualPositionMode` = 1, `kParamPosition` percent): every grain reads at Position; the scan and Start are ignored (Position 50 % = 4.0 s with Start 25 % and Scan 100 %).
+- **ScanRange** = 1 (8 oscillators): with End 50 %, Start 12.5 % the scan moved at twice the speed (1.0 -> 1.84 in 0.42 s). Meaning unknown, not carried.
+- Not measured: Tailed past the end, Loop Crossfade, LoopStartLink, Random Start (oscillator), the tempo-synced scan (`kParamScanBPM*`, `kParamBaseTempo`, `kParamScanTempoLock`).

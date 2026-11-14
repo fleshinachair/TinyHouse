@@ -6,7 +6,7 @@
 
 #define TB_VERSION "1.11.0-th"
 #define TB_MODULE_ID "tinyhouse"
-#define TB_PARAM_COUNT 459
+#define TB_PARAM_COUNT 495
 
 typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;
 
@@ -481,6 +481,42 @@ enum {
     TB_P_SMP3_GWIN = 456,
     TB_P_SMP3_GWINP = 457,
     TB_P_SMP3_GSKEW = 458,
+    TB_P_SMP_GLOOP = 459,
+    TB_P_SMP_GLOOPS = 460,
+    TB_P_SMP_GLOOPE = 461,
+    TB_P_SMP_GEND = 462,
+    TB_P_SMP_GMAN = 463,
+    TB_P_SMP_GPOS = 464,
+    TB_P_SMP_GRDIR = 465,
+    TB_P_SMP_GRGAIN = 466,
+    TB_P_SMP_GRPITCH = 467,
+    TB_P_SMP_GROFF = 468,
+    TB_P_SMP_GRLEN = 469,
+    TB_P_SMP_GRPAN = 470,
+    TB_P_SMP2_GLOOP = 471,
+    TB_P_SMP2_GLOOPS = 472,
+    TB_P_SMP2_GLOOPE = 473,
+    TB_P_SMP2_GEND = 474,
+    TB_P_SMP2_GMAN = 475,
+    TB_P_SMP2_GPOS = 476,
+    TB_P_SMP2_GRDIR = 477,
+    TB_P_SMP2_GRGAIN = 478,
+    TB_P_SMP2_GRPITCH = 479,
+    TB_P_SMP2_GROFF = 480,
+    TB_P_SMP2_GRLEN = 481,
+    TB_P_SMP2_GRPAN = 482,
+    TB_P_SMP3_GLOOP = 483,
+    TB_P_SMP3_GLOOPS = 484,
+    TB_P_SMP3_GLOOPE = 485,
+    TB_P_SMP3_GEND = 486,
+    TB_P_SMP3_GMAN = 487,
+    TB_P_SMP3_GPOS = 488,
+    TB_P_SMP3_GRDIR = 489,
+    TB_P_SMP3_GRGAIN = 490,
+    TB_P_SMP3_GRPITCH = 491,
+    TB_P_SMP3_GROFF = 492,
+    TB_P_SMP3_GRLEN = 493,
+    TB_P_SMP3_GRPAN = 494,
 };
 
 static const char *const tb_opts_0[] = { "LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24", "Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +" };
@@ -509,6 +545,7 @@ static const char *const tb_opts_22[] = { "Sub", "Osc A", "Osc B", "Osc C", "Noi
 static const char *const tb_opts_23[] = { "Off", "Low", "High", "Mid", "Side" };
 static const char *const tb_opts_24[] = { "Sample", "Granular" };
 static const char *const tb_opts_25[] = { "Tukey", "ExpDec", "Triangle", "BlackmanHarris", "Gaussian" };
+static const char *const tb_opts_26[] = { "Off", "Forward", "PingPong" };
 
 static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "wt1_table", TB_PATH, 0, 0, 0, 0, 0 },
@@ -970,6 +1007,42 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "smp3_gwin", TB_ENUM, 0, 4, 0, 5, tb_opts_25 },
     { "smp3_gwinp", TB_INT, 0, 100, 100, 0, 0 },
     { "smp3_gskew", TB_INT, -100, 100, 0, 0, 0 },
+    { "smp_gloop", TB_ENUM, 0, 2, 0, 3, tb_opts_26 },
+    { "smp_gloops", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_gloope", TB_INT, 0, 100, 100, 0, 0 },
+    { "smp_gend", TB_INT, 0, 100, 100, 0, 0 },
+    { "smp_gman", TB_ENUM, 0, 1, 0, 2, tb_opts_6 },
+    { "smp_gpos", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_grdir", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_grgain", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_grpitch", TB_INT, 0, 12, 0, 0, 0 },
+    { "smp_groff", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_grlen", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp_grpan", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_gloop", TB_ENUM, 0, 2, 0, 3, tb_opts_26 },
+    { "smp2_gloops", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_gloope", TB_INT, 0, 100, 100, 0, 0 },
+    { "smp2_gend", TB_INT, 0, 100, 100, 0, 0 },
+    { "smp2_gman", TB_ENUM, 0, 1, 0, 2, tb_opts_6 },
+    { "smp2_gpos", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_grdir", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_grgain", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_grpitch", TB_INT, 0, 12, 0, 0, 0 },
+    { "smp2_groff", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_grlen", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp2_grpan", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_gloop", TB_ENUM, 0, 2, 0, 3, tb_opts_26 },
+    { "smp3_gloops", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_gloope", TB_INT, 0, 100, 100, 0, 0 },
+    { "smp3_gend", TB_INT, 0, 100, 100, 0, 0 },
+    { "smp3_gman", TB_ENUM, 0, 1, 0, 2, tb_opts_6 },
+    { "smp3_gpos", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_grdir", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_grgain", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_grpitch", TB_INT, 0, 12, 0, 0, 0 },
+    { "smp3_groff", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_grlen", TB_INT, 0, 100, 0, 0, 0 },
+    { "smp3_grpan", TB_INT, 0, 100, 0, 0, 0 },
 };
 
 /* chain_params: fully static, served verbatim. It MUST stay cheap —

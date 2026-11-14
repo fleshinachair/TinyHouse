@@ -76,3 +76,18 @@ With a = Param / 100 and u = the skewed position:
 
 ## Still to measure
 See the probe plan in `docs/GRANULAR_DESIGN.md`.
+
+## Random settings (P5, measured 2026-11-14, `calibration/probe_granular_random.py`)
+Method: one grain at a time (Density 0.001), Scan 0, a rectangular window (Tukey Param 0) where the grain's extent is read, a click or a linear chirp (`chirp.wav`, 300 -> 3000 Hz over 8 s) where its read position is read.
+Every Random value is a percent (0..100), the amount v = Random / 100. The grain's draw is uniform, taken at its birth.
+- **Not seeded**: two renders of the same settings differ (pan sequences differ), and so do two notes. No seed rule is needed; any PRNG will do.
+- **Random Direction**: each grain is reversed with probability v (0.25 / 0.54 / 1.00 at 25 / 50 / 100). A reversed grain starts at the same read position as a forward one and runs backwards from it
+  (chirp: forward grains' mean frequency is the file's at Start + T/2, reversed ones' the file's at Start - T/2).
+- **Random Gain**: amplitude x (1 - v u), u uniform 0..1 (rms/ref spreads over 0.75..1 at 25, 0.5..1 at 50, 0.1..1 at 100): it only turns grains down.
+- **Random Pitch**: semitones, uniform in +-min(v x 100, 12) (v at 2 / 6 / 12 gives +-2 / +-6 / +-12 st, 24 is capped at +-12). A small positive bias of about 0.9 st was seen at 2 and 6 (cause not found; not modelled).
+- **Random Offset**: the grain's read start moves by +-0.15 x (the file's length) x v^4, uniform (v = 1: +-1.18 s on an 8 s file, +-0.58 s on 4 s; v = 0.75: +-0.37 s; v = 0.5: +-0.07 s; v = 0.25: +-0.005 s), independent of the grain length.
+- **Random Grain Length**: the length becomes T (1 + r v^4), r uniform in -1..1 (v = 1: lengths from about 0 to 2 T, v = 0.5: +-6 %, v = 0.25: +-0.4 %). The grid keeps the nominal spacing.
+- **Random Pan**: a pan x drawn uniform in +-g(v)... the measured extremes of x = (R - L) / (R + L) are 0.083 / 0.208 / 0.43 / 0.685 / 0.99 at v = 0.1 / 0.25 / 0.5 / 0.75 / 1, fitted by g(p) = p (0.83 + 0.16 p^2); the grain's gains
+  are L = (1 - x) c and R = (1 + x) c with c = 1 / sqrt(1 + 0.462 x^2), relative to the centre's L = R = 1 (mono file; fit within 0.5 %). It is not constant power: at the extreme one side is 1.65 and the other 0.
+  Stereo files and the pan of a stereo grain: not yet measured (P11).
+- Not measured: Random Window Amount / Skew and Random Warp (4 oscillators each), Random Start on the oscillator (4).

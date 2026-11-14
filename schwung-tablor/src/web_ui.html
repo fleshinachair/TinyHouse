@@ -52,6 +52,12 @@ body{
  * while the other pages drop to two columns. Under 700px the oscillators become one panel at a
  * time behind a 1/2/3 switch, and everything else is a single column. */
 .seg.oscsel{display:none; margin:0 0 10px}
+.smpnote{display:none; margin:0 0 10px; padding:6px 10px; border:1px solid var(--line2); border-radius:4px; color:var(--faint); font-size:11px; cursor:pointer}
+.smpnote b{color:var(--g); font-weight:600}
+.smpslot:not(.sel){display:none}
+.smpslot .badge{margin-left:8px; padding:1px 7px; border-radius:9px; font-size:10px; border:1px solid var(--line2); color:var(--faint)}
+.smpslot .badge.gran{color:var(--g); border-color:var(--g)}
+.smpslot .smpfile{color:var(--faint); font-size:11px; margin:2px 0 6px; word-break:break-all}
 @media (max-width:1100px){
   :root{--kw:48px; --ks:32px}
   .g3:not(#osc),.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1276,6 +1282,12 @@ function buildOsc() {
   var host = document.getElementById("osc");
   var sel = el("div", "seg oscsel", host.parentNode), panels = [];
   host.parentNode.insertBefore(sel, host);
+  /* a line above the oscillators when a sample slot (a plain sample, or the granular oscillator) is sounding too: the three panels below are the wavetable oscillators */
+  var nt = el("div", "smpnote", host.parentNode);
+  host.parentNode.insertBefore(nt, host);
+  SMPUI.note = nt; SMPUI.onOsc = true;
+  SMPUI.noteShow = function () { nt.style.display = SMPUI.onOsc && nt.dataset.has ? "block" : "none"; };
+  nt.addEventListener("click", function () { var b = document.querySelectorAll("#tabs button")[1]; if (b) b.click(); });
   function showOsc(i) {
     panels.forEach(function (p, j) { p.classList.toggle("sel", j === i); });
     [].forEach.call(sel.children, function (b, j) { b.classList.toggle("on", j === i); });
@@ -1303,6 +1315,70 @@ function buildOsc() {
     placed[pre + "table"] = 1;
   });
   showOsc(0);
+}
+
+/* ------------------------------------------------------------- sample slots
+ * The three sample slots, each a plain sample or Serum's Granular oscillator (the slot's Kind). Which file plays is part of the preset. */
+var SMPSLOTS = [["smp", "Sample 1"], ["smp2", "Sample 2"], ["smp3", "Sample 3"]];
+var SMPUI = {};
+function smpLabel(p) {
+  var k = val(p + "_kind") >= 1, lv = val(p + "_level");
+  return { on: lv > 0, gran: k };
+}
+function smpNoteUpdate() {
+  var n = SMPUI.note; if (!n) return;
+  var parts = [];
+  SMPSLOTS.forEach(function (s) { var l = smpLabel(s[0]); if (l.on) parts.push("<b>" + s[1] + "</b> " + (l.gran ? "granular" : "sample")); });
+  n.innerHTML = parts.length ? "Also sounding: " + parts.join(" · ") + " — open the Sample tab to edit" : "";
+  n.dataset.has = parts.length ? "1" : "";
+  SMPUI.noteShow && SMPUI.noteShow();
+}
+function buildSample(page) {
+  var sel = el("div", "seg", page), slots = [];
+  sel.style.margin = "0 0 10px";
+  function show(i) {
+    slots.forEach(function (p, j) { p.classList.toggle("sel", j === i); });
+    [].forEach.call(sel.children, function (b, j) { b.classList.toggle("on", j === i); });
+    redrawSoon();
+  }
+  SMPSLOTS.forEach(function (s, i) {
+    var p = s[0];
+    el("button", null, sel, s[1].toUpperCase()).addEventListener("click", function () { show(i); });
+    var pn = panel(s[1], page, { cls: "smpslot" });
+    slots.push(pn.root);
+    var badge = el("span", "badge", pn.head, "");
+    var file = el("div", "smpfile", pn.body, "");
+    SMPUI[p] = { file: file };
+    var gran = el("div", null, pn.body);
+    var upd = function () {
+      var g = val(p + "_kind") >= 1, l = val(p + "_level") > 0;
+      badge.textContent = (g ? "GRANULAR" : "SAMPLE") + (l ? "" : " · level 0");
+      badge.classList.toggle("gran", g);
+      gran.style.display = g ? "" : "none";
+      smpNoteUpdate();
+    };
+    row([[p + "_kind", "Kind"], [p + "_fixed", "Pitch"]], pn.body);
+    row([[p + "_level", "Level"], [p + "_tune", "Tune"], [p + "_fine", "Fine"], [p + "_bal", "Filter bal"]], pn.body);
+    row([[p + "_uni", "Unison"], [p + "_det", "Detune"], [p + "_spread", "Spread"]], pn.body);
+    sub(pn.body, "Routing");
+    row([[p + "_post", "Route"], [p + "_bus1", "Bus 1"], [p + "_bus2", "Bus 2"]], pn.body);
+    pn.body.appendChild(gran);
+    sub(gran, "Grains");
+    row([[p + "_gdens", "Density"], [p + "_glen", "Length"], [p + "_gscan", "Scan rate"], [p + "_gstart", "Start"], [p + "_gend", "End"]], gran);
+    row([[p + "_gdenm", "Density mode"], [p + "_glenm", "Length mode"]], gran);
+    sub(gran, "Window");
+    row([[p + "_gwin", "Window"], [p + "_gwinp", "Param"], [p + "_gskew", "Skew"]], gran);
+    sub(gran, "Scan");
+    row([[p + "_gscx", "Range"], [p + "_gscm", "Mode"], [p + "_gbase", "Base tempo"], [p + "_gsbr", "Rate step"]], gran);
+    sub(gran, "Loop and position");
+    row([[p + "_gloop", "Loop"], [p + "_gloops", "Loop start"], [p + "_gloope", "Loop end"], [p + "_gman", "Manual pos"], [p + "_gpos", "Position"]], gran);
+    sub(gran, "Random");
+    row([[p + "_grdir", "Direction"], [p + "_grgain", "Gain"], [p + "_grpitch", "Pitch"], [p + "_groff", "Offset"], [p + "_grlen", "Length"], [p + "_grpan", "Pan"]], gran);
+    on(p + "_kind", upd); on(p + "_level", upd); upd();
+    EXTRA[p + "_set"] = function (v) { file.textContent = v ? "File: " + String(v).split("/").pop().replace(/\.tbs$/, "") : "No sample loaded in this slot."; };
+  });
+  el("div", "note", page, "Which sample plays is part of the preset: a Serum preset brings its own, and the importer makes a set from it. Kind switches a slot between a plain sample and the granular oscillator; the grain controls show for Granular.");
+  show(0);
 }
 
 function buildFilter(page) {
@@ -2977,7 +3053,7 @@ var EXTRA = {
 /* ------------------------------------------------------------------ start */
 function buildTabs() {
   var tabs = document.getElementById("tabs"), pages = document.getElementById("pages");
-  var defs = [["Osc", null], ["Macros", buildMacros], ["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
+  var defs = [["Osc", null], ["Sample", buildSample], ["Macros", buildMacros], ["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
   var ps = [], bs = [];
   defs.forEach(function (d, i) {
     var b = el("button", i ? null : "on", tabs, d[0]);
@@ -2988,6 +3064,7 @@ function buildTabs() {
       ps.forEach(function (x, j) { if (x) x.classList.toggle("on", j === i); bs[j].classList.toggle("on", j === i); });
       document.getElementById("osc").style.display = i === 0 ? "" : "none";
       var os = document.querySelector(".seg.oscsel"); if (os) os.style.display = i === 0 ? "" : "none";
+      SMPUI.onOsc = i === 0; if (SMPUI.noteShow) SMPUI.noteShow();
       try { localStorage.setItem("th_tab2", String(i)); } catch (e) {}
       redrawSoon();
     });

@@ -33,7 +33,7 @@ body{
 #top .brand{font-size:12px; letter-spacing:.42em; font-weight:700; color:var(--hi)}
 #top .brand i{font-style:normal; color:var(--g)}
 #top .hint{margin-left:auto; color:var(--faint); font-size:10px; letter-spacing:.08em}
-#tabs{display:flex; gap:2px; margin:14px 0 10px; border-bottom:1px solid var(--line)}
+#tabs{display:flex; gap:2px; margin:6px 0 12px; border-bottom:1px solid var(--line)}
 #tabs button{
   background:none; border:0; border-bottom:2px solid transparent; color:var(--dim);
   font:inherit; letter-spacing:.2em; text-transform:uppercase; font-size:10px;
@@ -94,16 +94,38 @@ body{
 .panel > .head .pick{margin-left:auto; display:flex; gap:6px; min-width:0}
 .panel > .head .pick select{max-width:170px}
 .panel > .body{padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px}
-.fxhead{max-width:920px; margin-bottom:8px}
-.fxbar{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; max-width:920px}
+.fxhead{max-width:1180px; margin-bottom:8px}
+.fxbar{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; max-width:1180px}
 .fxchip{background:none; border:1px solid var(--line); color:var(--faint); font:inherit; font-size:10px; letter-spacing:.16em; text-transform:uppercase; padding:5px 10px; cursor:pointer; border-radius:3px}
 .fxchip:hover{color:var(--txt); border-color:var(--dim)}
 .fxchip.on{color:var(--g); border-color:var(--g)}
-.fxrack{display:flex; flex-direction:column; gap:8px; max-width:920px}
+.fxrack{display:flex; flex-direction:column; gap:8px; max-width:1180px}
 .fxrack.rackoff{opacity:.45}
-.fxrack > .panel.fxslot{height:340px; margin:0; display:flex; flex-direction:column}
-.fxslot > .head{flex:0 0 auto}
-.fxslot > .body{flex:1 1 auto; min-height:0; overflow-y:auto}
+/* a slot after Serum's: the same size for every effect, the name down the left edge, the display filling its half, the controls beside it */
+.fxrack > .panel.fxslot{height:214px; margin:0; display:flex; flex-direction:row; overflow:hidden; --kw:52px; --ks:34px}
+.fxslot > .head{flex:0 0 116px; flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:10px; padding:12px 10px; border-bottom:0; border-right:1px solid var(--line)}
+.fxslot > .head .ttl{letter-spacing:.14em; line-height:1.3}
+.fxslot > .body{flex:1 1 auto; min-width:0; min-height:0; flex-direction:row; align-items:stretch; gap:14px; padding:10px 12px; overflow:hidden}
+.fxgfx{flex:0 0 clamp(200px,28%,320px); display:flex; min-width:0}
+.fxgfx canvas.gr{flex:1; height:auto !important; min-height:0}
+.fxctl{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:8px; overflow-y:auto}
+.fxhead > .body{flex-direction:row; align-items:center; gap:18px}
+.fxhead > .body .note{flex:1 1 auto; margin:0}
+.fxrack > .panel.fxslot.nogfx{--kw:84px; --ks:50px}                                   /* no display: the controls take the whole width, bigger */
+.fxslot.nogfx .fxctl .row{justify-content:space-evenly}
+.fxslot.nogfx .fxctl .row > *{margin-top:0}
+.fxslot .eqbox{flex-direction:row !important; flex-wrap:wrap; align-items:flex-start; gap:8px 14px !important; width:100%}
+.fxslot .eqbox > div:first-child{flex:0 0 clamp(200px,28%,320px)}
+.fxslot .eqbox canvas.gr{height:118px !important}
+.fxslot .eqbox > .cols{flex:1 1 0; min-width:0; flex-wrap:wrap; gap:8px 10px}
+.fxslot .eqbox > .note{flex:0 0 100%}
+@media (max-width:900px){
+  .fxrack > .panel.fxslot{height:auto; flex-direction:column}
+  .fxslot > .head{flex:none; flex-direction:row; align-items:center; border-right:0; border-bottom:1px solid var(--line); padding:8px 12px}
+  .fxslot > .body{flex-direction:column; overflow:visible}
+  .fxgfx{flex:none; height:90px}
+  .fxctl{overflow:visible}
+}
 .row{display:flex; flex-wrap:wrap; gap:8px 2px; align-items:flex-start}
 .row > .fld{margin:6px 6px 0 0}
 .row > .tg{margin:14px 8px 0 0}
@@ -268,8 +290,8 @@ canvas.gr.drag{cursor:crosshair}
   <div id="top"><div class="brand">TINY<i>HOUSE</i></div><div id="pbar"></div><div class="hint" id="hint">connecting…</div></div>
   <div id="browser"></div>
   <div id="imp"></div>
-  <div id="osc" class="grid g3"></div>
   <div id="tabs"></div>
+  <div id="osc" class="grid g3"></div>
   <div id="pages"></div>
 </div>
 
@@ -1032,7 +1054,7 @@ function eqPtr(bands, hotRef, wrapEl) {
   };
 }
 function eqBlock(into, set, cap) {
-  var bands = eqBands(set), hot = { i: 0 }, box = el("div", null, into);
+  var bands = eqBands(set), hot = { i: 0 }, box = el("div", "eqbox", into);
   box.style.cssText = "display:flex;flex-direction:column;gap:10px";
   var gwrap = el("div", null, box);
   graph(gwrap, eqGraph(bands, hot), 150, eqPtr(bands, hot, box));
@@ -1162,6 +1184,11 @@ function fxSlot(title, o, build) {
   var p = panel(title, fxRack, { power: o.power });
   p.root.classList.add("fxslot");
   build(p.body, p);
+  var kids = [].slice.call(p.body.children), gfx = document.createElement("div"), ctl = document.createElement("div");     /* the display apart from the controls */
+  gfx.className = "fxgfx"; ctl.className = "fxctl";
+  kids.forEach(function (k) { (k.tagName === "CANVAS" ? gfx : ctl).appendChild(k); });
+  if (gfx.children.length) p.body.appendChild(gfx); else p.root.classList.add("nogfx");
+  p.body.appendChild(ctl);
   if (!o.power) {                       /* an effect with no switch of its own: a small one in the title bar puts it out of the rack */
     var off = el("button", "pw on");
     off.title = "Take " + title + " out of the rack";
@@ -1355,6 +1382,7 @@ function buildFx(page) {
   });
   fxSync();
   rackOn();
+  redrawSoon();
 }
 
 function buildGlobal(page) {
@@ -2778,21 +2806,22 @@ var EXTRA = {
 /* ------------------------------------------------------------------ start */
 function buildTabs() {
   var tabs = document.getElementById("tabs"), pages = document.getElementById("pages");
-  var defs = [["Macros", buildMacros], ["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
+  var defs = [["Osc", null], ["Macros", buildMacros], ["Filter", buildFilter], ["Envelopes", buildEnv], ["FX", buildFx], ["Mix", buildMix], ["Globals", buildGlobal], ["Demo", buildDemo]];
   var ps = [], bs = [];
   defs.forEach(function (d, i) {
     var b = el("button", i ? null : "on", tabs, d[0]);
-    var p = el("div", "page" + (i ? "" : " on"), pages);
-    d[1](p);
+    var p = d[1] ? el("div", "page", pages) : null;            /* the Osc tab has no page of its own: it shows the oscillator panels */
+    if (p) d[1](p);
     ps.push(p); bs.push(b);
     b.addEventListener("click", function () {
-      ps.forEach(function (x, j) { x.classList.toggle("on", j === i); bs[j].classList.toggle("on", j === i); });
-      try { localStorage.setItem("th_tab", String(i)); } catch (e) {}
+      ps.forEach(function (x, j) { if (x) x.classList.toggle("on", j === i); bs[j].classList.toggle("on", j === i); });
+      document.getElementById("osc").style.display = i === 0 ? "" : "none";
+      try { localStorage.setItem("th_tab2", String(i)); } catch (e) {}
       redrawSoon();
     });
   });
   try {
-    var t = parseInt(localStorage.getItem("th_tab"), 10);
+    var t = parseInt(localStorage.getItem("th_tab2"), 10);
     if (t > 0 && t < defs.length) bs[t].click();
   } catch (e) {}
 }

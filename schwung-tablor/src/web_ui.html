@@ -2749,11 +2749,16 @@ function macSend(cmd) {
   try { schwungRemote.setParam(KP + "macro_edit", cmd); } catch (e) {}
   setTimeout(macReload, 160);
 }
-function macDefaultTravel(key) {
+function macDefaultTravel(key, n) {
   var m = META[key], cur = Number(val(key)), span = (m.max - m.min) || 1;
   if (!isFinite(cur)) cur = m.min;
-  /* the macro going UP raises the control, from where it sits now to its top; only a control already within a tenth of its top goes the other way, down to its bottom */
-  return Math.round(cur <= m.max - span * 0.1 ? m.max - cur : m.min - cur);
+  var mv = Number(val("mac" + n)); if (!isFinite(mv)) mv = 0;
+  /* The macro going UP raises the control, so a macro turned up makes more of it. The control moves by its change, so it can only go where it has room: a control at its top
+   * with the macro low (or at its bottom with the macro high) can only follow the macro the other way round, and then it runs backwards. Otherwise the travel is the whole range, so the
+   * macro sweeps the control from bottom to top however far each sits to start with. */
+  var ctrlBias = (m.max - cur) - (cur - m.min), macBias = (127 - mv) - mv;
+  var sign = ctrlBias * macBias < 0 ? -1 : 1;
+  return Math.round(sign * span);
 }
 function macMenuClose() { var o = document.getElementById("macmenu"); if (o) o.remove(); }
 function macMenu(key, label, x, y) {
@@ -2767,7 +2772,7 @@ function macMenu(key, label, x, y) {
     el("span", "nm", b, MAC.names[n - 1] || (MAC.routes.some(function (r) { return r.m === n; }) ? "" : "empty"));
     el("span", "tick", b, has ? "\u2713 remove" : "add");
     b.addEventListener("click", function () {
-      macSend(has ? "del|" + n + "|" + key + "|" : "add|" + n + "|" + key + "|" + macDefaultTravel(key) + "|" + label);
+      macSend(has ? "del|" + n + "|" + key + "|" : "add|" + n + "|" + key + "|" + macDefaultTravel(key, n) + "|" + label);
       macMenuClose();
     });
   })(n);
@@ -2820,15 +2825,43 @@ function macKeys(i) {
   MAC.routes.forEach(function (r) { if (r.m === i + 1 && !seen[r.k]) { seen[r.k] = 1; out.push(r.k); } });
   return out;
 }
+/* A macro the Move turns moves its controls inside the module, and nothing tells the host: the manager hands back the value it last
+ * had (stale), so the source control never followed. The page therefore does the module's sum itself (travel x the macro's change /
+ * 127, held to the control's range, exactly as Engine::macroMoved) and shows that; the read afterwards only corrects it when it is
+ * nearer the prediction than the old value (a stale read is the old value and is ignored). */
+var MACP = { seen: {}, pred: {}, before: {}, hold: 0 };
+function macPredict(i, now) {
+  var was = MACP.seen[i];
+  MACP.seen[i] = now;
+  if (was === undefined || was === now || Date.now() < MACP.hold) return;
+  var d = now - was;
+  MAC.routes.forEach(function (r) {
+    if (r.m !== i + 1) return;
+    var m = META[r.k]; if (!m || m.type !== "int") return;
+    var cur = MACP.pred[r.k] !== undefined && Math.round(MACP.pred[r.k]) === val(r.k) ? MACP.pred[r.k] : val(r.k);
+    if (MACP.before[r.k] === undefined) MACP.before[r.k] = cur;
+    var nv = Math.min(m.max, Math.max(m.min, cur + r.t * d / 127));
+    MACP.pred[r.k] = nv;
+    setVal(r.k, nv, false);
+  });
+}
 function macFollow(i) {
   clearTimeout(MAC.timer);
   MAC.timer = setTimeout(function () {
     macKeys(i).forEach(function (k) {
-      schwungRemote.getParam(KP + k).then(function (v) { if (v !== undefined && v !== null && v !== "") incoming(k, v); }).catch(function () {});
+      schwungRemote.getParam(KP + k).then(function (v) {
+        if (v === undefined || v === null || v === "") return;
+        var n = parseFloat(v), b = MACP.before[k], p = MACP.pred[k];
+        delete MACP.before[k];
+        if (!isNaN(n) && b !== undefined && p !== undefined && Math.abs(n - p) > Math.abs(n - b) + 0.5) return;   /* the old value again: stale */
+        delete MACP.pred[k];
+        incoming(k, v);
+      }).catch(function () {});
     });
   }, 120);
 }
 function macReload() {
+  MACP.hold = Date.now() + 1500;                      /* a preset has just loaded: its macro values are not moves */
   schwungRemote.getParam(KP + "macro_names").then(function (v) { EXTRA.macro_names(v || ""); }).catch(function () {});
   schwungRemote.getParam(KP + "macro_routes").then(function (v) { EXTRA.macro_routes(v || ""); }).catch(function () {});
 }
@@ -2839,12 +2872,12 @@ function buildMacros(page) {
   var wraps = r.querySelectorAll(".knob");
   for (var i = 0; i < wraps.length; i++) {
     MAC.wraps[i] = wraps[i]; MAC.labs[i] = wraps[i].querySelector(".lab");
-    (function (n) { on("mac" + (n + 1), function () { macFollow(n); }); })(i);
+    (function (n) { on("mac" + (n + 1), function (v) { macPredict(n, v); macFollow(n); }); })(i);
   }
   MAC.note = el("div", "demo-note", p.body, "This sound has no macros yet. Right-click any knob (on any tab) and choose a macro to put it there: the macro then moves that control, and the Move shows it as one of its eight macro knobs. Imported Serum presets bring their own.");
   macRender();
   var ap = panel("Assignments", g);
-  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. A new assignment lets the macro raise the control from where it sits to its top; here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
+  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. A new assignment lets the macro sweep the control across its whole range, up as the macro goes up (it runs the other way only if the control sits at its top with the macro low, or the reverse); here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
   MAC.list = el("div", null, ap.body);
   MAC.empty = el("div", "demo-note", ap.body, "Nothing is assigned yet.");
   macList();

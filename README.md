@@ -26,8 +26,6 @@ out as close as possible to the original, use the Python scripts instead: they r
 
 ## Getting started
 
-## Getting started
-
 **1. Install the module.** TinyHouse installs beside any other Schwung modules, under its own name (`tinyhouse`). Build it and copy it to the Move
 (you need the Move on your network, SSH access to it, and a zig compiler; see [Installing](#installing)).
 

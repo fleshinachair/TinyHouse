@@ -48,8 +48,6 @@ body{
 .grid{display:grid; gap:10px; align-items:start}
 .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
-.gfx{display:block; column-width:360px; column-gap:10px}
-.gfx > .panel{break-inside:avoid; margin-bottom:10px}
 /* Narrower windows: the three oscillators stay side by side (smaller knobs, shorter waterfalls)
  * while the other pages drop to two columns. Under 700px the oscillators become one panel at a
  * time behind a 1/2/3 switch, and everything else is a single column. */
@@ -58,12 +56,11 @@ body{
   :root{--kw:48px; --ks:32px}
   .g3:not(#osc),.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wrap{padding:10px 10px 28px}
-  .grid,.gfx{gap:8px}
+  .grid{gap:8px}
   .panel > .head{padding:6px 9px 5px; min-height:30px}
   .panel > .body{padding:8px 9px 10px; gap:8px}
   #osc canvas.gr{height:150px !important}
   .knob .lab{font-size:9px}
-  .gfx{column-width:300px}
 }
 @media (max-width:900px){
   :root{--kw:42px; --ks:28px}
@@ -97,20 +94,16 @@ body{
 .panel > .head .pick{margin-left:auto; display:flex; gap:6px; min-width:0}
 .panel > .head .pick select{max-width:170px}
 .panel > .body{padding:10px 12px 12px; display:flex; flex-direction:column; gap:10px}
-.fxoff{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; align-items:flex-start}
-.fxoff:empty{display:none}
-.fxoff:not(:empty)::before{content:"Bypassed"; flex:1 0 100%; font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin-top:6px}
-.fxoff > .panel{width:230px; margin:0; column-span:none}
-.panel .chev{display:none}
-.panel.fx > .head{cursor:default}
-.panel.fx.collapsed > .head,.panel.fx.peek > .head{cursor:pointer}
-.panel.fx.collapsed > .head{border-bottom-color:transparent}
-.panel.fx.peek .chev{transform:rotate(45deg)}
-.panel.fx.collapsed > .head:hover .ttl{color:var(--txt)}
-.panel.fx.collapsed > .head .ttl{color:var(--faint)}
-.panel.fx.collapsed > .body{display:none}
-.panel.fx.collapsed .chev,.panel.fx.peek .chev{display:block}
-.panel .chev{margin-left:auto; width:6px; height:6px; border-right:1.5px solid var(--faint); border-bottom:1.5px solid var(--faint); transform:rotate(-45deg); margin-right:4px}
+.fxhead{max-width:920px; margin-bottom:8px}
+.fxbar{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; max-width:920px}
+.fxchip{background:none; border:1px solid var(--line); color:var(--faint); font:inherit; font-size:10px; letter-spacing:.16em; text-transform:uppercase; padding:5px 10px; cursor:pointer; border-radius:3px}
+.fxchip:hover{color:var(--txt); border-color:var(--dim)}
+.fxchip.on{color:var(--g); border-color:var(--g)}
+.fxrack{display:flex; flex-direction:column; gap:8px; max-width:920px}
+.fxrack.rackoff{opacity:.45}
+.fxrack > .panel.fxslot{height:340px; margin:0; display:flex; flex-direction:column}
+.fxslot > .head{flex:0 0 auto}
+.fxslot > .body{flex:1 1 auto; min-height:0; overflow-y:auto}
 .row{display:flex; flex-wrap:wrap; gap:8px 2px; align-items:flex-start}
 .row > .fld{margin:6px 6px 0 0}
 .row > .tg{margin:14px 8px 0 0}
@@ -1156,47 +1149,39 @@ function reverbGraph() {
 }
 
 /* ----------------------------------------------------------------- build */
-var fxStrip = null;
-function fxCard(into, title, power, build) {
-  var p = panel(title, into, { power: power });
+/* ---- the FX tab as a rack, after Serum 2: every effect that is switched on is one slot of the same size, stacked top to bottom in the order the signal goes through them
+ * (Hyper, Distortion, Filter FX, Compressor, Chorus, Flanger, Phaser, Width, Delay, Delay 2, Reverb, EQ: fx.h process()). An effect that is off has no slot; its chip in
+ * the bar above switches it on (and off again), which is what Serum's "add an effect" does. The Rack switch bypasses them all (the slots dim). */
+var fxRack = null, fxBar = null, fxSlots = [], fxNone = null;
+function fxSync() {
+  var any = false;
+  fxSlots.forEach(function (s) { s.sync(); any = any || s.active(); });
+  if (fxNone) fxNone.style.display = any ? "none" : "";
+}
+function fxSlot(title, o, build) {
+  var p = panel(title, fxRack, { power: o.power });
+  p.root.classList.add("fxslot");
   build(p.body, p);
-  if (power && META[power]) {
-    /* A rack effect that is switched off folds down to its title bar. The power switch opens it
-     * again; clicking the bar peeks inside an off effect without switching it on. */
-    var peek = false, wasOn = val(power) >= 1;
-    p.root.classList.add("fx");
-    el("span", "chev", p.head);
-    var ph = null;                      /* marks the card's place in the grid while it is parked */
-    var sync = function () {
-      var off = val(power) < 1, fold = off && !peek;
-      p.root.classList.toggle("collapsed", fold);
-      p.root.classList.toggle("peek", off && peek);
-      if (fxStrip) {
-        if (fold && !ph) {
-          ph = document.createComment("");
-          p.root.parentNode.insertBefore(ph, p.root);
-          fxStrip.appendChild(p.root);
-        } else if (!fold && ph) {
-          ph.parentNode.insertBefore(p.root, ph);
-          ph.parentNode.removeChild(ph);
-          ph = null;
-        }
-      }
-      redrawSoon();
-    };
-    on(power, function (v) {
-      var now = v >= 1;
-      if (now !== wasOn) { peek = false; wasOn = now; }
-      sync();
-    });
-    p.head.addEventListener("click", function (e) {
-      if (e.target.closest(".pw,select,input,button")) return;
-      if (val(power) >= 1) return;
-      peek = !peek;
-      sync();
-    });
+  if (!o.power) {                       /* an effect with no switch of its own: a small one in the title bar puts it out of the rack */
+    var off = el("button", "pw on");
+    off.title = "Take " + title + " out of the rack";
+    off.addEventListener("click", function () { o.turnOff(); });
+    p.head.insertBefore(off, p.head.firstChild);
   }
+  var chip = el("button", "fxchip", fxBar, title);
+  chip.title = "Switch " + title + " on / off";
+  chip.addEventListener("click", function () { if (o.active()) o.turnOff(); else o.turnOn(); });
+  var s = {
+    active: o.active,
+    sync: function () { var a = !!o.active(); p.root.style.display = a ? "" : "none"; chip.classList.toggle("on", a); }
+  };
+  fxSlots.push(s);
+  (o.watch || []).forEach(function (k) { on(k, fxSync); });
   return p;
+}
+function fxSwitch(key) {                /* an effect with a power switch */
+  return { power: key, watch: [key], active: function () { return val(key) >= 1; },
+           turnOn: function () { setVal(key, 1, true); }, turnOff: function () { setVal(key, 0, true); } };
 }
 function sub(into, txt) { return el("div", "sub", into, txt); }
 
@@ -1287,32 +1272,74 @@ function buildEnv(page) {
 }
 
 function buildFx(page) {
-  var g = el("div", "grid gfx", page);
-  fxStrip = el("div", "fxoff", page);
-  fxCard(g, "Distortion", null, function (b) {
-    graph(b, distGraph(), 150);
-    row([["dist_mode", "Mode"], ["dist_cal", "Calibrated"]], b);
-    row([["dist_drive", "Drive"], ["dist_mix", "Mix"], ["dist_out", "Wet gain"], ["dist_level", "Level"]], b);
-    sub(b, "Pre-filter");
-    row([["dist_pre", "Type"]], b);
-    row([["dist_pre_freq", "Freq"], ["dist_pre_q", "Q"]], b);
+  var head = panel("Rack", page, { power: "fx_on", cls: "fxhead" });
+  row([["fx_space", "Space"]], head.body);
+  el("div", "note", head.body, "The Rack switch bypasses every effect below. Space scales the delay and reverb mixes. The effects that are on are stacked in the order the sound goes through them; the chips switch one on or off.");
+  fxBar = el("div", "fxbar", page);
+  fxRack = el("div", "fxrack", page);
+  fxNone = el("div", "note", page, "No effect is switched on. Use the chips above to add one.");
+  fxNone.style.display = "none";
+  page.insertBefore(fxNone, fxRack.nextSibling);
+  var rackOn = function () { fxRack.classList.toggle("rackoff", val("fx_on") < 1); };
+  on("fx_on", rackOn);
+
+  fxSlot("Hyper", {
+    watch: ["hyd_wet"], active: function () { return val("hyd_wet") > 0; },
+    turnOn: function () { setVal("hyd_wet", 64, true); }, turnOff: function () { setVal("hyd_wet", 0, true); }
+  }, function (b) {
+    row([["hyd_uni", "Voices"], ["hyd_det", "Detune"], ["hyd_rate", "Rate"], ["hyd_wet", "Wet"]], b);
   });
-  fxCard(g, "Filter FX", "fxf_on", function (b) {
+  fxSlot("Distortion", {
+    watch: ["dist_mix", "dist_drive", "dist_cal"], active: function () { return val("dist_mix") > 0 && (val("dist_cal") >= 1 || val("dist_drive") > 0); },
+    turnOn: function () { if (val("dist_drive") <= 0) setVal("dist_drive", 40, true); setVal("dist_mix", Math.max(val("dist_mix"), 64), true); },
+    turnOff: function () { setVal("dist_mix", 0, true); }
+  }, function (b) {
+    graph(b, distGraph(), 100);
+    row([["dist_mode", "Mode"], ["dist_cal", "Calibrated"], ["dist_pre", "Pre-filter"]], b);
+    row([["dist_drive", "Drive"], ["dist_mix", "Mix"], ["dist_out", "Wet gain"], ["dist_level", "Level"], ["dist_pre_freq", "Pre freq"], ["dist_pre_q", "Pre Q"]], b);
+  });
+  fxSlot("Filter FX", fxSwitch("fxf_on"), function (b) {
     graph(b, (function () {
       var inner = filterGraph("fxf");
       return function (gg, w, h) { inner(gg, w, h); };
-    })(), 130, filterPtr("fxf"));
-    row([["fxf_type", "Type"]], b);
-    row([["fxf_freq", "Cutoff"], ["fxf_res", "Resonance"], ["fxf_env", "Env amt"]], b);
+    })(), 100, filterPtr("fxf"));
+    row([["fxf_type", "Type"], ["fxf_freq", "Cutoff"], ["fxf_res", "Resonance"], ["fxf_env", "Env amt"]], b);
   });
-  fxCard(g, "Compressor", "comp_on", function (b) {
-    graph(b, compGraph(), 150);
-    row([["comp_multi", "Multiband"]], b);
-    row([["comp_thresh", "Thresh"], ["comp_ratio", "Ratio"], ["comp_knee", "Knee"], ["comp_attack", "Attack"], ["comp_release", "Release"], ["comp_makeup", "Makeup"], ["comp_mix", "Mix"]], b);
+  fxSlot("Compressor", fxSwitch("comp_on"), function (b) {
+    graph(b, compGraph(), 100);
+    row([["comp_multi", "Multiband"], ["comp_thresh", "Thresh"], ["comp_ratio", "Ratio"], ["comp_knee", "Knee"], ["comp_attack", "Attack"], ["comp_release", "Release"], ["comp_makeup", "Makeup"], ["comp_mix", "Mix"]], b);
     sub(b, "Bands");
     row([["comp_thresh2", "Thresh 2"], ["comp_thresh3", "Thresh 3"], ["comp_gain1", "Gain 1"], ["comp_gain2", "Gain 2"], ["comp_gain3", "Gain 3"], ["comp_below", "Below"]], b);
   });
-  var eq = fxCard(g, "EQ", "eq_on", function (b, p) {
+  fxSlot("Chorus", fxSwitch("chor_on"), function (b) {
+    row([["chor_mix", "Mix"], ["chor_rate", "Rate"], ["chor_depth", "Depth"], ["chor_d1", "Delay 1"], ["chor_d2", "Delay 2"], ["chor_fb", "Feedback"], ["chor_filt", "Filter"], ["chor_fmode", "Filter mode"]], b);
+  });
+  fxSlot("Flanger", fxSwitch("flan_on"), function (b) {
+    row([["flan_mix", "Mix"], ["flan_rate", "Rate"], ["flan_depth", "Depth"], ["flan_fb", "Feedback"], ["flan_phase", "Phase"]], b);
+  });
+  fxSlot("Phaser", fxSwitch("phas_on"), function (b) {
+    row([["phas_mix", "Mix"], ["phas_rate", "Rate"], ["phas_depth", "Depth"], ["phas_depth2", "Depth 2"], ["phas_freq", "Freq"], ["phas_fb", "Feedback"], ["phas_phase", "Phase"], ["phas_poles", "Poles"]], b);
+  });
+  fxSlot("Width", fxSwitch("wide_on"), function (b) {
+    row([["fx_wide", "Amount"], ["fx_wrate", "Rate"], ["fx_wdepth", "Depth"]], b);
+  });
+  fxSlot("Delay", fxSwitch("dly_on"), function (b) {
+    graph(b, delayGraph("dly"), 60);
+    row([["dly_mode", "Mode"], ["dly_sync", "Tempo sync"], ["dly_mix", "Mix"], ["dly_time", "Time L"], ["dly_timer", "Time R"], ["dly_fb", "Feedback"], ["dly_lo", "Lo cut"], ["dly_hi", "Hi cut"]], b);
+  });
+  fxSlot("Delay 2", {
+    watch: ["dly_on", "dly2_mix"], active: function () { return val("dly_on") >= 1 && val("dly2_mix") > 0; },
+    turnOn: function () { setVal("dly_on", 1, true); setVal("dly2_mix", Math.max(val("dly2_mix"), 64), true); }, turnOff: function () { setVal("dly2_mix", 0, true); }
+  }, function (b) {
+    graph(b, delayGraph("dly2"), 60);
+    row([["dly2_mode", "Mode"], ["dly2_mix", "Mix"], ["dly2_time", "Time L"], ["dly2_timer", "Time R"], ["dly2_fb", "Feedback"], ["dly2_lo", "Lo cut"], ["dly2_hi", "Hi cut"]], b);
+    el("div", "note", b, "Runs with the Delay switch.");
+  });
+  fxSlot("Reverb", fxSwitch("rev_on"), function (b) {
+    graph(b, reverbGraph(), 60);
+    row([["rev_mix", "Mix"], ["rev_decay", "Decay"], ["rev_damp", "Damp"], ["rev_lo", "Lo cut"], ["rev_width", "Width"]], b);
+  });
+  fxSlot("EQ", fxSwitch("eq_on"), function (b) {
     var tabs = el("div", "seg", b), boxes = [], names = ["Main", "Mid", "Side"], sets = ["eq", "eqm", "eqs"];
     sets.forEach(function (s, i) {
       var box = eqBlock(b, s, i ? "Mid/side bands act only when the preset uses the split rack." : "");
@@ -1326,41 +1353,8 @@ function buildFx(page) {
       });
     });
   });
-  eq.root.style.columnSpan = "all";
-  fxCard(g, "Chorus", "chor_on", function (b) {
-    row([["chor_mix", "Mix"], ["chor_rate", "Rate"], ["chor_depth", "Depth"], ["chor_d1", "Delay 1"], ["chor_d2", "Delay 2"], ["chor_fb", "Feedback"], ["chor_filt", "Filter"], ["chor_fmode", "Filter mode"]], b);
-  });
-  fxCard(g, "Flanger", "flan_on", function (b) {
-    row([["flan_mix", "Mix"], ["flan_rate", "Rate"], ["flan_depth", "Depth"], ["flan_fb", "Feedback"], ["flan_phase", "Phase"]], b);
-  });
-  fxCard(g, "Phaser", "phas_on", function (b) {
-    row([["phas_mix", "Mix"], ["phas_rate", "Rate"], ["phas_depth", "Depth"], ["phas_depth2", "Depth 2"], ["phas_freq", "Freq"], ["phas_fb", "Feedback"], ["phas_phase", "Phase"], ["phas_poles", "Poles"]], b);
-  });
-  fxCard(g, "Delay", "dly_on", function (b) {
-    graph(b, delayGraph("dly"), 90);
-    row([["dly_mode", "Mode"], ["dly_sync", "Tempo sync"]], b);
-    row([["dly_mix", "Mix"], ["dly_time", "Time L"], ["dly_timer", "Time R"], ["dly_fb", "Feedback"], ["dly_lo", "Lo cut"], ["dly_hi", "Hi cut"]], b);
-  });
-  fxCard(g, "Delay 2", null, function (b) {
-    graph(b, delayGraph("dly2"), 90);
-    row([["dly2_mode", "Mode"]], b);
-    row([["dly2_mix", "Mix"], ["dly2_time", "Time L"], ["dly2_timer", "Time R"], ["dly2_fb", "Feedback"], ["dly2_lo", "Lo cut"], ["dly2_hi", "Hi cut"]], b);
-    el("div", "note", b, "Runs with the Delay switch.");
-  });
-  fxCard(g, "Reverb", "rev_on", function (b) {
-    graph(b, reverbGraph(), 90);
-    row([["rev_mix", "Mix"], ["rev_decay", "Decay"], ["rev_damp", "Damp"], ["rev_lo", "Lo cut"], ["rev_width", "Width"]], b);
-  });
-  fxCard(g, "Width", "wide_on", function (b) {
-    row([["fx_wide", "Amount"], ["fx_wrate", "Rate"], ["fx_wdepth", "Depth"]], b);
-  });
-  fxCard(g, "Hyper", null, function (b) {
-    row([["hyd_uni", "Voices"], ["hyd_det", "Detune"], ["hyd_rate", "Rate"], ["hyd_wet", "Wet"]], b);
-  });
-  fxCard(g, "Rack", "fx_on", function (b) {
-    row([["fx_space", "Space"]], b);
-    el("div", "note", b, "FX Enable switches the whole rack. Space scales the delay and reverb mixes.");
-  });
+  fxSync();
+  rackOn();
 }
 
 function buildGlobal(page) {

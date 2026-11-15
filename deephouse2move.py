@@ -277,9 +277,9 @@ def physical(tree: dict, header: dict) -> dict:
             "table": wt.get("relativePathToWT"),
             "embedded": wt.get("embeddedWTData") or None,        # a table stored in the preset itself: the only copy when it was edited in Serum, the fallback when the file named in table is not on this machine
             "table_pos": wtp.get("kParamTablePos", 1.0),            # 1..256
-            "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0)}
-                     for m, a in (("kParamWarpMenu", "kParamWarp"),
-                                  ("kParamWarpMenu2", "kParamWarp2")) if wtp.get(m)],
+            "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0), "slot": si}
+                     for si, (m, a) in enumerate((("kParamWarpMenu", "kParamWarp"),
+                                                  ("kParamWarpMenu2", "kParamWarp2"))) if wtp.get(m)],
         })
     sub_node = tree.get("Oscillator4", {})
     noise_node = tree.get("Oscillator3", {})
@@ -344,6 +344,32 @@ def physical(tree: dict, header: dict) -> dict:
                 else:
                     norm = min(max((max(envs[m["dest_id"]][key], 0.0) / 32.0) ** 0.2 + d, 0.0), 1.0)
                     envs[m["dest_id"]][key] = 32.0 * norm ** 5
+    # A macro, velocity, note or mod-wheel route into an oscillator's pitch or warp knobs is folded in at the saved macro position / nominal velocity and note (before this the knobs
+    # kept their stored values: 31 of the 40 factory presets the sound gate dropped for their tone had such a route, DR - Kick Minimal's PITCH macro sat an octave off). Laws measured on
+    # Serum with a macro at 50 / 100 % (calibration/probe_macro_osc.py): a route adds depth x source to a Warp knob (0..1, clamped); coarse pitch 128 semitones per unit (bipolar
+    # after the source minus a half, as everywhere), the Pitch knob 25 semitones per unit in whole semitones, the Octave knob 10 octaves per unit in whole octaves, Fine 2 semitones per
+    # unit, the knob stopping at +-1 semitone.
+    for m in mods:
+        oid, src = m.get("dest_id"), m["source"]
+        if m["dest_type"] not in ("Oscillator", "WTOsc") or not isinstance(oid, int) or not 0 <= oid < len(oscs) or not isinstance(src, int):
+            continue
+        if not (25 <= src <= 32 or src in (1, 16, 17)):
+            continue
+        x = fxmap.macro_value(m, macros)
+        eff = m["amount_pct"] / 100.0 * ((x - 0.5) if m["bipolar"] else x)
+        o, par = oscs[oid], m["dest_param"]
+        if m["dest_type"] == "WTOsc" and par in ("kParamWarp", "kParamWarp2"):
+            for w in o["warp"]:
+                if w.get("slot") == (1 if par == "kParamWarp2" else 0):
+                    w["amount"] = _clamp(w["amount"] + eff, 0.0, 1.0)
+        elif m["dest_type"] == "Oscillator" and par == "kParamCoarsePit":
+            o["semitone"] += 128.0 * eff
+        elif m["dest_type"] == "Oscillator" and par == "kParamPitch":
+            o["semitone"] += round(25.0 * eff)
+        elif m["dest_type"] == "Oscillator" and par == "kParamOctave":
+            o["octave"] += round(10.0 * eff)
+        elif m["dest_type"] == "Oscillator" and par == "kParamFine":
+            o["fine_cents"] = _clamp(o["fine_cents"] + 200.0 * eff, -100.0, 100.0)
     lfos = []
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
@@ -1759,19 +1785,19 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 continue                  # (the measured waveshapers and Even/Odd act at amount 0 too: Rectify is a full-wave rectifier there, Even/Odd keeps only the odd harmonics)
             if w["mode"] == "kFlip" and abs(w["amount"] - 0.5) <= FLIP_TOLERANCE and not any(
                     v["amount"] >= WARP_NOISE_FLOOR for v in o["warp"][:wi]):       # only as the first warp: a warp after it reads the reversed table, as it does in Serum
-                flip_rev = {"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]}
+                flip_rev = {"osc": o["id"], "index": w.get("slot", wi), "mode": w["mode"], "amount": w["amount"]}
             elif w["mode"] == "kEvenOdd":
                 if abs(w["amount"] - 0.5) <= EVENODD_TOLERANCE:
                     continue              # Even/Odd at 0.5 is the table as it is
                 if all(v["mode"] in LTI_WARPS or v["amount"] < WARP_NOISE_FLOOR for v in o["warp"][:wi]):
-                    eo_bake = {"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]}
+                    eo_bake = {"osc": o["id"], "index": w.get("slot", wi), "mode": w["mode"], "amount": w["amount"]}
                 else:
                     crit.append(f"{k} warp EvenOdd unsupported (it follows a warp that is not a filter or a time shift, which the half-cycle mix does not commute with)")
-                    unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+                    unsup_warps.append({"osc": o["id"], "index": w.get("slot", wi), "mode": w["mode"], "amount": w["amount"]})
             elif w["mode"] in curves["modes"] and not P.get(f"{k}_wshape"):
                 if w["amount"] > curves["limit"][w["mode"]]:
                     crit.append(f"{k} warp {w['mode'][1:]} unsupported above amount {curves['limit'][w['mode']]:g} (measured only up to there)")
-                    unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+                    unsup_warps.append({"osc": o["id"], "index": w.get("slot", wi), "mode": w["mode"], "amount": w["amount"]})
                 else:
                     P.update(warp_curve_pots(k, w["mode"], w["amount"]))
                     note.append(f"{k} warp {w['mode'][1:]} carried as Serum's measured waveshaper curve (amount {w['amount']:.2f})")
@@ -1780,7 +1806,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 appr.append(f"{k} warp {w['mode'][1:]} carried as a static waveshaper (fitted to Serum's harmonics, a few dB)")
             elif w["mode"] == "kSelfPD" and w["amount"] > SELFPD_LIMIT:
                 crit.append(f"{k} warp SelfPD unsupported above amount {SELFPD_LIMIT:g} (measured only up to there)")
-                unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+                unsup_warps.append({"osc": o["id"], "index": w.get("slot", wi), "mode": w["mode"], "amount": w["amount"]})
             elif (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES or w["mode"] in XWARP_NOISE_MODES) and not (P.get(f"{k}_xw") and P.get(f"{k}_xw2")):
                 slot = "xw2" if P.get(f"{k}_xw") else "xw"
                 sfx = "2" if slot == "xw2" else ""
@@ -1810,7 +1836,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                     appr.append(f"{k} warp {w['mode'][1:]} approximated with Tablor Bend")
             else:
                 crit.append(f"{k} warp {w['mode'][1:]} unsupported (no FM/RM/fold in Tablor)")
-                unsup_warps.append({"osc": o["id"], "index": wi, "mode": w["mode"], "amount": w["amount"]})
+                unsup_warps.append({"osc": o["id"], "index": w.get("slot", wi), "mode": w["mode"], "amount": w["amount"]})
         path, ref = resolve_table(o["table"], pack, serum_tables, wt_out, subdir)
         if path is None and o.get("embedded"):
             path = write_embedded_table(o["embedded"], wt_out, subdir)

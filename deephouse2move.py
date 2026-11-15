@@ -683,9 +683,12 @@ def filter_model_key(model: str, var) -> str:
     return min(near)[1] if near else model
 
 
-def filter_cutoff_delta(model: str, cut: float) -> float:
+def filter_cutoff_delta(model: str, cut: float, reso: float | None = None) -> float:
+    """Cutoff pots to add to the closed-form law. A fitted model can also carry "res_delta" [[resonance %, pots]]: its passband corner and its resonant peak do not sit at one cutoff (the
+    Acid ladder), so the offset follows the resonance too."""
     if model in FILTER_MODELS:
-        return interp([tuple(x) for x in FILTER_MODELS[model]["delta"]], cut)
+        extra = interp([tuple(x) for x in FILTER_MODELS[model]["res_delta"]], reso) if (reso is not None and FILTER_MODELS[model].get("res_delta")) else 0.0
+        return interp([tuple(x) for x in FILTER_MODELS[model]["delta"]], cut) + extra
     return interp(FILTER_CUTOFF_DELTA.get(model, [(0.0, 0.0)]), cut)
 
 
@@ -2067,7 +2070,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
             P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
         else:
-            P[f"{prefix}_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] + pivot - 8 + filter_cutoff_delta(fkey, cut), 0, 127))
+            P[f"{prefix}_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] + pivot - 8 + filter_cutoff_delta(fkey, cut, reso_pct), 0, 127))
             P[f"{prefix}_res"] = filter_res_pot(fl["model"], reso_pct)
         P[f"{prefix}_key"] = round(_clamp(key + keyfold[key_id], 0, 1) * 127)
         if fl["keytrack"] < 0:

@@ -427,30 +427,40 @@ public:
                 if (noiseLpHz > 0.0f) noiseLp.process(tl, tr, n);
                 for (int i = 0; i < n; i++) { l[i] += tl[i]; r[i] += tr[i]; }
             });
+        /* A sample slot's oscillator Pan (Serum, measured with the wavetable and the granular oscillator alike): t = pan / 50 (hard left / right at +-50 percent),
+         * L = (1 - t)(1 + 0.172 t), R = (1 + t)(1 - 0.172 t) relative to the centre; on a stereo file it is a balance (each channel keeps its own side's gain). */
+        const auto smpPan = [&](float pan, float *l, float *r, const auto &src) {
+            if (pan == 0.0f) { src(l, r); return; }
+            const float t = std::clamp(pan / 50.0f, -1.0f, 1.0f), gl = (1.0f - t) * (1.0f + 0.172f * t), gr = (1.0f + t) * (1.0f - 0.172f * t);
+            float tl[kBlock], tr[kBlock];
+            clr(tl); clr(tr);
+            src(tl, tr);
+            for (int i = 0; i < n; i++) { l[i] += gl * tl[i]; r[i] += gr * tr[i]; }
+        };
         const float knobL = std::clamp(pot01(P[TB_P_SMP_LEVEL]) + lfoLvl[MD_SMP1_LEVEL], 0.0f, 1.0f);
         if (smp.on && knobL > 0.0f) {                  /* the sample oscillator: its level knob is squared, as the wavetables' are */
             const float knob = knobL;
             const bool fixedPitch = P[TB_P_SMP_FIXED] >= 0.5f;                 /* a sample that does not follow the keyboard (Serum's noise slot samples) */
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp.r->root) + c.pitchBendSemis) + P[TB_P_SMP_TUNE] + P[TB_P_SMP_FINE] / 100.0f;
-            addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smp.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, std::min((int) P[TB_P_SMP_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP_DET]), pot01(P[TB_P_SMP_SPREAD])); });
+            addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP_PAN], l, r, [&](float *a, float *b) { smp.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP_DET]), pot01(P[TB_P_SMP_SPREAD])); }); });
         }
         const float knob2L = std::clamp(pot01(P[TB_P_SMP2_LEVEL]) + lfoLvl[MD_SMP2_LEVEL], 0.0f, 1.0f);
         if (smp2.on && knob2L > 0.0f) {                /* the second sample oscillator: the same, with its own controls */
             const float knob = knob2L;
             const bool fixedPitch = P[TB_P_SMP2_FIXED] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp2.r->root) + c.pitchBendSemis) + P[TB_P_SMP2_TUNE] + P[TB_P_SMP2_FINE] / 100.0f;
-            addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smp2.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, std::min((int) P[TB_P_SMP2_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP2_DET]), pot01(P[TB_P_SMP2_SPREAD])); });
+            addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP2_PAN], l, r, [&](float *a, float *b) { smp2.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP2_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP2_DET]), pot01(P[TB_P_SMP2_SPREAD])); }); });
         }
         const float knob3L = std::clamp(pot01(P[TB_P_SMP3_LEVEL]) + lfoLvl[MD_SMP3_LEVEL], 0.0f, 1.0f);
         if (smp3.on && knob3L > 0.0f) {                /* the third (Serum has three oscillators, any of them a sample) */
             const float knob = knob3L;
             const bool fixedPitch = P[TB_P_SMP3_FIXED] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp3.r->root) + c.pitchBendSemis) + P[TB_P_SMP3_TUNE] + P[TB_P_SMP3_FINE] / 100.0f;
-            addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smp3.processAdding(semis, knob * knob, (float) sampleRate, l, r, n, std::min((int) P[TB_P_SMP3_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP3_DET]), pot01(P[TB_P_SMP3_SPREAD])); });
+            addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP3_PAN], l, r, [&](float *a, float *b) { smp3.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP3_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP3_DET]), pot01(P[TB_P_SMP3_SPREAD])); }); });
         }
 
         /* The granular kind of each sample slot (granular.h): Density / Grain Length are knobs that a route adds to, Scan Rate is a percent (a route of a adds 4a). */
-        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb, int xc, int uniP, int detP, int spreadP, int mLvl) {
+        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb, int xc, int uniP, int detP, int spreadP, int mLvl, int panP) {
             const float knob = std::clamp(pot01(P[levelP]) + lfoLvl[mLvl], 0.0f, 1.0f);
             if (!gc.on || !(knob > 0.0f)) return;
             const bool fixedPitch = P[fixedP] >= 0.5f;
@@ -485,11 +495,11 @@ public:
             gp.loopMode = (int) P[xb]; gp.loopStart = P[xb + 1] * 0.01f; gp.loopEnd = P[xb + 2] * 0.01f; gp.end = P[xb + 3] * 0.01f;      /* xb: the slot's 12 params from _GLOOP (gen_params _gran2) */
             gp.manual = P[xb + 4] >= 0.5f; gp.position = P[xb + 5] * 0.01f;
             gp.rDir = P[xb + 6] * 0.01f; gp.rGain = P[xb + 7] * 0.01f; gp.rPitch = P[xb + 8]; gp.rOffset = P[xb + 9] * 0.01f; gp.rLen = P[xb + 10] * 0.01f; gp.rPan = P[xb + 11] * 0.01f;
-            addSource(P[postP], balP, busP, [&](float *l, float *r) { gc.processAdding(gp, semis, knob * knob, (float) sampleRate, l, r, n); });
+            addSource(P[postP], balP, busP, [&](float *l, float *r) { smpPan(P[panP], l, r, [&](float *a, float *b) { gc.processAdding(gp, semis, knob * knob, (float) sampleRate, a, b, n); }); });
         };
-        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS, TB_P_SMP_GLOOP, TB_P_SMP_GSCX, TB_P_SMP_UNI, TB_P_SMP_DET, TB_P_SMP_SPREAD, MD_SMP1_LEVEL);
-        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS, TB_P_SMP2_GLOOP, TB_P_SMP2_GSCX, TB_P_SMP2_UNI, TB_P_SMP2_DET, TB_P_SMP2_SPREAD, MD_SMP2_LEVEL);
-        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS, TB_P_SMP3_GLOOP, TB_P_SMP3_GSCX, TB_P_SMP3_UNI, TB_P_SMP3_DET, TB_P_SMP3_SPREAD, MD_SMP3_LEVEL);
+        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS, TB_P_SMP_GLOOP, TB_P_SMP_GSCX, TB_P_SMP_UNI, TB_P_SMP_DET, TB_P_SMP_SPREAD, MD_SMP1_LEVEL, TB_P_SMP_PAN);
+        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS, TB_P_SMP2_GLOOP, TB_P_SMP2_GSCX, TB_P_SMP2_UNI, TB_P_SMP2_DET, TB_P_SMP2_SPREAD, MD_SMP2_LEVEL, TB_P_SMP2_PAN);
+        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS, TB_P_SMP3_GLOOP, TB_P_SMP3_GSCX, TB_P_SMP3_UNI, TB_P_SMP3_DET, TB_P_SMP3_SPREAD, MD_SMP3_LEVEL, TB_P_SMP3_PAN);
         static_assert(TB_P_SMP_GDENM == TB_P_SMP_GSCX + 5 && TB_P_SMP2_GDENM == TB_P_SMP2_GSCX + 5 && TB_P_SMP3_GDENM == TB_P_SMP3_GSCX + 5, "the granular tempo params of a slot are contiguous");
         static_assert(TB_P_SMP_GRPAN == TB_P_SMP_GLOOP + 11 && TB_P_SMP2_GRPAN == TB_P_SMP2_GLOOP + 11 && TB_P_SMP3_GRPAN == TB_P_SMP3_GLOOP + 11, "the granular scan / loop / random params of a slot are contiguous");
 

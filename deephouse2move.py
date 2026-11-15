@@ -481,15 +481,23 @@ def to_vital(ph: dict) -> dict:
 # Stage 3: Vital JSON -> Tablor
 # ---------------------------------------------------------------------------
 CARRY_BUSES = True                        # the sources' sends to the two FX buses and the buses' racks (engine: Voice sends, Engine::fxBus); off: the old rack-0-only conversion
+def serum_pan_balance(pan_pct):
+    """Serum's oscillator Pan (percent; measured on the wavetable and the granular oscillator alike): t = pan / 50 with hard left / right at +-50, left gain (1 - t)(1 + 0.172 t) and right gain
+    (1 + t)(1 - 0.172 t). The engine's wavetable pan is gains (1 -+ x), so this returns the x with the same left : right ratio (the overall level is left to the loudness fit)."""
+    t = max(-1.0, min(1.0, float(pan_pct) / 50.0))
+    gl, gr = (1.0 - t) * (1.0 + 0.172 * t), (1.0 + t) * (1.0 - 0.172 * t)
+    return (gr - gl) / (gr + gl)
+
+
 TABLOR_DEFAULTS = {
     "flt1_out": 0, "flt2_out": 0, "flt1_bus1": 0, "flt1_bus2": 0, "flt2_bus1": 0, "flt2_bus2": 0,
     "wt1_bus1": 0, "wt1_bus2": 0, "wt2_bus1": 0, "wt2_bus2": 0, "wt3_bus1": 0, "wt3_bus2": 0, "sub_bus1": 0, "sub_bus2": 0, "noise_bus1": 0, "noise_bus2": 0, "smp_bus1": 0, "smp_bus2": 0, "smp2_bus1": 0, "smp2_bus2": 0, "smp3_bus1": 0, "smp3_bus2": 0,
     "wt1_post": 0, "wt2_post": 0, "wt3_post": 0, "sub_post": 0, "noise_post": 0,
     "wt1_bal": 0, "wt2_bal": 0, "wt3_bal": 0, "sub_bal": 0, "noise_bal": 0, "smp_bal": 0, "smp2_bal": 0, "smp3_bal": 0,
     "flt2_type": 1, "flt2_freq": 127, "flt2_res": 0, "flt2_env": 64, "flt2_drive": 0, "flt2_key": 0, "flt_gain": 0, "flt2_gain": 0,
-    "smp_set": "", "smp_level": 0, "smp_tune": 0, "smp_fine": 0, "smp_post": 0, "smp_fixed": 0, "smp_uni": 1, "smp_det": 0, "smp_spread": 0,
-    "smp2_set": "", "smp2_level": 0, "smp2_tune": 0, "smp2_fine": 0, "smp2_post": 0, "smp2_fixed": 0, "smp2_uni": 1, "smp2_det": 0, "smp2_spread": 0,
-    "smp3_set": "", "smp3_level": 0, "smp3_tune": 0, "smp3_fine": 0, "smp3_post": 0, "smp3_fixed": 0, "smp3_uni": 1, "smp3_det": 0, "smp3_spread": 0,
+    "smp_set": "", "smp_level": 0, "smp_tune": 0, "smp_fine": 0, "smp_post": 0, "smp_fixed": 0, "smp_uni": 1, "smp_det": 0, "smp_spread": 0, "smp_pan": 0,
+    "smp2_set": "", "smp2_level": 0, "smp2_tune": 0, "smp2_fine": 0, "smp2_post": 0, "smp2_fixed": 0, "smp2_uni": 1, "smp2_det": 0, "smp2_spread": 0, "smp2_pan": 0,
+    "smp3_set": "", "smp3_level": 0, "smp3_tune": 0, "smp3_fine": 0, "smp3_post": 0, "smp3_fixed": 0, "smp3_uni": 1, "smp3_det": 0, "smp3_spread": 0, "smp3_pan": 0,
     "conv_set": "",
     "wt1_pos": 0, "wt2_pos": 0, "wt1_level": 100, "wt2_level": 0, "wt1_tune": 0, "wt2_tune": 0,
     "wt1_uni": 1, "wt1_detune": 0, "wt1_spread": 0, "wt1_pan": 64,
@@ -1178,7 +1186,7 @@ GRAN_OSC_GAPS = (("random start (P5)", ("kParamRandomStart",)),
                  ("key / velocity zone", ("kParamKeyZoneMin", "kParamKeyZoneMax", "kParamVelocityZoneMin", "kParamVelocityZoneMax")))
 # The Random settings the engine carries (engine param, Serum key, top of its range); a static route into one is folded in (percent = 100 x the route's share of the knob).
 GRAN_RANDOM = (("grdir", "kParamRandomDir"), ("grgain", "kParamRandomGain"), ("groff", "kParamRandomOffset"), ("grlen", "kParamRandomGrainLength"), ("grpan", "kParamRandomPan"))
-GRAN_FOLDED_PARAMS = ("kParamStart", "kParamPosition") + tuple(k for _, k in GRAN_RANDOM)           # a macro, wheel, velocity or note route into one of these is folded in; an LFO or envelope route is a gap
+GRAN_FOLDED_PARAMS = ("kParamStart", "kParamPosition", "kParamRandomPitch") + tuple(k for _, k in GRAN_RANDOM)           # a macro, wheel, velocity or note route into one of these is folded in; an LFO or envelope route is a gap
 
 
 def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, list, list]:
@@ -1219,6 +1227,10 @@ def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, 
         if v > 0.0:
             pots[f"{sk}_{pk}"] = round(v, 2)
     rp = float(gr.get("kParamRandomPitch", 0.0))
+    rf = fold[("GranularOsc", "kParamRandomPitch", oid)]
+    if rf:                                                # a route moves the KNOB: stored semitones p = 12 (e^(4.4 x) - 1) / (e^4.4 - 1) for the knob position x (measured, docs/GRANULAR_PROBE_NOTES.md)
+        x = math.log1p(max(rp, 0.0) * (math.exp(4.4) - 1.0) / 12.0) / 4.4
+        rp = 12.0 * (math.exp(4.4 * _clamp(x + rf, 0.0, 1.0)) - 1.0) / (math.exp(4.4) - 1.0)
     if rp > 0.0:
         pots[f"{sk}_grpitch"] = round(min(rp, 12.0), 2)    # semitones, Serum stops at 12
     if osc.get("kParamPitchTrack", 1.0) == 0.0:
@@ -1252,8 +1264,6 @@ def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, 
         extra = [k[6:] for k in ("kParamUnisonWarp", "kParamUnisonStack") if osc.get(k) not in (None, 0.0, "kOff", "kNone", "kNormal", "kNoStack")]
         if extra:
             gaps.append("unison " + " / ".join(extra))
-    if abs(float(osc.get("kParamPan", 0.0))) >= 10.0:
-        gaps.append("pan (P11)")
     if "gain" in node or "trimHead" in node:
         gaps.append("sample gain / trim")
     if "edgeFadeMs" in node or "baseDetune" in node:
@@ -1722,7 +1732,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         stereo = o["stereo_pct"] if o["stereo_pct"] is not None else CAL["stereo_default"]
         P[f"{k}_spread"] = (round(_clamp(stereo / 100 * CAL["width_scale"], 0, 1) * 127)
                             if P[f"{k}_uni"] > 1 else 0)
-        P[f"{k}_pan"] = round(_clamp(64 + 63 * o["pan"] / 100, 0, 127))
+        P[f"{k}_pan"] = round(_clamp(64 + 63 * serum_pan_balance(o["pan"]), 0, 127))
         flip_rev = None                   # the Flip warp at 0.5: the table is read backwards (reverse_table, once the table's path is known)
         eo_bake = None                    # the Even/Odd warp: baked into a copy of the table (evenodd_table)
         curves = WARP_CURVES()
@@ -1911,6 +1921,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{sk}_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
         P[f"{sk}_fine"] = round(_clamp(sinfo["fine"], -100, 100))
         P[f"{sk}_post"] = post_of(so["id"])
+        if not so.get("noise"):
+            P[f"{sk}_pan"] = int(round(_clamp(so["pan"], -50, 50)))          # the slot's own Pan, applied by the engine with Serum's law
         if so.get("gran"):                                  # a Granular oscillator: the slot's granular mode (granular_pots); no unison in granular mode yet
             gp, ggaps, gappr = granular_pots(sk, so["gran"], so["id"], so["unison"], fold)
             P.update(gp)

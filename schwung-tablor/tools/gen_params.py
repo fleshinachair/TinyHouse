@@ -330,6 +330,8 @@ def _gran3(slot, tag, name):
         denm  = enum(f"{slot}_gdenm",  f"GR{tag}D", f"{name} Grain Density Mode", ["Free", "BPM"], 0),
     )
 GRANC1, GRANC2, GRANC3 = _gran3("smp", "A", "Sample"), _gran3("smp2", "B", "Sample 2"), _gran3("smp3", "C", "Sample 3")
+# The oscillator Pan of a sample slot (either kind), in Serum's percent: hard left / right at -50 / +50 (measured: t = pan / 50, gains L = (1 - t)(1 + 0.172 t), R = (1 + t)(1 - 0.172 t)).
+GRAND1, GRAND2, GRAND3 = [dict(pan=num(f"{s}_pan", f"GR{t}Y", f"{n} Pan", -50, 50, 0)) for s, t, n in (("smp", "A", "Sample"), ("smp2", "B", "Sample 2"), ("smp3", "C", "Sample 3"))]
 SUB = dict(
     level = pot("sub_level", "SUB",  "Sub Level", 0),
     wave  = enum("sub_wave", "SUBW", "Sub Wave", SUB_WAVES, 0),
@@ -706,6 +708,8 @@ BANKS = [
     ("Granular 2", False, [row(*list(G.values())[i:i + 6]) for G in (GRANB1, GRANB2, GRANB3) for i in (0, 6)]),
     # After Granular 2, for the same reason: the scan range option, the tempo scan, and the BPM modes of grain length and density. Set by the converter; no page on the device.
     ("Granular 3", False, [row(*G.values()) for G in (GRANC1, GRANC2, GRANC3)]),
+    # After Granular 3, for the same reason: a sample slot's Pan. Set by the converter; no page on the device.
+    ("Granular 4", False, [row(GRAND1["pan"], GRAND2["pan"], GRAND3["pan"])]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

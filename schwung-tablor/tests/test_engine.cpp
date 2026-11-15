@@ -773,6 +773,31 @@ static void testSample2()
     CHECK(rms(render(*d, 60)) < 50, "a level of 0 is silent (rms %.0f)", rms(render(*d, 1)));
 }
 
+static void testSamplePan()
+{
+    printf("== sample oscillator pan ==\n");
+    auto chan = [](const std::vector<int16_t> &x, int ch) {
+        double acc = 0.0; const int frames = (int) x.size() / 2;
+        for (int i = frames / 2; i < frames; i++) acc += (double) x[(size_t) i * 2 + ch] * x[(size_t) i * 2 + ch];
+        return std::sqrt(acc / (frames - frames / 2));
+    };
+    auto hear = [&](int pan) {
+        auto e = std::make_unique<Engine>();
+        e->pots[TB_P_WT1_LEVEL] = 0; e->pots[TB_P_WT2_LEVEL] = 0; e->pots[TB_P_WT3_LEVEL] = 0;
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VCA_R] = 0;
+        e->setSample(sineSet(10)); e->pots[TB_P_SMP_LEVEL] = 100; e->pots[TB_P_SMP_PAN] = (float) pan;
+        note(*e, 60); render(*e, 40);
+        auto x = render(*e, 60);
+        return std::make_pair(chan(x, 0), chan(x, 1));
+    };
+    const auto c = hear(0), p = hear(14), h = hear(50), hl = hear(-50);
+    CHECK(std::fabs(c.first - c.second) < 0.02 * c.first, "pan 0 is centred (L %.0f, R %.0f)", c.first, c.second);
+    /* Serum: t = pan / 50, L = (1 - t)(1 + 0.172 t), R = (1 + t)(1 - 0.172 t) relative to the centre (measured: 0.7541 / 1.2188 at pan 14.035) */
+    CHECK(std::fabs(p.first / c.first - 0.7545) < 0.03 && std::fabs(p.second / c.second - 1.2190) < 0.03, "pan 14 gains %.3f / %.3f (0.754 / 1.219 expected)", p.first / c.first, p.second / c.second);
+    CHECK(h.first < 0.01 * c.first && std::fabs(h.second / c.second - 1.6557) < 0.04, "pan 50 is hard right at 1.656 (L %.0f, R %.3f x centre)", h.first, h.second / c.second);
+    CHECK(hl.second < 0.01 * c.second && std::fabs(hl.first / c.first - 1.6557) < 0.04, "pan -50 is hard left (R %.0f, L %.3f x centre)", hl.second, hl.first / c.first);
+}
+
 static void testArp()
 {
     printf("== arpeggiator ==\n");
@@ -1196,6 +1221,7 @@ int main()
     testMonoTakeover();
     testClipPlayer();
     testSample2();
+    testSamplePan();
     testArp();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;

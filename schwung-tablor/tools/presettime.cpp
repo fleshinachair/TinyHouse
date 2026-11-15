@@ -36,32 +36,45 @@ int main(int argc, char **argv)
     api->get_param(inst, "preset_count", pc, sizeof pc);
     const int n = atoi(pc);
     printf("bank %s: %d presets\n", bn, n);
-    struct R { double ms; int flips; std::string name; };
+    struct R { double ms; double setms; int reload; double reloadAt; std::string name; };
     std::vector<R> rs;
     for (int i = 0; i < n; i++) {
         char idx[16]; snprintf(idx, sizeof idx, "%d", i);
         const double t0 = now_ms();
-        api->set_param(inst, "preset", idx);
-        int flips = 0; char last = 'x';
+        api->set_param(inst, "preset", idx);                    /* this runs on the host's callback thread: how long does it hold it? */
+        const double tset = now_ms() - t0;
         double t1 = t0;
         for (;;) {
             api->get_param(inst, "is_loading", b, sizeof b);
-            if (b[0] != last) { flips++; last = b[0]; }
             t1 = now_ms();
-            if (b[0] == '0' && t1 - t0 > 0) break;
+            if (b[0] == '0') break;
             if (t1 - t0 > 20000) break;
             nanosleep(&ts, nullptr);
         }
+        /* the host shows the name once is_loading reads 0: does it go back to 1 afterwards (the name would flash)? */
+        int reload = 0; double reloadAt = 0; char last = '0';
+        for (const double tend = t1 + 900; now_ms() < tend; nanosleep(&ts, nullptr)) {
+            api->get_param(inst, "is_loading", b, sizeof b);
+            if (b[0] == '1' && last == '0') { reload++; if (reload == 1) reloadAt = now_ms() - t1; }
+            last = b[0];
+        }
         char nm[256] = {};
         api->get_param(inst, "preset_name", nm, sizeof nm);
-        rs.push_back({ t1 - t0, flips, nm });
+        rs.push_back({ t1 - t0, tset, reload, reloadAt, nm });
     }
     std::vector<R> s = rs;
     std::sort(s.begin(), s.end(), [](const R &a, const R &c) { return a.ms > c.ms; });
     std::vector<double> m; for (auto &r : rs) m.push_back(r.ms);
     std::sort(m.begin(), m.end());
-    printf("median %.0f ms, p90 %.0f ms, max %.0f ms\n", m[m.size() / 2], m[m.size() * 9 / 10], m.back());
-    for (int i = 0; i < 25 && i < (int) s.size(); i++) printf("  %6.0f ms  %s\n", s[i].ms, s[i].name.c_str());
+    std::vector<double> sm; for (auto &r : rs) sm.push_back(r.setms);
+    std::sort(sm.begin(), sm.end());
+    int nre = 0; for (auto &r : rs) nre += r.reload > 0;
+    printf("until name shown: median %.0f ms, p90 %.0f ms, max %.0f ms\n", m[m.size() / 2], m[m.size() * 9 / 10], m.back());
+    printf("set_param itself (host callback thread): median %.1f ms, p90 %.1f ms, max %.1f ms\n", sm[sm.size() / 2], sm[sm.size() * 9 / 10], sm.back());
+    printf("presets where is_loading went back to 1 after it read 0 (name would flash): %d of %d\n", nre, (int) rs.size());
+    for (int i = 0; i < 25 && i < (int) s.size(); i++) printf("  %6.0f ms  set %5.1f ms  %s\n", s[i].ms, s[i].setms, s[i].name.c_str());
+    int shown = 0;
+    for (auto &r : rs) if (r.reload && shown++ < 15) printf("  FLASH x%d  back to 1 %.0f ms after reading 0:  %s\n", r.reload, r.reloadAt, r.name.c_str());
     api->destroy_instance(inst);
     return 0;
 }

@@ -247,6 +247,10 @@ def measure_fingerprints(name, tree, meas):
         # a fingerprint from before the convolver has no Conv measurement (conv, reverb_noconv): measured again when the rack holds a Conv
         has_conv = known is not None and "Conv" in (known.get("fx") or [])
         stale = has_conv and ("conv" not in known or ("Reverb" in (known.get("fx") or []) and "reverb_noconv" not in known))        # or measured with the Conv's tail in the Reverb's
+        # or measured before the engine could run a Split band's reverb: the band's Reverb / Conv (fxmap.hoist_branch) is measured alone, like a master one
+        hz = fxmap.hoist_branch([dict(x) for x in tr["FXRack0"].get("FX") or []])[1]
+        band_rv = bool(hz) and any(fxmap.kind_of(tr["FXRack0"]["FX"][j]) in ("Reverb", "Conv") for j in hz["idx"])
+        stale = stale or (known is not None and band_rv and not ({"reverb", "conv"} & set(known)))
         if known is not None and not stale:
             continue
         if not meas or meas[0][0].audio_seconds > 1000:

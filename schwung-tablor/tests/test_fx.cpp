@@ -1253,6 +1253,24 @@ int main()
         double ra = 0, rb = 0;
         for (size_t i = 0; i < a.size(); i++) { ra += (double) a[i] * a[i]; rb += (double) b[i] * b[i]; }
         CHECK(std::fabs(10 * std::log10(ra / rb)) < 0.2, "an idle branch is transparent at the crossover (%+.2f dB)", 10 * std::log10(rb / ra));
+        /* a Reverb in one band (split_stages bit 128): the tail of a tone is made only when the tone is in that band */
+        auto bandTail = [&](int band, double f) {
+            FxSettings s;
+            s.revMix = 1.0f; s.revT60 = 2.0f; s.revDampHz = 12000.0f; s.revLoHz = 20.0f; s.revWidth = 1.0f;
+            s.splitBand = band; s.splitStages = 128; s.splitHz = 250.0f;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) (SR * 0.8f);
+            std::vector<float> L((size_t) n, 0.0f), R((size_t) n, 0.0f);
+            for (int i = 0; i < (int) (SR * 0.3f); i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * f * i / SR));
+            run(fx, L, R);
+            double e = 0;
+            for (int i = (int) (SR * 0.5f); i < n; i++) e += (double) L[(size_t) i] * L[(size_t) i];
+            return 10 * std::log10(e / (n - SR * 0.5f) + 1e-20);
+        };
+        const double hiInHigh = bandTail(2, 2000.0), hiInLow = bandTail(1, 2000.0), loInLow = bandTail(1, 60.0), loInHigh = bandTail(2, 60.0);
+        CHECK(hiInHigh > hiInLow + 30.0, "a 2 kHz tone makes a reverb tail only with the reverb in the high band (%.0f vs %.0f dB)", hiInHigh, hiInLow);
+        CHECK(loInLow > loInHigh + 30.0, "a 60 Hz tone makes a reverb tail only with the reverb in the low band (%.0f vs %.0f dB)", loInLow, loInHigh);
         /* SplitMS: a distortion on the Mid leaves a side-only signal alone */
         FxSettings s; s.distDrive = 0.9f; s.distMix = 1.0f; s.distMode = 2; s.splitBand = 3; s.splitStages = 2;
         Fx fx(SR); fx.set(s);

@@ -171,7 +171,7 @@ struct FxSettings {
     /* Serum's HyperD ahead of the distortion: voices (1 is off), detune 0..1 (how far each voice's delay moves), rate 0..1 (how fast), wet 0..1. */
     int   hydVoices = 1;
     float hydDetune = 0, hydRate = 0.4f, hydWet = 0;
-    /* Serum's Split / SplitMS: the stages in splitStages (1 HyperD, 2 Distortion, 4 Chorus / Flanger / Phaser, 32 Width) work on one band only: 1 the low band below splitHz, 2 the high band
+    /* Serum's Split / SplitMS: the stages in splitStages (1 HyperD, 2 Distortion, 4 Chorus / Flanger / Phaser, 32 Width, 64 Conv, 128 Reverb) work on one band only: 1 the low band below splitHz, 2 the high band
      * above it (a 4th-order Linkwitz-Riley crossover), 3 the Mid, 4 the Side. 0 is off. */
     int   splitBand = 0, splitStages = 0;
     float splitHz = 250;
@@ -582,7 +582,8 @@ public:
     void process(float *L, float *R, int n)
     {
         const int inBand = st.splitBand ? st.splitStages : 0;                    /* the stages that work on one band only */
-        if (inBand && (((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq) || ((inBand & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)))) processBand(L, R, n, inBand);
+        const bool convNow = (st.convMix > 0.0f && convP) || convWetCur > 0.0f, revNow = st.revMix > 0.0f || revWetCur > 0.0f;
+        if (inBand && (((inBand & 64) && convNow) || ((inBand & 128) && revNow) || ((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq) || ((inBand & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)))) processBand(L, R, n, inBand);
         if (!(inBand & 1) && hyper.active()) hyper.process(L, R, n);
         if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
         if (xfOn) xf.process(L, R, n);
@@ -605,11 +606,11 @@ public:
             }
         }
 
-        if ((st.convMix > 0.0f && convP) || convWetCur > 0.0f) { processConv(L, R, n); convRan = true; }
-        else if (convRan) { if (convP) convP->reset(); convRan = false; }
+        if (!(inBand & 64) && convNow) { processConv(L, R, n); convRan = true; }                /* (with bit 64 the convolver works on the Split band, in processBandChunk) */
+        else if (!convNow && convRan) { if (convP) convP->reset(); convRan = false; }
 
-        if (st.revMix > 0.0f || revWetCur > 0.0f) { processReverb(L, R, n); revRan = true; }
-        else if (revRan) { clearReverb(); revRan = false; }
+        if (!(inBand & 128) && revNow) { processReverb(L, R, n); revRan = true; }              /* (likewise bit 128: the reverb) */
+        else if (!revNow && revRan) { clearReverb(); revRan = false; }
 
         /* The bands run whether or not the EQ is switched on, so the filters hold the signal's state and
          * switching never starts one from silence; only their output is crossfaded (about 10 ms). With
@@ -771,6 +772,8 @@ private:
                 for (int i = 0; i < n; i++) { aL[i] = msEq[0][b].tick(0, aL[i]); aR[i] = msEq[0][b].tick(1, aR[i]); }
             }
         }
+        if ((stages & 64) && ((st.convMix > 0.0f && convP) || convWetCur > 0.0f)) { processConv(aL, aR, n); convRan = true; }      /* the band's own Conv and Reverb, after its other stages */
+        if ((stages & 128) && (st.revMix > 0.0f || revWetCur > 0.0f)) { processReverb(aL, aR, n); revRan = true; }
         for (int i = 0; i < n; i++) {
             if (band == 4)      { L[i] = oL[i] + aL[i]; R[i] = oR[i] - aL[i]; }
             else if (band == 3) { L[i] = oL[i] + aL[i]; R[i] = oR[i] + aL[i]; }

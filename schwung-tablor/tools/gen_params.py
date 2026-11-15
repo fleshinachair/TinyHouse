@@ -273,7 +273,7 @@ CTUNE = dict(
 SPLITFX = dict(
     band  = enum("split_band",  "SPLB", "Split Band", ["Off", "Low", "High", "Mid", "Side"], 0),
     freq  = pot("split_freq",   "SPLF", "Split Freq", 64),
-    stages = num("split_stages", "SPLS", "Split Stages", 0, 63, 0),
+    stages = num("split_stages", "SPLS", "Split Stages", 0, 255, 0),
 )
 SAMPLE3 = dict(
     set   = wtfile("smp3_set", "SMRS", "Sample 3 Set"),

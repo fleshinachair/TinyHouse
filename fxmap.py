@@ -699,6 +699,12 @@ def hoist_branch(nodes: list[dict]) -> tuple[list[dict], dict]:
             # A HyperD that widens (a Dimension Wet, or a Wet) works on the band as the engine's width stage, after the band's other stages: its place among them is not kept.
             if not ms and not master_wide:
                 mods = mods + [j for j in range(lo, hi) if kind_of(nodes[j]) == "HyperD" and enabled(nodes[j]) and not idle_effect(nodes[j])]
+            # A Reverb / Conv of a plain Split's band is the engine's band reverb (bits 64 / 128): it runs after the band's other stages, so it is carried only when none of them (nor an EQ) follows it
+            # in the branch, and only when the master signal has no reverb of its own (the engine has one reverb and one convolver).
+            if not ms and not (master_kinds & {"Reverb", "Conv"}):
+                rv = [j for j in range(lo, hi) if kind_of(nodes[j]) in ("Reverb", "Conv") and enabled(nodes[j]) and not idle_effect(nodes[j])]
+                if rv and not [j for j in range(rv[0] + 1, hi) if kind_of(nodes[j]) in ("Distortion", "HyperD", "EQ") + MOD_KINDS and enabled(nodes[j]) and not idle_effect(nodes[j])]:
+                    mods = mods + rv
             if not mods:
                 continue
             key = (any(kind_of(nodes[j]) == "Distortion" for j in mods), len(mods), -i)
@@ -739,6 +745,10 @@ def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
         bits |= 4
     if any(kind_of(nodes[j]) == "HyperD" for j in hoist["idx"]):
         bits |= 32
+    if any(kind_of(nodes[j]) == "Conv" for j in hoist["idx"]):
+        bits |= 64
+    if any(kind_of(nodes[j]) == "Reverb" for j in hoist["idx"]):
+        bits |= 128
     if not bits:
         return {}, []
     if bits & 4 and hoist.get("mod_first"):
@@ -749,7 +759,7 @@ def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
     P = {"split_band": hoist["band"], "split_stages": bits,
          "split_freq": int(round(min(max(127.0 * math.log(hz / 20.0) / math.log(1000.0), 0.0), 127.0))) if hoist["band"] <= 2 else 64}
     names = {1: "the low band below", 2: "the high band above", 3: "the Mid of a SplitMS", 4: "the Side of a SplitMS"}[hoist["band"]]
-    what = ", ".join(x for x, bit in (("Distortion", 2), ("modulation effects", 4), ("width (HyperD Dimension)", 32)) if bits & bit)
+    what = ", ".join(x for x, bit in (("Distortion", 2), ("modulation effects", 4), ("width (HyperD Dimension)", 32), ("Conv", 64), ("Reverb", 128)) if bits & bit)
     return P, [f"Split carried: {what} work on {names}" + (f" {hz:.0f} Hz (4th-order Linkwitz-Riley)" if hoist["band"] <= 2 else "")]
 
 

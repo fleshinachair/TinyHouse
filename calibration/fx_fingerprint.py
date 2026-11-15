@@ -92,7 +92,10 @@ def measure(serum, base, ref_db, dry_noise2, tree):
     kinds = [kind_of(x) for x in nodes]
     rec = {"fx": kinds}
     inside = fxmap.branch_nodes(nodes)
-    nodes = [x for i, x in enumerate(nodes) if i not in inside]      # an effect in a Split branch works on one band: not the master reverb/delay/width
+    # An effect in a Split branch works on one band: not the master reverb/delay/width. The Reverb / Conv the engine carries as its band reverb (fxmap.hoist_branch) is measured alone like a master one:
+    # the engine runs the same reverb, only on the band.
+    hoisted, _ = fxmap.hoist_branch(nodes)
+    nodes = [x for i, x in enumerate(nodes) if i not in inside or (hoisted[i].get("_hoisted") and kind_of(x) in REVERB)]
     # Each kind is measured on its own: in the whole rack the other effects (a delay's echoes, a Hyper's diffusion) read as part of the reverb's
     # wet part and tail (Lead - Nyday's reverb came out 2.5 x too wet and twice as long). The engine applies the stages in the same order anyway.
     rv = [x for x in nodes if kind_of(x) in REVERB]

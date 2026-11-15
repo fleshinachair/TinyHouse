@@ -145,6 +145,22 @@ AB_SLACK_BANDS = 1.5          # dB above Serum's own render-to-render noise (sam
 AB_MAX_LEVEL = 1.0            # dB: the effect-off render's level against the full one (a bigger gap is an effect that matters, whatever the bands say)
 
 
+BODE_COMPANIONS = {"Bode", "Split", "Split3", "SplitMS"}
+
+
+def bode_only(why):
+    """True when the effects the converter leaves out are a Bode (and the Split modules it usually sits in) and nothing else: such a preset is imported without the Bode and says so in
+    the report, even when Serum itself can hear the difference. The sound gate still judges the result against the full Serum render."""
+    kinds = set()
+    for w in why:
+        if "no Serum fingerprint" in w or "measure the fingerprint again" in w or "in a Split branch" in w:
+            continue
+        if not w.startswith("not carried: "):
+            return False
+        kinds |= set(w[len("not carried: "):].split(", "))
+    return "Bode" in kinds and kinds <= BODE_COMPANIONS
+
+
 def ignored_effects_off(tree, header, name, why):
     """When the only thing besides a missing fingerprint that stops a preset is effects the converter leaves out (a Filter FX with a model or a modulator, a Bode, a Split with
     its branch modules, a Comp / Distortion / Utils it has no stage for): the tree with exactly those nodes switched off (a Split takes its branch modules with it), else None.
@@ -253,6 +269,7 @@ def main():
     ap.add_argument("--max-level-gap", type=float, default=3.0, help="drop a preset whose finished level is further than this from Serum's (dB)")
     ap.add_argument("--band-floor", type=float, default=BAND_FLOOR_DB, help="hold each octave band at this many dB under the loudest band before the gate compares them (masked bands are inaudible); 0 = off")
     ap.add_argument("--max-band-rms", type=float, default=14.0, help="drop a preset whose octave-band levels are further than this (rms dB) from Serum's")
+    ap.add_argument("--no-bode-out", action="store_true", help="skip a preset whose Bode is audible in Serum (the default imports it without the Bode and lists it in the report)")
     ap.add_argument("--no-ab-ignore", action="store_true", help="do not test whether the effects the converter leaves out are inaudible in Serum itself; skip those presets")
     ap.add_argument("--no-level", action="store_true", help="skip the Serum render and the loudness fit (the converter's own volume)")
     a = ap.parse_args()
@@ -271,7 +288,7 @@ def main():
 
     def fingerprint(name, tree):
         measure_fingerprints(name, tree, meas)
-    used, kept, skipped = set(), [], []
+    used, kept, skipped, bode_left = set(), [], [], []
     for p in sorted(a.src.rglob("*.SerumPreset")):
         try:
             header, tree = decode_preset_file(p)
@@ -346,10 +363,14 @@ def main():
                     skipped.append((name, [f"Serum made no sound with the effects off: {str(e)[:50]}"]))
                     continue
                 print(f"  A/B {name}: effects off vs on: bands {gap_b:.1f} dB (Serum against itself {noise_b:.1f}), level {lvl_b:+.1f} dB -> {'inaudible' if ok else 'audible'}", flush=True)
-                if not ok:
+                if not ok and not a.no_bode_out and bode_only(why):
+                    ab_note = f"; Bode left out (audible in Serum: bands {gap_b:.1f} dB, level {lvl_b:+.1f} dB)"
+                    bode_left.append((name, gap_b, lvl_b))
+                elif not ok:
                     skipped.append((name, why + [f"and Serum's own render changes with them off: bands {gap_b:.1f} dB (noise {noise_b:.1f}), level {lvl_b:+.1f} dB"]))
                     continue
-                ab_note = f"; left out, inaudible in Serum: {'; '.join(w for w in why if 'no Serum fingerprint' not in w)[:70]}"
+                else:
+                    ab_note = f"; left out, inaudible in Serum: {'; '.join(w for w in why if 'no Serum fingerprint' not in w)[:70]}"
             C.mapped = lambda *args, _m=m, **kw: copy.deepcopy(_m)         # fit_item maps the preset itself; hand it ours
             try:
                 state, capped_db = finalize_level(m, it, serum, a.bank)
@@ -375,6 +396,9 @@ def main():
         if a.limit and len(kept) >= a.limit:
             break
     lines = [f"# {a.bank}: {len(kept)} imported, {len(skipped)} skipped", ""] + [f"- {n}: {'; '.join(w)}" for n, w in skipped]
+    done = [(n, g, l) for n, g, l in bode_left if n in kept]          # a preset that then failed the sound gate is in the skipped list instead
+    if done:
+        lines += ["", f"## Imported without the Bode ({len(done)}): the Bode is audible in Serum and the engine has no stage for it", ""] + [f"- {n}: Serum with the Bode off differs from the full preset by {g:.1f} dB (octave bands), {l:+.1f} dB level" for n, g, l in done]
     (a.out / f"skipped_{a.bank.replace(' ', '_')}.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"{a.bank}: {len(kept)} imported, {len(skipped)} skipped -> {bank_dir}")
     sys.stdout.flush()

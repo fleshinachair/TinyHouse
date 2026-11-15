@@ -360,6 +360,7 @@ FX_FILTER_RATIO = {"MgL24": 0.47, "L24": 0.47, "MgL18": 0.53, "L18": 0.53, "Dirt
                    "H24": 0.9, "H18": 0.9, "H12": 0.9, "H6": 0.9}      # -3 dB point / stated cutoff, measured
 FX_FILTER_POLES = {"MgL24": 4, "L24": 4, "MgL18": 3, "L18": 3, "DirtyMg": 3, "LadderAcid": 3, "ZDF_A": 3, "MgL12": 2, "L12": 2, "MgL6": 1, "L6": 1,
                     "H24": 4, "H18": 3, "H12": 2, "H6": 1}   # DirtyMg, LadderAcid and ZDF_A unmeasured (taken as three); the H types: probe_fxfilter_types.py --hp
+FX_FILTER_MIN_ROUTE_PCT = 1.0            # a route into a Filter FX knob with under 1 % depth moves nothing audible (Talk Box 2: an LFO at 1.2 %; Slippery Snake, Blessings of Peace: 0 %)
 FX_FILTER_MIN_WET = 50.0                 # below this the filtered signal is too small a part of the output to stand in for
 
 
@@ -453,7 +454,7 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
     """A master-rack Filter FX that an envelope moves (and nothing else but macros): the engine runs it as its second voice filter.
     Returns {"index", "model", "norm", "reso", "envs": {env index: amount}, "ignored": [sources]} or None. The cutoff is the stored
     value plus the macros at their saved position; the envelope amounts are fractions of the cutoff knob."""
-    mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXFilter"]
+    mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXFilter" and abs(m.get("amount_pct", 100.0)) >= FX_FILTER_MIN_ROUTE_PCT]
     macros = (ctx or {}).get("macros", [])
     inside = branch_nodes(nodes)
     fx = [i for i, n in enumerate(nodes) if kind_of(n) == "Filter" and enabled(n) and i not in inside]
@@ -549,7 +550,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
     inside = branch_nodes(nodes)
     mods = (ctx or {}).get("mods", [])
     macros = (ctx or {}).get("macros", [])
-    fmods = [m for m in mods if m.get("dest_type") == "FXFilter"]
+    fmods = [m for m in mods if m.get("dest_type") == "FXFilter" and abs(m.get("amount_pct", 100.0)) >= FX_FILTER_MIN_ROUTE_PCT]
     dynamic = any(not foldable_source(m, macros) for m in fmods)
     spec = dynamic_filter(nodes, ctx)
     for i, n in enumerate(nodes):

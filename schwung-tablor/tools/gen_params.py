@@ -644,7 +644,7 @@ BANKS = [
     # The three pages the device shows (TinyHouse). The banks above stay in the table, so every parameter
     # still exists, is saved in a preset's state and is on the web UI; they just have no page on the Move.
     ("Main", False, [
-        row(FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"], GLOBAL["ucap"]),
+        row(FILTER["freq"], FILTER["res"], FILTER["env"], TONE["decay"], SUB["level"], FX["wide"], FX["space"]),   # Bank is the 8th knob of this page (added below); Unison Cap lives on the Voice page
     ]),
     ("Tone", False, [
         # Row 0 has no page: Low Shelf lost its knob to the third position (it stays on the web UI), and it is kept here, in its old place in the

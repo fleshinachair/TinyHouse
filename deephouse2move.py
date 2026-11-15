@@ -323,7 +323,10 @@ def physical(tree: dict, header: dict) -> dict:
     for m in mods:
         aux = m.get("aux") or 0
         if aux in (18, 19, 24):
-            m["amount_pct"] = 0.0                  # the sources closed at rest (probe_aux_source.py): the route does nothing in a static preset
+            # the sources closed at rest (probe_aux_source.py): the route does nothing in a static preset. An inverted aux works as 1 - its value (kParamAuxInverted), so a closed source
+            # leaves an inverted route at its full depth (SY - Env LPF Seq, SY - Heavy Motion Synth: two LFO routes into the cutoff, aux 18 inverted, were being dropped).
+            if not m.get("aux_inverted", False):
+                m["amount_pct"] = 0.0
         elif 25 <= aux <= 32 or aux in (1, 16, 17, 21, 22) or 2 <= aux <= 15:
             # a macro at its saved value, velocity / note at their nominal values, a random aux or an envelope / LFO gate at its mean (two vibrato routes: Keys - Billboard's
             # random-gated vibrato was carried at full depth), each through the route's aux curve when it has one (aux_scale)

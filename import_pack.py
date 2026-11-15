@@ -18,6 +18,7 @@ import copy
 import json
 import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -355,6 +356,10 @@ def main():
             key = f"{a.bank}_{name}_fx"
             try:
                 refs = H.reference(serum, key, tree, notes, 2, 4.0, 1.0)
+                if max(float(np.abs(r).max()) for r in refs) < 1e-4:          # a cached render that is silent (a Serum render that failed once) would make every engine render look far too loud: make it again
+                    for f in (H.OUT / "refs").glob(f"{re.sub(r'[^A-Za-z0-9]+', '_', key)}_*.npy"):
+                        f.unlink()
+                    refs = H.reference(serum, key, tree, notes, 2, 4.0, 1.0)
             except RuntimeError as e:
                 skipped.append((name, [f"Serum made no sound: {str(e)[:50]}"]))
                 continue

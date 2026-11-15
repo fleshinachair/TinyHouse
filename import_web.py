@@ -139,7 +139,7 @@ def sample_needs(tree: dict) -> list[dict]:
     """The sample files a preset's oscillators name: [{"kind": "sample" | "multi" | "noise", "rel": path under Serum's Samples / Multisamples}]."""
     out = []
     for i in range(3):
-        info = SE.sample_osc(tree, i)
+        info = SE.sample_osc(tree, i) or SE.granular_osc(tree, i)       # a Granular oscillator plays a file of its own, asked for the same way
         if info and info.get("file") and not info.get("embedded"):       # audio stored in the preset is never asked of the folder
             out.append({"kind": "multi" if info["multi"] else "sample", "rel": str(info["file"]).replace("\\", "/")})
     for r in ("FXRack0", "FXRack1", "FXRack2"):                # a Convolution reverb's impulse response file (one stored in the preset is never asked of the folder)

@@ -557,7 +557,8 @@ def noise_type_for(sample: str | None) -> tuple[int, str | None]:
 ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune": 5, "WT2 Tune": 6, "WT1 Pan": 11, "WT2 Pan": 12,
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
-          "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38}
+          "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
+          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41}
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -1325,8 +1326,8 @@ def lfo_shape_pots(l: dict) -> list:
     return [round(127 * curve_value(xs, ys, cs, k / (15 if one_shot else 16))) for k in range(16)]
 
 
-def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list, gslot: dict | None = None) -> list:
-    """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried. gslot: Serum id of a carried Granular oscillator -> sample slot."""
+def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list, gslot: dict | None = None, sslot: dict | None = None) -> list:
+    """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried. gslot: Serum id of a carried Granular oscillator -> sample slot. sslot: Serum id of every carried Sample / Granular oscillator -> sample slot."""
     def dest(key):
         slot = slot_of.get(key[2])
         if key[:2] in GRAN_ROUTE_KEYS and gslot and key[2] in gslot:        # a Granular oscillator's Density / Grain Length / Scan Rate: whole-knob depth (a route of a adds a to the knob; Scan 4a x 100 %, the engine's 400 x offset)
@@ -1343,6 +1344,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return ("Filter 2 Freq" if key[2] == 1 else "Filter Freq"), CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "WTOsc" and key[1] == "kParamTablePos" and slot:
             return f"WT{slot} Pos", 1.0
+        if key[0] == "Oscillator" and key[1] == "kParamVolume" and sslot and key[2] in sslot:        # a Sample / Granular oscillator's volume: the sample slot's level knob, moved by 1.0 x the depth like a wavetable's
+            return f"Smp{sslot[key[2]]} Level", 1.0
         if key[0] == "Oscillator" and key[1] == "kParamVolume":
             return (f"WT{slot} Level" if slot else {3: "Noise Level", 4: "Sub Level"}.get(key[2])), 1.0
         # measured (probe_lfo_pitch.py, a constant LFO): a unipolar route moves coarse pitch 128 semitones per 100 %, fine pitch 2 (it stops
@@ -1644,14 +1647,25 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     odd = [o for o in ph["oscs"] if o["enabled"] and o["kind"] != "kOsc_WT"]
     # The engine's three sample oscillators carry the loudest Sample / Multisample oscillators whose files are on this machine.
     smps = []
-    for o in sorted((o for o in odd if o.get("sample") and eff_level(o) > 0.02), key=lambda o: -eff_level(o)):
+    # An oscillator whose level is stored near 0 and comes from an LFO or an envelope (a tremolo or a swell on a sample) still sounds: the slot is carried and the route moves its level knob.
+    mod_vol = Counter()
+    for item in other:
+        if isinstance(item[0], int) and 6 <= item[0] <= 15 and item[1][:2] == ("Oscillator", "kParamVolume") and item[2] > 0:
+            mod_vol[item[1][2]] += item[2]
+    for e_, k_, a_ in routes:
+        if k_[:2] == ("Oscillator", "kParamVolume") and a_ > 0:
+            mod_vol[k_[2]] += a_
+    def sel_level(o):
+        return max(eff_level(o), min(mod_vol[o["id"]], 1.0) ** 2)            # a route adds to the level KNOB and the gain is its square
+    for o in sorted((o for o in odd if o.get("sample") and sel_level(o) > 0.02), key=lambda o: -sel_level(o)):
         got = SE.export_info(o["sample"], wt_out.parent / "Samples" / subdir)
         if got:
             smps.append((o, got[0], got[1]))
             if len(smps) == 3:
                 break
+    sslot = {s_[0]["id"]: n for n, s_ in enumerate(smps, 1) if not s_[0].get("noise")}              # Serum id of each carried Sample / Granular oscillator -> the engine's sample slot (1..3)
     gslot = {s_[0]["id"]: n for n, s_ in enumerate(smps, 1) if s_[0].get("gran")}         # Serum id of each carried Granular oscillator -> the engine's sample slot (1..3)
-    if not smps and ph["noise"].get("click") and ph["noise"].get("sample"):
+    if len(smps) < 3 and ph["noise"].get("click") and ph["noise"].get("sample"):
         # a one-shot click or hit in the noise slot (a kick attack): the sample oscillator plays it once, at its own pitch
         nz0 = ph["noise"]
         got = SE.export_info(nz0["sample"], wt_out.parent / "Samples" / subdir)
@@ -2099,6 +2113,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = f"WT{slot} Pos"
         elif key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and key[2] in synced:
             dest = f"WT{slot} Sync"
+        elif key[0] == "Oscillator" and key[1] == "kParamVolume" and key[2] in sslot:
+            dest = f"Smp{sslot[key[2]]} Level"
         elif key[0] == "Oscillator" and key[1] == "kParamVolume":
             dest = f"WT{slot} Level" if slot else {3: "Noise Level", 4: "Sub Level"}.get(key[2])
         elif key[0] == "FXDistortion" and key[1] == "kParamWet":
@@ -2118,7 +2134,9 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     # sweep changes a sound, losing this silences part of it.
     def level_pot(dest):
         pot = {"Sub Level": "sub_level", "Noise Level": "noise_level"}.get(dest)
-        if not pot and dest.endswith(" Level"):
+        if not pot and dest.startswith("Smp") and dest.endswith(" Level"):
+            pot = "smp_level" if dest[3] == "1" else f"smp{dest[3]}_level"
+        elif not pot and dest.endswith(" Level"):
             pot = f"wt{dest[2]}_level"
         return pot
 
@@ -2145,7 +2163,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if a > 0 and level_pot(dest) and P[level_pot(dest)] == 0:
                 P[level_pot(dest)] = round(127 * _clamp(a * MOD_LEVEL_HOLD, 0, 1))
 
-    other = map_lfos(ph, P, other, slot_of, appr, note, gslot)   # the LFO routes the engine's LFOs can carry
+    other = map_lfos(ph, P, other, slot_of, appr, note, gslot, sslot)   # the LFO routes the engine's LFOs can carry
     audible = [o for o in other if abs(o[2]) >= 0.25 and o[1][0] in ("VoiceFilter", "WTOsc", "Oscillator")]
     if audible:
         appr.append(f"{len(audible)} velocity/LFO route(s) >=25% not carried (an LFO beyond the engine's four, or a destination it lacks)")

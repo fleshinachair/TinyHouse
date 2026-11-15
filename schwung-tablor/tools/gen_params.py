@@ -380,7 +380,9 @@ MOD_DST = ["None",
            # Granular sample slots (granular.h): the knob of Density, Grain Length and Scan Rate, moved by an LFO / envelope route.
            "Smp1 Density", "Smp1 Length", "Smp1 Scan", "Smp2 Density", "Smp2 Length", "Smp2 Scan", "Smp3 Density", "Smp3 Length", "Smp3 Scan",
            # The Level Out knob of the Utils that ends the main rack / bus 1 / bus 2 (a sidechain-style pump on the hardstyle kicks).
-           "Util Out", "Bus1 Out", "Bus2 Out"]
+           "Util Out", "Bus1 Out", "Bus2 Out",
+           # A sample slot's Level knob (a Sample / Granular oscillator whose volume comes from an LFO or envelope).
+           "Smp1 Level", "Smp2 Level", "Smp3 Level"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,

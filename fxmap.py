@@ -1107,6 +1107,9 @@ def utils_level_why(nodes: list[dict], ctx: dict | None) -> list[str]:
     return []
 
 
+UTILS_MIN_ROUTE_PCT = 1.0          # a modulator pointed at a Utils knob with under 1 % depth moves nothing audible (five granular presets carry a 0 to 0.4 % LFO route to Balance)
+
+
 def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | None, list[str]]:
     """Serum's Utils effect on the master signal as (width factor, mono-below Hz or None, why not). Width is the
     product of every Utils width (100 % = 1); Low Freq Mono is the highest crossover set. Anything moved by an
@@ -1115,7 +1118,7 @@ def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | No
     width, mono, why = 1.0, None, []
     inside = branch_nodes(nodes)
     mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils"]
-    dynamic = any(not foldable_source(m, (ctx or {}).get("macros", [])) and m.get("dest_param") in UTILS_STEREO_KEYS for m in mods)       # a Level Out route is a gain: utils_level_why
+    dynamic = any(not foldable_source(m, (ctx or {}).get("macros", [])) and m.get("dest_param") in UTILS_STEREO_KEYS and abs(m.get("amount_pct", 100.0)) >= UTILS_MIN_ROUTE_PCT for m in mods)       # a Level Out route is a gain: utils_level_why
     for i, n in enumerate(nodes):
         if kind_of(n) != "Utils" or not enabled(n):
             continue

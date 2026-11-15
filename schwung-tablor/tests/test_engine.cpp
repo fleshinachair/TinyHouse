@@ -270,7 +270,34 @@ static void testTuneRange()
         const double hz = heardHz(render(e, 2000));
         CHECK(hz > 53.0 && hz < 57.0, "sub at -48 plays 4 octaves down (%.1f Hz for 55)", hz);
     }
-    CHECK(tb_params[TB_P_WT3_TUNE].min == -48 && tb_params[TB_P_WT3_TUNE].max == 48, "every oscillator reaches +/-48");
+    CHECK(tb_params[TB_P_WT3_TUNE].min == -72 && tb_params[TB_P_WT3_TUNE].max == 72, "every oscillator reaches +/-72");
+    {   /* Pitch Track off: the oscillator plays MIDI note 0 plus its tune whatever key is held */
+        double hz[2];
+        for (int i = 0; i < 2; i++) {
+            Engine e;
+            e.setTable(0, sine);
+            e.pots[TB_P_VCA_A] = 0;
+            e.pots[TB_P_VCA_S] = 127;
+            e.pots[TB_P_WT1_FIXED] = 1;
+            e.pots[TB_P_WT1_TUNE] = 57;          /* note 57 = A3 = 220 Hz */
+            note(e, i ? 40 : 90);
+            hz[i] = heardHz(render(e, 2000));
+        }
+        CHECK(hz[0] > 215.0 && hz[0] < 225.0 && hz[1] > 215.0 && hz[1] < 225.0, "a fixed oscillator ignores the key (%.1f and %.1f Hz for 220)", hz[0], hz[1]);
+    }
+    {   /* a spare envelope into WT1 Pitch: 48 semitones at full amount (a held sustain of 1) */
+        Engine e;
+        e.setTable(0, sine);
+        e.pots[TB_P_VCA_A] = 0;
+        e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_ME1_DST] = 43;
+        e.pots[TB_P_ME1_AMT] = 64 + 31;          /* about +0.5 = 24 semitones */
+        e.pots[TB_P_ME1_A] = 0;
+        e.pots[TB_P_ME1_S] = 127;
+        note(e, 45);                             /* 110 Hz, two octaves up = 440 */
+        const double hz = heardHz(render(e, 2000));
+        CHECK(hz > 425.0 && hz < 455.0, "a spare envelope into WT1 Pitch moves it 24 st (%.1f Hz for 440)", hz);
+    }
 }
 
 static void testSoftClipper()

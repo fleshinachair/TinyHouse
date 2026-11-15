@@ -90,7 +90,8 @@ def osc(n):
         table  = wtfile(f"wt{n}_table", f"WT{n}", f"WT{n}"),
         pos    = pot(f"wt{n}_pos",     f"POS{n}",  f"WT{n} Pos", 0),
         level  = pot(f"wt{n}_level",   f"LVL{n}",  f"WT{n} Level", 100 if n == 1 else 0),
-        tune   = num(f"wt{n}_tune",    f"TUN{n}",  f"WT{n} Tune", -48, 48, 0),
+        tune   = num(f"wt{n}_tune",    f"TUN{n}",  f"WT{n} Tune", -72, 72, 0),
+        fixed  = enum(f"wt{n}_fixed",   f"FIX{n}",  f"WT{n} Pitch", ["Track", "Fixed"], 0),
         uni    = num(f"wt{n}_uni",     f"UNI{n}",  f"WT{n} Unison", 1, 16, 1),
         detune = pot(f"wt{n}_detune",  f"DET{n}",  f"WT{n} Detune", 0),
         spread = pot(f"wt{n}_spread",  f"SPR{n}",  f"WT{n} Spread", 0),
@@ -387,7 +388,7 @@ MOD_DST = ["None",
            # A sample slot's Level knob (a Sample / Granular oscillator whose volume comes from an LFO or envelope).
            "Smp1 Level", "Smp2 Level", "Smp3 Level",
            # The Filter FX's Wet knob (a fraction of 0..100 %), moved by an LFO / envelope route.
-           "FX Filter Wet"]
+           "FX Filter Wet", "WT1 Pitch", "WT2 Pitch", "WT3 Pitch"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -696,9 +697,9 @@ BANKS = [
     # Last, so no earlier parameter's number moves. The page is on the device (PAGE_MAP).
     ("Macros", False, [row(*MACROS)]),
     # After the Macros, so no earlier parameter's number moves. Serum's filter / FM / PD / RM warps (the amount is Serum's, in thousandths); no page on the device.
-    ("Warps", False, [row(O1["xw"], O1["xa"], O1["xs"], O1["xw2"], O1["xa2"], O1["xs2"]),
-                      row(O2["xw"], O2["xa"], O2["xs"], O2["xw2"], O2["xa2"], O2["xs2"]),
-                      row(O3["xw"], O3["xa"], O3["xs"], O3["xw2"], O3["xa2"], O3["xs2"])]),
+    ("Warps", False, [row(O1["xw"], O1["xa"], O1["xs"], O1["xw2"], O1["xa2"], O1["xs2"], O1["fixed"]),
+                      row(O2["xw"], O2["xa"], O2["xs"], O2["xw2"], O2["xa2"], O2["xs2"], O2["fixed"]),
+                      row(O3["xw"], O3["xa"], O3["xs"], O3["xw2"], O3["xa2"], O3["xs2"], O3["fixed"])]),
     # After the Warps, for the same reason. Set by the converter; no page on the device.
     ("Conv", False, [row(CONV["set"], CONV["mix"])]),
     # After the Conv, for the same reason. Set by the converter; no page on the device.

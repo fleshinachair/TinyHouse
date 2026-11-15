@@ -77,6 +77,7 @@ enum ModDst {
     /* A sample slot's Level KNOB (squared after, as for the wavetables'), moved by an LFO / envelope route: a Sample / Granular oscillator whose volume comes from a modulator. */
     MD_SMP1_LEVEL, MD_SMP2_LEVEL, MD_SMP3_LEVEL,
     MD_FXF_WET,                  /* the effects block's Filter FX Wet, as a fraction of its 0..100 % range: read by the engine from the newest voice (fxfWetMod) */
+    MD_WT1_PITCH, MD_WT2_PITCH, MD_WT3_PITCH,     /* an oscillator's pitch in semitones, 48 per unit of the route (a pitch envelope: a kick's drop is 24 st, past the +-12 st of the Tune destinations) */
     MD_COUNT
 };
 
@@ -724,20 +725,20 @@ private:
          * so it stands in for a destination the oscillator does not have. */
         static const struct OscKeys {
             int pos, level, tune, uni, det, spread, pan, sync, bend, form;
-            int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync;
+            int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync, dPit;
             int shape, sgain, sout, xw, xa, xs, xw2, xa2, xs2;
         } kOsc[kOscs] = {
             { TB_P_WT1_POS, TB_P_WT1_LEVEL, TB_P_WT1_TUNE, TB_P_WT1_UNI, TB_P_WT1_DETUNE,
               TB_P_WT1_SPREAD, TB_P_WT1_PAN, TB_P_WT1_SYNC, TB_P_WT1_BEND, TB_P_WT1_FORMANT,
               MD_WT1_POS, MD_WT1_LEVEL, MD_WT1_TUNE, MD_WT1_BEND, MD_WT1_FORMANT, MD_WT1_PAN,
-              MD_WT1_SYNC, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA, TB_P_WT1_XS, TB_P_WT1_XW2, TB_P_WT1_XA2, TB_P_WT1_XS2 },
+              MD_WT1_SYNC, MD_WT1_PITCH, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA, TB_P_WT1_XS, TB_P_WT1_XW2, TB_P_WT1_XA2, TB_P_WT1_XS2 },
             { TB_P_WT2_POS, TB_P_WT2_LEVEL, TB_P_WT2_TUNE, TB_P_WT2_UNI, TB_P_WT2_DETUNE,
               TB_P_WT2_SPREAD, TB_P_WT2_PAN, TB_P_WT2_SYNC, TB_P_WT2_BEND, TB_P_WT2_FORMANT,
               MD_WT2_POS, MD_WT2_LEVEL, MD_WT2_TUNE, MD_WT2_BEND, MD_WT2_FORMANT, MD_WT2_PAN,
-              MD_WT2_SYNC, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA, TB_P_WT2_XS, TB_P_WT2_XW2, TB_P_WT2_XA2, TB_P_WT2_XS2 },
+              MD_WT2_SYNC, MD_WT2_PITCH, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA, TB_P_WT2_XS, TB_P_WT2_XW2, TB_P_WT2_XA2, TB_P_WT2_XS2 },
             { TB_P_WT3_POS, TB_P_WT3_LEVEL, TB_P_WT3_TUNE, TB_P_WT3_UNI, TB_P_WT3_DETUNE,
               TB_P_WT3_SPREAD, TB_P_WT3_PAN, TB_P_WT3_SYNC, -1, -1,
-              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA, TB_P_WT3_XS, TB_P_WT3_XW2, TB_P_WT3_XA2, TB_P_WT3_XS2 },
+              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, MD_WT3_PITCH, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA, TB_P_WT3_XS, TB_P_WT3_XW2, TB_P_WT3_XA2, TB_P_WT3_XS2 },
         };
 
         int unison[kOscs];
@@ -746,7 +747,9 @@ private:
             VoicedWTParams &v = vp[o];
 
             /* tune modulation reads as an octave at full amount */
-            oscNote[o] = baseNote + P[k.tune] + modOff[k.dTun] * 12.0f;
+            static const int kFixed[kOscs] = { TB_P_WT1_FIXED, TB_P_WT2_FIXED, TB_P_WT3_FIXED };
+            /* a fixed oscillator ignores the key (Serum's Pitch Track off): its pitch is MIDI note 0 plus the tune (measured: DR - Kick Minimal) */
+            oscNote[o] = (P[kFixed[o]] >= 0.5f ? 0.0f : baseNote) + P[k.tune] + modOff[k.dTun] * 12.0f + modOff[k.dPit] * 48.0f;
 
             v.position = std::clamp(pot01(P[k.pos]) + modOff[k.dPos], 0.0f, 1.0f);
             {

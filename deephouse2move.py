@@ -270,6 +270,7 @@ def physical(tree: dict, header: dict) -> dict:
             "semitone": p.get("kParamPitch", p.get("kParamCoarsePit", 0.0)),
             "fine_cents": p.get("kParamFine", 0.0),
             "pan": p.get("kParamPan", 0.0),
+            "track": p.get("kParamPitchTrack", 1.0),
             "unison": int(p.get("kParamUnison", 1)),
             "detune": p.get("kParamDetune", DEFAULTS["detune"]),
             "detune_wid": p.get("kParamDetuneWid"),      # how far the stack spreads, not stereo
@@ -592,7 +593,8 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
           "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
-          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42}
+          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45}
+PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/probe_macro_osc.py, probe_lfo_pitch.py)
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -1584,6 +1586,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
 
     # ---- static macro offsets are folded into the base values --------------
     fold = Counter()
+    bipfold = Counter()                          # an oscillator id -> semitones its base sits lower for a bipolar envelope route into its coarse pitch (the envelope minus a half)
     keyfold = Counter()                          # a note-number route to a filter's cutoff, as semitones of cutoff per semitone of pitch
     routes = []                                  # envelope routes
     other = []                                   # LFO/velocity/etc: not representable
@@ -1649,6 +1652,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             routes.append((src - 2, key, a))
             if m.get("bipolar") and key[:2] in GRAN_ROUTE_KEYS:
                 fold[key] += a * -0.5                     # the same rule for a granular knob: the engine's route adds the envelope x depth, a bipolar Serum route the envelope minus a half
+            if m.get("bipolar") and key[:2] == ("Oscillator", "kParamCoarsePit") and isinstance(key[2], int):
+                bipfold[key[2]] += a * -0.5 * 128.0          # a pitch drop (DR - Kick Minimal: Env 2 into coarse pitch, bipolar 18.75 %): once the envelope has fallen the pitch sits half the depth below the stored one
             if m.get("bipolar") and key == ("VoiceFilter", "kParamFreq", 0):
                 # A bipolar route is the source minus one half, so once the envelope has fallen the cutoff sits half the depth below the stored one and the
                 # engine's unipolar envelope only gets the depth: fold the offset into the base (Lead - Let It Go: Env2 -> cutoff +17 % bipolar, sustain 0)
@@ -1754,10 +1759,12 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         pos = _clamp((o["table_pos"] - 1) / 255 + fold[("WTOsc", "kParamTablePos", o["id"])], 0, 1)
         P[f"{k}_pos"] = round(pos * 127)
         P[f"{k}_level"] = pot_level(eff_level(o), o["unison"], wt=True)
-        tune = o["octave"] * 12 + o["semitone"]
-        P[f"{k}_tune"] = round(_clamp(tune, -48, 48))
-        if abs(tune) > 48:
-            appr.append(f"{k} tune {tune:+.0f} st clamped to +/-48")
+        tune = o["octave"] * 12 + o["semitone"] + bipfold[o["id"]]
+        P[f"{k}_tune"] = round(_clamp(tune, -72, 72))
+        if abs(tune) > 72:
+            appr.append(f"{k} tune {tune:+.0f} st clamped to +/-72")
+        if o.get("track", 1.0) == 0.0:
+            P[f"{k}_fixed"] = 1          # Pitch Track off: the oscillator plays one pitch whatever key is held
         P[f"{k}_uni"] = _clamp(o["unison"], 1, 16)
         detune = _clamp(o["detune"] + fold[("Oscillator", "kParamDetune", o["id"])], 0.0, 1.0) ** CAL["detune_exp"] * CAL["detune_scale"]     # macro-driven detune at the saved position
         if CAL["detune_wid"] and o["detune_wid"] is not None:
@@ -2163,6 +2170,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = f"Smp{sslot[key[2]]} Level"
         elif key[0] == "Oscillator" and key[1] == "kParamVolume":
             dest = f"WT{slot} Level" if slot else {3: "Noise Level", 4: "Sub Level"}.get(key[2])
+        elif key[0] == "Oscillator" and key[1] in PITCH_ROUTE_ST and slot:
+            dest, a = f"WT{slot} Pitch", a * PITCH_ROUTE_ST[key[1]] / 48.0          # a pitch envelope (a kick's drop): semitones, 48 per unit of the route
         elif key[0] == "FXDistortion" and key[1] == "kParamWet":
             dest = "Dist Wet"
         elif key[0] == "FXFilter" and key[1] == "kParamWet":

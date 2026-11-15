@@ -6,6 +6,7 @@ calibration/*.exe
 calibration/*.pdb
 calibration/*.out
 calibration/refs/
+calibration/fit_memo.pkl
 
 # Proprietary sound content: the pack, and out/, which holds Xfer's factory wavetables
 *.SerumPack

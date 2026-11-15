@@ -2016,3 +2016,58 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
                 for f in ("type", "freq", "gain", "q"):
                     P.pop(f"eq{t}{n}_{f}", None)
     return P, notes, info
+
+
+# ------------------------------------------------------------------------------ remembered fits
+# The band fits (a Filter FX's curve, an EQ reduced to four bands) are pure: the same target gives the same bands, and they take most of the time a preset needs to map
+# (about 4 s of a preset's 4 s in a census). They are remembered on disk (calibration/fit_memo.pkl, not committed), keyed by their inputs and by the source of the
+# functions that make them, so a changed fit is computed afresh and nothing else is. A second census, or a re-import, finds nearly all of them already done.
+import hashlib
+import inspect
+import pickle
+
+FIT_MEMO_PATH = ROOT / "calibration/fit_memo.pkl"
+_FIT_MEMO: dict | None = None
+_FIT_MEMO_DIRTY = False
+
+
+def _fit_memo() -> dict:
+    global _FIT_MEMO
+    if _FIT_MEMO is None:
+        try:
+            _FIT_MEMO = pickle.loads(FIT_MEMO_PATH.read_bytes()) if FIT_MEMO_PATH.exists() else {}
+        except Exception:
+            _FIT_MEMO = {}
+    return _FIT_MEMO
+
+
+def save_fit_memo() -> None:
+    """Write the remembered fits if any are new (a script that ends with os._exit calls this itself)."""
+    global _FIT_MEMO_DIRTY
+    if _FIT_MEMO_DIRTY and _FIT_MEMO is not None:
+        tmp = FIT_MEMO_PATH.with_suffix(".tmp")
+        tmp.write_bytes(pickle.dumps(_FIT_MEMO, protocol=4))
+        tmp.replace(FIT_MEMO_PATH)
+        _FIT_MEMO_DIRTY = False
+
+
+def disk_memo(fn, *deps):
+    """fn with its results remembered across runs. The key holds the source of fn and of the functions it calls (deps) and the frequency grid."""
+    code = hashlib.sha1(("".join(inspect.getsource(f) for f in (fn,) + deps) + hashlib.sha1(FGRID.tobytes()).hexdigest()).encode()).hexdigest()[:16]
+
+    def wrapper(*a, **k):
+        global _FIT_MEMO_DIRTY
+        key = code + hashlib.sha1(pickle.dumps((a, sorted(k.items())), protocol=4)).hexdigest()
+        memo = _fit_memo()
+        hit = memo.get(key)
+        if hit is None:
+            hit = memo[key] = pickle.dumps(fn(*a, **k), protocol=4)
+            _FIT_MEMO_DIRTY = True
+        return pickle.loads(hit)
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+fit_filter_curve = disk_memo(fit_filter_curve, fit_one, refine_bands, biquad_db, curve)
+_reduce_bands = disk_memo(_reduce_bands, curve, biquad_db)

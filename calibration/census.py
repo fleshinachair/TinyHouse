@@ -24,7 +24,8 @@ def main():
     if limit: files = files[:limit]
     tally = collections.Counter(); crit = collections.Counter(); appr = collections.Counter(); tiers = collections.Counter(); fxk = collections.Counter(); filt = collections.Counter()
     warps = collections.Counter(); srcs = collections.Counter(); osck = collections.Counter(); bus = 0; errors = []; rows = {}
-    for p in files:
+    for n_done, p in enumerate(files):
+        if n_done % 50 == 49: fxmap.save_fit_memo()
         try:
             h, t = decode_preset_file(p)
             ph = d2m.physical(t, h)
@@ -54,6 +55,7 @@ def main():
         rows[nm] = {"tier": m["tier"], "why": why[:6], "bus_fx": ph.get("bus_fx", 0), "path": str(p)}
     out = {"n": len(files), "tiers": dict(tiers), "critical": crit.most_common(40), "approx": appr.most_common(30), "notes": tally.most_common(30), "fx": fxk.most_common(),
            "filters": filt.most_common(), "warps": warps.most_common(), "osc_kinds": osck.most_common(), "sources": srcs.most_common(), "bus_presets": bus, "errors": errors[:20], "rows": rows}
+    fxmap.save_fit_memo()
     Path(f"calibration/census_{name}.json").write_text(json.dumps(out, indent=1))
     print("presets", len(files), "tiers", dict(tiers), "bus-FX presets", bus, "errors", len(errors))
     for title, items in (("CRITICAL", crit), ("APPROX", appr), ("NOT CARRIED NOTES", tally), ("FX in racks", fxk), ("filters", filt), ("warps used", warps), ("osc kinds", osck)):

@@ -562,9 +562,12 @@ public:
         anyActive = baseActive || xfOn;
     }
 
-    void setFilter(bool on, int type, float hz, float q)
+    /* wet: the Filter FX's Wet knob as a fraction of 0..100 %. Serum mixes it as a smoothstep s with the dry part kept, (1 - s^2) dry + s filtered (calibration/probe_fxfilter_wet.py). */
+    void setFilter(bool on, int type, float hz, float q, float wet = 1.0f)
     {
+        xfWetKnob = std::min(std::max(wet, 0.0f), 1.0f);
         if (on) {
+            if (!xfOn) xfS = xfWetKnob * xfWetKnob * (3.0f - 2.0f * xfWetKnob);
             static const Filter::Type kTypes[8] = {
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
                 Filter::bandpass, Filter::bandpass, Filter::notch, Filter::notch };
@@ -579,6 +582,27 @@ public:
         anyActive = baseActive || xfOn;
     }
 
+    /* The Filter FX at its Wet: the filtered signal at s and the dry at 1 - s^2 (s ramps towards the knob's smoothstep, so a moving Wet does not zip). */
+    void processFilterFx(float *L, float *R, int n)
+    {
+        const float tgt = xfWetKnob * xfWetKnob * (3.0f - 2.0f * xfWetKnob);
+        if (tgt >= 0.9999f && xfS >= 0.9999f) { xfS = 1.0f; xf.process(L, R, n); return; }
+        float dL[128], dR[128];
+        for (int o = 0; o < n; o += 128) {
+            const int m = std::min(128, n - o);
+            std::copy(L + o, L + o + m, dL);
+            std::copy(R + o, R + o + m, dR);
+            xf.process(L + o, R + o, m);
+            for (int i = 0; i < m; i++) {
+                xfS += (tgt - xfS) * 0.002f;
+                const float d = 1.0f - xfS * xfS;
+                L[o + i] = dL[i] * d + L[o + i] * xfS;
+                R[o + i] = dR[i] * d + R[o + i] * xfS;
+            }
+        }
+        if (std::fabs(tgt - xfS) < 1e-4f) xfS = tgt;
+    }
+
     void process(float *L, float *R, int n)
     {
         const int inBand = st.splitBand ? st.splitStages : 0;                    /* the stages that work on one band only */
@@ -586,7 +610,7 @@ public:
         if (inBand && (((inBand & 64) && convNow) || ((inBand & 128) && revNow) || ((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq) || ((inBand & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)))) processBand(L, R, n, inBand);
         if (!(inBand & 1) && hyper.active()) hyper.process(L, R, n);
         if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
-        if (xfOn) xf.process(L, R, n);
+        if (xfOn) processFilterFx(L, R, n);
         if (compTarget > 0.0f || compCur > 0.0f) {
             if (st.compMulti) processCompMulti(L, R, n); else processComp(L, R, n);
         } else { compGrDb = 0.0f; compMs = 0.0f; for (int b = 0; b < 3; b++) { mbMs[b] = 0.0f; mbGain[b] = 0.0f; } }
@@ -1045,6 +1069,7 @@ private:
     float sr;
     FxSettings st;
     bool anyActive = false, baseActive = false, xfOn = false;
+    float xfWetKnob = 1.0f, xfS = 1.0f;                       /* the Filter FX Wet knob (0..1) and the smoothstep weight it has reached */
     Filter xf;
     ModFx mod;
     Hyper hyper;

@@ -1003,14 +1003,14 @@ void Engine::renderBlock(int16_t *out, int frames)
                 if (v.isActive()) env = std::max(env, v.filterEnvelope());
             const float filterWidth = 12.0f * std::log2(20000.0f / 440.0f) + 69.0f;
             /* an LFO (or spare envelope) route to the Filter FX cutoff lives in the voices' modulation; the effect is shared, so it follows the newest voice */
-            float fxfMod = 0.0f;
+            float fxfMod = 0.0f, fxfWet = 0.0f;
             uint32_t newest = 0;
             for (auto &v : voices)
-                if (v.isActive() && v.serialNumber() >= newest) { newest = v.serialNumber(); fxfMod = v.fxfCutoffMod(); }
+                if (v.isActive() && v.serialNumber() >= newest) { newest = v.serialNumber(); fxfMod = v.fxfCutoffMod(); fxfWet = v.fxfWetMod(); }
             const float note = potFilterNote(pots[TB_P_FXF_FREQ]) + env * potBipolar(pots[TB_P_FXF_ENV]) * filterWidth + fxfMod * filterWidth;
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
-            fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f));
+            fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f), pots[TB_P_FXF_WET] / 127.0f + fxfWet);
             {                                           /* an envelope / LFO route to the Distortion's Wet: the newest voice's, like the Filter FX cutoff above */
                 float dm = 0.0f;
                 uint32_t newestD = 0;
@@ -1034,7 +1034,7 @@ void Engine::renderBlock(int16_t *out, int frames)
                 if (!bon && !fxBus[b].filterOn()) continue;
                 const float bnote = potFilterNote(bp[TB_P_FXF_FREQ]) + env * potBipolar(bp[TB_P_FXF_ENV]) * filterWidth;
                 const float bres = std::clamp(bp[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
-                fxBus[b].setFilter(bon, (int) bp[TB_P_FXF_TYPE], std::clamp(midiNoteToHz(bnote), 4.0f, 20000.0f), kFilterQ / (1.0f - bres * 0.99f));
+                fxBus[b].setFilter(bon, (int) bp[TB_P_FXF_TYPE], std::clamp(midiNoteToHz(bnote), 4.0f, 20000.0f), kFilterQ / (1.0f - bres * 0.99f), bp[TB_P_FXF_WET] / 127.0f);
             }
         }
         for (int b = 0; b < 2; b++) {                   /* the buses' racks: their output joins the main path ahead of the main rack (probe: a Filter FX in the main rack filters what a bus returns) */

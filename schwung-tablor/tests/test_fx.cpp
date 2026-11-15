@@ -1351,6 +1351,26 @@ int main()
         CHECK(std::fabs(hiBand.second - hiAll.second) < 0.5, "the mid is untouched either way");
     }
 
+    printf("\n-- Filter FX Wet --\n");
+    {   /* a 12 dB low-pass at 200 Hz on a 4 kHz sine: Wet 100 % filters it away, Wet 0 passes it, Wet 50 % keeps the dry part (1 - s^2 = 0.75 at s = 0.5) */
+        auto wetRun = [&](float wet) {
+            Fx fx(SR);
+            fx.set(FxSettings());
+            fx.setFilter(true, 0, 200.0f, 0.7071f, wet);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin(6.283185307 * 4000.0 * i / SR));
+            run(fx, L, R);
+            double a = 0, b = 0;
+            for (int i = n / 2; i < n; i++) { a += 0.01 * 0.5; b += (double) L[(size_t) i] * L[(size_t) i]; }
+            return 10.0 * std::log10(b / a);
+        };
+        const double w1 = wetRun(1.0f), w0 = wetRun(0.0f), wh = wetRun(0.5f);
+        CHECK(w1 < -30.0, "Wet 100 %%: the low-pass takes a 4 kHz sine away (%.1f dB)", w1);
+        CHECK(std::fabs(w0) < 0.3, "Wet 0: the sine passes untouched (%+.2f dB)", w0);
+        CHECK(std::fabs(wh - 20.0 * std::log10(0.75)) < 0.8, "Wet 50 %%: only the dry part left, 1 - s^2 = 0.75 (%.2f dB, want %.2f)", wh, 20.0 * std::log10(0.75));
+    }
+
     printf("\n%s (%d failures)\n", g_fail ? "FX TESTS FAILED" : "FX TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

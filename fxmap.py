@@ -450,21 +450,44 @@ FILTER_FX_ENABLED = True       # calibration/ablation scripts turn this off to h
 ENV_SOURCES = range(2, 6)
 
 
-def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
-    """A master-rack Filter FX that an envelope moves (and nothing else but macros): the engine runs it as its second voice filter.
-    Returns {"index", "model", "norm", "reso", "envs": {env index: amount}, "ignored": [sources]} or None. The cutoff is the stored
-    value plus the macros at their saved position; the envelope amounts are fractions of the cutoff knob."""
-    mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXFilter" and abs(m.get("amount_pct", 100.0)) >= FX_FILTER_MIN_ROUTE_PCT]
+def node_mods(mods: list[dict], i: int, rack: int = 0) -> list[dict]:
+    """The Filter FX routes that belong to node i of a rack (a route names its node by dest_id: rack x 100 + index, the main rack being 0; one without it is taken for every node)."""
+    return [m for m in mods if m.get("dest_id") in (None, rack * 100 + i)]
+
+
+def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) -> dict | None:
+    """A master-rack Filter FX that an envelope or an LFO moves (and nothing else but macros): the engine runs it as its own Filter FX stage (cutoff, resonance, Wet).
+    Returns {"index", "model", "norm", "reso", "wet", "envs": {env index: amount}, "lfos", "wet_envs", "wet_lfos", "ignored": [sources]} or None. The cutoff and the Wet are the stored
+    values plus the macros at their saved position (`folded`: the nodes already carry the macros' Wet, as in map_fx); the envelope amounts are fractions of the cutoff knob.
+    A route to the Wet from an envelope or an LFO goes to the engine's FX Filter Wet destination."""
+    allmods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXFilter" and abs(m.get("amount_pct", 100.0)) >= FX_FILTER_MIN_ROUTE_PCT]
     macros = (ctx or {}).get("macros", [])
+    if not folded:
+        nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), macros)
     inside = branch_nodes(nodes)
     fx = [i for i, n in enumerate(nodes) if kind_of(n) == "Filter" and enabled(n) and i not in inside]
     if not fx or not FILTER_FX_ENABLED:
         return None
-    i = fx[0]
+    rack = (ctx or {}).get("rack", 0)
+    movers = [i for i in fx if any(not foldable_source(m, macros) and m.get("dest_param") in ("kParamFreq", "kParamWet") for m in node_mods(allmods, i, rack))]
+    i = movers[0] if movers else fx[0]
+    mods = node_mods(allmods, i, rack)
     pp = plain(nodes[i])
     envs, lfos, ignored, norm = {}, [], [], float(pp.get("kParamFreq", 0.5))
+    wet_envs, wet_lfos = [], []
     reso = float(pp.get("kParamReso", 10.0))
     for m in mods:
+        if m.get("dest_param") == "kParamWet":
+            s = m["source"]
+            if foldable_source(m, macros):
+                continue                                # already in the node's Wet (fold_macro_wets)
+            if 2 <= s <= 5 and not m.get("bipolar"):
+                wet_envs.append(s)
+            elif 6 <= s <= 15 and (ctx or {}).get("fxf_lfo"):
+                wet_lfos.append(s)
+            else:
+                return None                             # a bipolar envelope, an LFO in a bus rack (no route there), or a source the engine has not
+            continue
         if m.get("dest_param") != "kParamFreq":
             if 6 <= m["source"] <= 15:
                 return None
@@ -481,9 +504,10 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None) -> dict | None:
             lfos.append(m["source"])
         else:
             ignored.append(m["source"])
-    if not (envs or lfos) or float(pp.get("kParamWet", 100.0)) < FX_FILTER_MIN_WET:
+    wet = float(pp.get("kParamWet", 100.0))
+    if not (envs or lfos or wet_envs or wet_lfos) or (wet < 1.0 and not (wet_envs or wet_lfos)):
         return None
-    return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "envs": envs, "lfos": lfos, "ignored": ignored}
+    return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "wet": wet, "envs": envs, "lfos": lfos, "wet_envs": wet_envs, "wet_lfos": wet_lfos, "ignored": ignored}
 
 
 FX_MODEL_FILE = Path(__file__).resolve().parent / "calibration/fxfilter_models_probe.json"
@@ -551,8 +575,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
     mods = (ctx or {}).get("mods", [])
     macros = (ctx or {}).get("macros", [])
     fmods = [m for m in mods if m.get("dest_type") == "FXFilter" and abs(m.get("amount_pct", 100.0)) >= FX_FILTER_MIN_ROUTE_PCT]
-    dynamic = any(not foldable_source(m, macros) for m in fmods)
-    spec = dynamic_filter(nodes, ctx)
+    spec = dynamic_filter(nodes, ctx, folded=True)
     for i, n in enumerate(nodes):
         if kind_of(n) != "Filter" or not enabled(n):
             continue
@@ -562,6 +585,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             continue
         if spec is not None and spec["index"] == i:
             continue                                    # moved by an envelope: the engine's second filter carries it (dynamic_filter)
+        dynamic = any(not foldable_source(m, macros) for m in node_mods(fmods, i, (ctx or {}).get("rack", 0)))
         # An unwritten type is Serum's default, measured with test patches (calibration/probe_filterfx.py): a 6 dB/octave
         # low-pass with its -3 dB point at the stated cutoff.
         ty = str(pp.get("kParamType", "default"))
@@ -1858,7 +1882,7 @@ def fx_defaults() -> dict:
               "chor_on": 0, "chor_mix": 0, "chor_rate": 37, "chor_d1": 21, "chor_d2": 22, "chor_depth": 64, "chor_fb": 0, "chor_filt": 127, "chor_fmode": 0,
               "flan_on": 0, "flan_mix": 0, "flan_rate": 37, "flan_depth": 64, "flan_fb": 0, "flan_phase": 0,
               "phas_on": 0, "phas_mix": 0, "phas_rate": 37, "phas_depth": 64, "phas_depth2": 0, "phas_freq": 50, "phas_fb": 0, "phas_phase": 0, "phas_poles": 4,
-              "fxf_on": 0, "fxf_type": 0, "fxf_freq": 127, "fxf_res": 0, "fxf_env": 64,
+              "fxf_on": 0, "fxf_type": 0, "fxf_freq": 127, "fxf_res": 0, "fxf_env": 64, "fxf_wet": 127,
               "hyd_uni": 1, "hyd_det": 0, "hyd_rate": 40, "hyd_wet": 0, "split_band": 0, "split_freq": 64, "split_stages": 0, "util_out": 0})
     return P
 
@@ -1981,7 +2005,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     ignored = sorted({kind_of(x) for i, x in enumerate(nodes) if kind_of(x) in ("Distortion", "Comp", "Bode", "Split", "Split3", "SplitMS", "Utils") and enabled(x) and not dry(x)
                       and not (kind_of(x) == "Utils" and utils_ok(i, x)) and not (kind_of(x) == "Distortion" and dp) and not (kind_of(x) == "Comp" and cp)
                       and not (kind_of(x) == "SplitMS" and ms_plain) and not (kind_of(x) in ("Split", "Split3", "SplitMS") and split_clear(i, x))})
-    dyn_i = (dynamic_filter(nodes, ctx) or {}).get("index")
+    dyn_i = (dynamic_filter(nodes, ctx, folded=True) or {}).get("index")
     if any(kind_of(x) == "Filter" and enabled(x) and not dry(x) and i not in info.get("filter_fx_handled", ()) and i != dyn_i for i, x in enumerate(nodes)):
         ignored = sorted(set(ignored) | {"Filter"})
     if ignored:

@@ -76,6 +76,7 @@ enum ModDst {
     MD_UTIL_OUT, MD_BUS1_OUT, MD_BUS2_OUT,
     /* A sample slot's Level KNOB (squared after, as for the wavetables'), moved by an LFO / envelope route: a Sample / Granular oscillator whose volume comes from a modulator. */
     MD_SMP1_LEVEL, MD_SMP2_LEVEL, MD_SMP3_LEVEL,
+    MD_FXF_WET,                  /* the effects block's Filter FX Wet, as a fraction of its 0..100 % range: read by the engine from the newest voice (fxfWetMod) */
     MD_COUNT
 };
 
@@ -161,6 +162,7 @@ public:
     float distWetMod() const { return modOff[MD_DIST_WET]; }            /* LFO / spare-envelope routes to the Distortion's Wet */
     float compWetMod() const { return modOff[MD_COMP_WET]; }            /* LFO / spare-envelope routes to the Comp's Wet */
     float utilOutMod(int rack) const { return modOff[MD_UTIL_OUT + rack]; }   /* rack 0 main, 1 and 2 the buses: the Level Out knob's offset */
+    float fxfWetMod() const { return modOff[MD_FXF_WET]; }              /* LFO / spare-envelope routes to the Filter FX's Wet */
     float fxfCutoffMod() const { return modOff[MD_FXF_FREQ]; }          /* LFO / spare-envelope routes to the Filter FX cutoff, as a fraction of the filter's width */
     float filterEnvelope() const { return filterADSR.getOutput(); }       /* the Filter FX in the effects block follows it */
     bool isReleasing() const { return adsr.getState() == AnalogADSR::State::release; }

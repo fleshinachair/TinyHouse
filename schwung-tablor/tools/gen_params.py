@@ -134,6 +134,7 @@ FILTER2 = dict(
     freq = pot("fxf_freq",  "F2FQ", "FX Filter Freq", 127),
     res  = pot("fxf_res",   "F2RS", "FX Filter Res", 0),
     env  = pot("fxf_env",   "F2EN", "FX Filter EG Amt", 64),
+    wet  = pot("fxf_wet",   "F2WT", "FX Filter Wet", 127),     # 127 = fully wet (the stage was always fully wet before this knob)
 )
 # Serum's second voice filter: a second filter in every voice with its own type, cutoff, resonance, drive and key tracking; its cutoff follows
 # the filter envelope by its own amount. Each source has a balance between the two filters (0 = filter 1 only, the default; 127 = filter 2 only;
@@ -384,7 +385,9 @@ MOD_DST = ["None",
            # The Level Out knob of the Utils that ends the main rack / bus 1 / bus 2 (a sidechain-style pump on the hardstyle kicks).
            "Util Out", "Bus1 Out", "Bus2 Out",
            # A sample slot's Level knob (a Sample / Granular oscillator whose volume comes from an LFO or envelope).
-           "Smp1 Level", "Smp2 Level", "Smp3 Level"]
+           "Smp1 Level", "Smp2 Level", "Smp3 Level",
+           # The Filter FX's Wet knob (a fraction of 0..100 %), moved by an LFO / envelope route.
+           "FX Filter Wet"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -666,7 +669,7 @@ BANKS = [
         row(TONE["mwid"], TONE["mono"], TONE["ddrive"], TONE["dmode"], TONE["dmix"], TONE["dcal"], TONE["dout"], TONE["dlvl"]),
         row(TONE["cthr"], TONE["crat"], TONE["catt"], TONE["crel"], TONE["cmk"], TONE["cmix"], TONE["ckn"]),
         row(TONE["cmulti"], TONE["ct2"], TONE["ct3"], TONE["cg1"], TONE["cg2"], TONE["cg3"], TONE["cbl"]),
-        row(FILTER2["on"], FILTER2["type"], FILTER2["freq"], FILTER2["res"], FILTER2["env"]),
+        row(FILTER2["on"], FILTER2["type"], FILTER2["freq"], FILTER2["res"], FILTER2["env"], FILTER2["wet"]),
         row(ROUTES["wt1"], ROUTES["wt2"], ROUTES["wt3"], ROUTES["sub"], ROUTES["noise"]),
         row(SAMPLE["set"], SAMPLE["level"], SAMPLE["tune"], SAMPLE["fine"], SAMPLE["post"], SAMPLE["fixed"], SAMPLE["uni"], SAMPLE["det"]),
         row(VFILTER2["type"], VFILTER2["freq"], VFILTER2["res"], VFILTER2["env"], VFILTER2["drive"], VFILTER2["key"], VGAIN["g1"], VGAIN["g2"]),

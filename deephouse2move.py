@@ -566,7 +566,7 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
           "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
-          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41}
+          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42}
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -1344,6 +1344,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return f"Smp{gslot[key[2]]} {GRAN_ROUTE_NAME[key[1]]}", 1.0
         if key[0] == "FXFilter" and key[1] == "kParamFreq":              # the effects block's Filter FX (fxmap.dynamic_filter): same cutoff units as the voice filter
             return "FX Filter Freq", CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
+        if key[0] == "FXFilter" and key[1] == "kParamWet":               # the Filter FX's Wet knob: moves by 1.0 x the depth, as the Distortion's
+            return "FX Filter Wet", 1.0
         if key[0] == "FXDistortion" and key[1] == "kParamWet":           # the effects block's Distortion Wet (fxmap.dist_dynamic): Serum's route moves the Wet knob, 1.0 x the depth
             return "Dist Wet", 1.0
         if key[0] == "FXUtils" and key[1] == "kParamLevelOut":            # the Level Out knob of the Utils that ends a rack (fxmap.util_out_plan): the knob moves by 1.0 x the depth
@@ -1582,8 +1584,14 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             else:
                 other.append((src, ("FXDistortion", "kParamWet", 0), a, bool(m.get("bipolar"))))
             continue
-        if fxf_dyn and fxf_dyn["lfos"] and m["dest_type"] == "FXFilter" and m["dest_param"] == "kParamFreq" and 6 <= src <= 15:
+        if fxf_dyn and fxf_dyn["lfos"] and m["dest_type"] == "FXFilter" and m["dest_param"] == "kParamFreq" and 6 <= src <= 15 and m["dest_id"] == fxf_dyn["index"]:
             other.append((src, ("FXFilter", "kParamFreq", 0), a, bool(m.get("bipolar"))))
+            continue
+        if fxf_dyn and (fxf_dyn["wet_envs"] or fxf_dyn["wet_lfos"]) and m["dest_type"] == "FXFilter" and m["dest_param"] == "kParamWet" and m["dest_id"] == fxf_dyn["index"]                 and isinstance(src, int) and 2 <= src <= 15 and not (src <= 5 and m.get("bipolar")):
+            if src <= 5:
+                routes.append((src - 2, ("FXFilter", "kParamWet", 0), a))
+            else:
+                other.append((src, ("FXFilter", "kParamWet", 0), a, bool(m.get("bipolar"))))
             continue
         if m in util_out_carried:                  # the Level Out of a Utils that ends a rack (fxmap.util_out_plan): an LFO route (map_lfos) or an envelope route (the spare envelopes)
             ukey = ("FXUtils", "kParamLevelOut", m["dest_id"] // 100)
@@ -2131,6 +2139,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = f"WT{slot} Level" if slot else {3: "Noise Level", 4: "Sub Level"}.get(key[2])
         elif key[0] == "FXDistortion" and key[1] == "kParamWet":
             dest = "Dist Wet"
+        elif key[0] == "FXFilter" and key[1] == "kParamWet":
+            dest = "FX Filter Wet"
         elif key[0] == "FXComp" and key[1] == "kParamWet":
             dest = "Comp Wet"
         elif key[0] == "FXUtils" and key[1] == "kParamLevelOut":
@@ -2294,7 +2304,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
         # A Filter FX that the filter envelope moves is the engine's Filter stage in a rack, as in the main one (fxmap.filter_bands leaves it to that stage and
         # no static EQ band stands in for it): left out here, the EQs behind it, set to lift what it takes away, boost the whole distorted signal (Lead - Other
         # Side's bus 1: LP 24 -> +18 dB shelf at 15 kHz, +29 dB too much above 10 kHz).
-        dyn = fxmap.dynamic_filter(nodes, {"mods": ph["mods"], "macros": ph["macros"]})
+        dyn = fxmap.dynamic_filter(nodes, {"mods": ph["mods"], "macros": ph["macros"], "rack": b})
         if dyn:
             scratch: dict = {}
             fnotes = apply_filter2(scratch, dyn, ph, voice_env if voice_env is not None else (-1 if P.get("fxf_on") else None))
@@ -2341,8 +2351,11 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
     corr = interp([tuple(x) for x in fit["corr"]], cut) if fit else 0.0
     P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut) + corr, 0, 127))
     P["fxf_res"] = filter_res_pot(model, dyn["reso"])
+    P["fxf_wet"] = round(_clamp(dyn["wet"] / 100.0, 0.0, 1.0) * 127)
     if not dyn["envs"]:
-        out = [f"Filter FX carried as the effects block's filter: {model}, moved by LFO(s) {', '.join(str(s - 5) for s in sorted(set(dyn['lfos'])))} (route to FX Filter Freq)"]
+        out = [f"Filter FX carried as the effects block's filter: {model}"
+               + (f", moved by LFO(s) {', '.join(str(s - 5) for s in sorted(set(dyn['lfos'])))} (route to FX Filter Freq)" if dyn["lfos"] else "")
+               + (f", Wet {dyn['wet']:.0f} %" + (" moved by " + ", ".join([f"envelope {s - 1}" for s in sorted(set(dyn['wet_envs']))] + [f"LFO {s - 5}" for s in sorted(set(dyn['wet_lfos']))]) if dyn["wet_envs"] or dyn["wet_lfos"] else "") if dyn["wet"] < 99.0 or dyn["wet_envs"] or dyn["wet_lfos"] else "")]
     else:
         e = max(dyn["envs"], key=lambda k: abs(dyn["envs"][k]))
         P["fxf_env"] = round(_clamp(64 + 63 * dyn["envs"][e] * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))

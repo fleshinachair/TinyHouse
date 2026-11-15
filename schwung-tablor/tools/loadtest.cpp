@@ -520,8 +520,8 @@ int main(int argc, char **argv)
             if (!strncmp(c, "\"level\":", 8)) levels++;
             if (!strncmp(c, "\"key\":", 6)) keys++;
         }
-        CHECK(levels == 6 && keys == 0 && end && !strncmp(end, "\"knobs\":[]", 10),
-              "and holds the six pages (Main, Tone, Macros, Effects, Mod FX, Demo) as levels, with no knobs of its own (%d levels, %d params)", levels, keys);
+        CHECK(levels == 7 && keys == 0 && end && !strncmp(end, "\"knobs\":[]", 10),
+              "and holds the seven pages (Main, Tone, Macros, Effects, Mod FX, Voice, Demo) as levels, with no knobs of its own (%d levels, %d params)", levels, keys);
     }
     n = api->get_param(inst, "chain_params", big, sizeof big);
     CHECK(strstr(big, "\"viz\"") && strstr(big, "\"group\":\"amp\"") &&
@@ -1064,6 +1064,16 @@ int main(int argc, char **argv)
                       "a restored state puts the preset page back on its preset (%s / %s \"%s\", wanted %s / 1 \"%s\")", rbank, ridx, rname, bn, nb);
             }
             CHECK(strcmp(s0, s1) != 0 && !strncmp(s0, "TBLR2;", 6), "choosing a preset loads its sound (preset 0 and 1 differ)");
+            {   /* a preset is a whole sound: a setting it does not name is at its default, not where the last sound left it (granular settings leaked into every later preset) */
+                char d0[64] = {}, d1[64] = {}, d2[64] = {};
+                api->set_param(inst, "preset", "0");
+                api->get_param(inst, "smp_gdens", d0, sizeof d0);
+                api->set_param(inst, "smp_gdens", "77");
+                api->get_param(inst, "smp_gdens", d1, sizeof d1);
+                api->set_param(inst, "preset", "0");
+                api->get_param(inst, "smp_gdens", d2, sizeof d2);
+                CHECK(strcmp(d0, d1) != 0 && !strcmp(d0, d2), "choosing a preset puts a setting it does not name back at its default (%s, edited to %s, after the preset %s)", d0, d1, d2);
+            }
             api->set_param(inst, "preset", "9999");
             api->get_param(inst, "preset", pb, sizeof pb);
             CHECK(atoi(pb) == count - 1, "an index past the end stops at the last preset (%s of %d)", pb, count);

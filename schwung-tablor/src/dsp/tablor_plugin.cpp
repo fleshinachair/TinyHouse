@@ -1256,6 +1256,14 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
     bool v1 = strncmp(val, "TBLR1;", 6) == 0;
     if (!v1 && strncmp(val, "TBLR2;", 6) != 0) return;
     inst->state_seen = true;
+    /* A sound taken from the store is a whole sound: a setting it does not name is at its default, not where the last preset left it (the converter
+     * writes only the settings that differ from the default, so browsing from a granular preset carried its grain settings into every sample preset
+     * after it). The host's own restore of a slot keeps its meaning (a state that names little sets little). Unison Cap is the player's live limit. */
+    const int capIdx = param_index("uni_cap");
+    bool pathSeen[TB_WT_SLOTS + 4] = {};
+    if (!host_restore)
+        for (int i = 0; i < TB_PARAM_COUNT; i++)
+            if (tb_params[i].type != TB_PATH && i != capIdx) inst->params()[i] = tb_params[i].def;
     for (int b = 0; b < 2; b++)                       /* a preset says what its buses hold: a bus it does not mention is empty */
         for (int i = 0; i < TB_PARAM_COUNT; i++)
             inst->engine.busPots[b][i] = tb_params[i].def;
@@ -1325,8 +1333,10 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
                 if (tb_params[idx].type != TB_PATH)
                     inst->engine.busPots[kbuf[1] - '1'][idx] = clamp_param(&tb_params[idx], strtof(vbuf, nullptr));
             } else if (idx >= 0) {
-                if (tb_params[idx].type == TB_PATH)
+                if (tb_params[idx].type == TB_PATH) {
+                    pathSeen[tb_path_slot(idx)] = true;
                     set_table_path(inst, tb_path_slot(idx), vbuf, true);
+                }
                 else
                     inst->params()[idx] = clamp_param(&tb_params[idx],
                                                       strtof(vbuf, nullptr));
@@ -1334,6 +1344,9 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
         }
         p = (*semi) ? semi + 1 : semi;
     }
+    if (!host_restore)                                /* a table or set the preset does not name is none */
+        for (int s = 0; s < TB_WT_SLOTS + 4; s++)
+            if (!pathSeen[s] && inst->wt_path[s][0]) set_table_path(inst, s, "", true);
     inst->engine.macroSync();                         /* the macros sit where the state says; their routes move nothing until one is turned */
     republish_macro_names(inst);
     if (host_restore && dm_seen) {                    /* back onto the song the slot was playing, once the demo store has been scanned */

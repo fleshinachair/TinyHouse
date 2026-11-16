@@ -115,7 +115,7 @@ int main(int argc, char **argv)
     /* TB_SEQ=gap: the notes are played one after another, each held `hold` seconds and `gap` seconds apart (a first note against the next). */
     const char *seqEnv = getenv("TB_SEQ");
     const double gap = seqEnv ? atof(seqEnv) : 0.0;
-    /* TB_EVENTS=file: a performance, one note per line "on_s off_s note velocity" (a MIDI file's notes, see calibration/midi_ab.py); the note
+    /* TB_EVENTS=file: a performance, one note per line "on_s off_s note velocity" (a MIDI file's notes, see calibration/dev/midi_ab.py); the note
      * list and hold above are then ignored. */
     struct Ev { int onAt, offAt, note, vel; };
     std::vector<Ev> events;

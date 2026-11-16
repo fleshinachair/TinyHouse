@@ -132,7 +132,7 @@ def route_curve(slot: dict):
 
 def aux_curve(slot: dict):
     """A route's aux curve (kParamAuxCurveData on, the points in flex[1]) as 33 samples of the scale it gives the depth for an aux value x = k / 32, or None for a straight route.
-    Measured (calibration/probe_aux_curve.py): the depth is amount x curve(x), the curve read as 1 - y like every Serum curve, and it REPLACES the straight x: a macro at 0 / .25 / .5 / .75 / 1
+    Measured (calibration/dev/probe_aux_curve.py): the depth is amount x curve(x), the curve read as 1 - y like every Serum curve, and it REPLACES the straight x: a macro at 0 / .25 / .5 / .75 / 1
     on a curve (0.8 -> 0.2) gave 0.20 / .35 / .50 / .66 / .79, velocity and note number (x = value / 127) on (0.43 -> 0) gave 0.64 / .77 / .90 / 1.0 at 20 / 60 / 100 / 127, and a random aux
     (21, 22: uniform 0..1 per note) on (0.274 -> 0.166) gave 0.73..0.81, mean 0.78."""
     flex = slot.get("flex") or []
@@ -155,7 +155,7 @@ def aux_scale(aux: int, curve, macros: list, inverted: bool = False) -> float:
         x = 60 / 127.0
     else:
         x = None                                         # random per note (21, 22) or an envelope / LFO gate: the mean over x
-    # kParamAuxInverted: the aux works as 1 - its value (calibration/probe_aux_inverted.py: macro 0 / .5 / 1 gave -29 / -41 / silent dB, the plain route the reverse). With an aux curve
+    # kParamAuxInverted: the aux works as 1 - its value (calibration/dev/probe_aux_inverted.py: macro 0 / .5 / 1 gave -29 / -41 / silent dB, the plain route the reverse). With an aux curve
     # as well the curve comes first and the inversion after it, scale = 1 - curve(x) (BA - Analog Classics 3: macro 0 / 50 / 100 on a curve 0 -> 0.72 inverted gave the full depth /
     # 0.64 / 0.28, matched against plain routes of those depths; inverting x first gave 0.72 / 0.36 / 0 and held its filter route 14 dB too shut).
     if curve is None:
@@ -302,7 +302,7 @@ def physical(tree: dict, header: dict) -> dict:
             mods.append({"source": s["source"][0], "aux": s["source"][1] if len(s["source"]) > 1 else 0, "dest_type": s["destModuleTypeString"],
                          "dest_id": s.get("destModuleID"), "dest_param": s.get("destModuleParamName"),
                          # kParamOut, when saved, is the route's output scale in percent (default 100): depth = amount x Out / 100 on every destination
-                         # (calibration/probe_route_out.py: coarse pitch swing 11 st at 10 % with no Out, 0.1 st at Out 1, 2.1 st at Out 20; a filter route's
+                         # (calibration/dev/probe_route_out.py: coarse pitch swing 11 st at 10 % with no Out, 0.1 st at Out 1, 2.1 st at Out 20; a filter route's
                          # centroid swing 63 / 30 / 6 Hz at Out none / 50 / 10). Lead - Let It Go's sine into pitch at Out 0.86 does nothing in Serum. Not for a velocity or note-number aux (16, 17): Lead - Can't Find You's
                          # Out 38-46 routes render the same in Serum with or without it, and the scale made the engine's match worse).
                          "amount_pct": _pp(s).get("kParamAmount", 0.0) * (1.0 if (s["source"][1:] or [0])[0] in (16, 17) else _pp(s).get("kParamOut", 100.0) / 100.0),
@@ -320,8 +320,8 @@ def physical(tree: dict, header: dict) -> dict:
     macros.append(wheel * 100.0)
     # A route's second source (source = [main, aux]) scales its depth by the aux's value x: a macro at its saved value (a route gated by a macro at 0 does nothing: Pad - MIND's filter
     # envelope, which left its filter closed in Serum while the engine opened it), velocity (x = velocity / 127) and note number (x = note / 127) at their nominal values
-    # (calibration/probe_aux_source.py), a random aux (21, 22: uniform per note) at its mean, and when the slot has an aux curve (kParamAuxCurveData) the curve's value in place
-    # of x (calibration/probe_aux_curve.py; it explains Lead - Tonic Walter's route, which at velocity 100 is almost the unscaled one: a plain 100/127 made it 25 dB too dark, and the
+    # (calibration/dev/probe_aux_source.py), a random aux (21, 22: uniform per note) at its mean, and when the slot has an aux curve (kParamAuxCurveData) the curve's value in place
+    # of x (calibration/dev/probe_aux_curve.py; it explains Lead - Tonic Walter's route, which at velocity 100 is almost the unscaled one: a plain 100/127 made it 25 dB too dark, and the
     # old fix left every velocity / note aux at full depth). 1 (the mod wheel), 18, 19 and 24 are closed at rest (the route is off), 20 and 23 constant (left).
     for m in mods:
         aux = m.get("aux") or 0
@@ -337,7 +337,7 @@ def physical(tree: dict, header: dict) -> dict:
     # An envelope's Sustain is a plain 0..1 knob, so a macro, velocity or note route into it is folded in at the saved macro value or the nominal velocity / note
     # (Bass - Let It Go: velocity into the filter envelope's sustain, +73 %, which at velocity 100 holds the filter at 0.57 where the preset's own value is 0).
     # Attack, Decay and Release are stored in seconds but a route moves them in the knob's own domain, norm = (seconds / 32) ** 0.2 (the loader's time law): measured in
-    # calibration/probe_env_route.py (a 0.3 s decay with a macro at 100 % routed at +10 / +20 / -20 %: 0.9 / 2.4 / 0.009 s, the norm 0.395 + amount). 49 of the 91 factory presets
+    # calibration/dev/probe_env_route.py (a 0.3 s decay with a macro at 100 % routed at +10 / +20 / -20 %: 0.9 / 2.4 / 0.009 s, the norm 0.395 + amount). 49 of the 91 factory presets
     # in the trial set route something into an envelope time; before this they were left as stored.
     for m in mods:
         if m["dest_type"] == "Env" and isinstance(m["dest_id"], int) and 0 <= m["dest_id"] < len(envs) and m["dest_param"] in ("kParamSustain", "kParamAttack", "kParamDecay", "kParamRelease"):
@@ -353,7 +353,7 @@ def physical(tree: dict, header: dict) -> dict:
                     envs[m["dest_id"]][key] = 32.0 * norm ** 5
     # A macro, velocity, note or mod-wheel route into an oscillator's pitch or warp knobs is folded in at the saved macro position / nominal velocity and note (before this the knobs
     # kept their stored values: 31 of the 40 factory presets the sound gate dropped for their tone had such a route, DR - Kick Minimal's PITCH macro sat an octave off). Laws measured on
-    # Serum with a macro at 50 / 100 % (calibration/probe_macro_osc.py): a route adds depth x source to a Warp knob (0..1, clamped); coarse pitch 128 semitones per unit (bipolar
+    # Serum with a macro at 50 / 100 % (calibration/dev/probe_macro_osc.py): a route adds depth x source to a Warp knob (0..1, clamped); coarse pitch 128 semitones per unit (bipolar
     # after the source minus a half, as everywhere), the Pitch knob 25 semitones per unit in whole semitones, the Octave knob 10 octaves per unit in whole octaves, Fine 2 semitones per
     # unit, the knob stopping at +-1 semitone.
     for m in mods:
@@ -391,7 +391,7 @@ def physical(tree: dict, header: dict) -> dict:
         dest = rs.get("kParamRoutingDest")
         routed[source] = dest == "kRoutingDestFilter" if dest else source == 0
         # the balance between the two voice filters, -1 (Filter 1 only, what an unwritten one means) to +1 (Filter 2 only); stored in percent with 0 the
-        # middle, and each filter gets (1 -/+ t) / 2 of the source (calibration/probe_filter2.py)
+        # middle, and each filter gets (1 -/+ t) / 2 of the source (calibration/dev/probe_filter2.py)
         balance[source] = _clamp(rs.get("kParamFilterBalance", -100.0) / 100.0, -1.0, 1.0)
         none[source] = dest == "kRoutingDestNone"
         out[source] = dest == "kRoutingDestDirect"                       # Direct goes past the effects racks as well; Master is only past the voice filter (the rack-0 Filter probe)
@@ -552,7 +552,7 @@ TABLOR_DEFAULTS = {
 # 0.3 dB at 12.8 kHz, where MgL24 is 60 dB lower); the converter had assumed MgL24.
 DEFAULT_VOICE_FILTER = "MgL12"
 VELOCITY_NOMINAL = 100                    # the velocity a static preset's velocity routes are taken at (the engine's vca_vel default is the same 100)
-# Serum's noise oscillator (calibration/probe_noise_color.py, fitted: every White / Pink / Brown at Color 0.1 .. 0.8 within 0.4-1.6 dB): Type is the spectrum (White 3 dB per
+# Serum's noise oscillator (calibration/dev/probe_noise_color.py, fitted: every White / Pink / Brown at Color 0.1 .. 0.8 within 0.4-1.6 dB): Type is the spectrum (White 3 dB per
 # octave up in an octave band, Pink flat, Brown 3 dB down), Color 0.5 is neutral, below it a 12 dB/octave low-pass whose corner is 460 Hz at 0.2 and x4.5 per 0.1, above it
 # a 12 dB/octave high-pass with the same corners from 0.7 (0.6: 100 Hz, 0.8: 2 kHz). (Color 0.9 and up adds a rising tilt that this leaves out; 1.0 is silent.) The unwritten type
 # is a noise that is flat to 1.6 kHz and rises 3-5 dB/octave above (+14 dB at 12.8 kHz re 800 Hz): White stands in. Geiger is sparse clicks, left as before.
@@ -600,7 +600,7 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
           "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
           "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45, "WT1 Warp": 46, "WT2 Warp": 47, "WT3 Warp": 48}
-PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/probe_macro_osc.py, probe_lfo_pitch.py)
+PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/dev/probe_macro_osc.py, probe_lfo_pitch.py)
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -641,7 +641,7 @@ CAL = {
 }
 SUB_WAVE = {"kSine": 0, "kTriangle": 1, "kSaw": 2, "kSquare": 3, "kRoundRect": 0, "kPulse": 4}
 # Serum filter model -> (Tablor flt_type index, exact?)
-# Serum's comb and flanger models are the engine's own filter types 8..11 (comb.h; laws measured on noise in calibration/probe_comb.py, the Comb2 / Combs / L6 / H6 / Dist / Phase variants are not carried)
+# Serum's comb and flanger models are the engine's own filter types 8..11 (comb.h; laws measured on noise in calibration/dev/probe_comb.py, the Comb2 / Combs / L6 / H6 / Dist / Phase variants are not carried)
 COMB_MODELS = {"CombP": 8, "CombN": 9, "FlangeP": 10, "FlangeN": 11, "Phase12P": 12, "Phase24P": 13, "Phase36P": 14, "Phase48P": 15}
 FILTER_MAP = {
     **{m: (i, True) for m, i in COMB_MODELS.items()},
@@ -660,7 +660,7 @@ FILTER_CUTOFF_DELTA = {
     "MgL18": [(0.35, 7.0), (0.7, 7.0)], "L18": [(0.35, 7.0), (0.7, 7.0)],
     "L12": [(0.35, 3.0), (0.7, 2.0)], "MgL12": [(0.35, 3.0), (0.7, 2.0)],
     "MgL6": [(0.35, 31.0), (0.45, 25.0), (0.55, 20.0), (0.7, 12.0)], "L6": [(0.35, 31.0), (0.45, 25.0), (0.55, 20.0), (0.7, 12.0)],
-    "H24": [(0.3, -1.5), (0.4, 0.8), (0.5, 1.6), (0.6, -0.1), (0.7, -1.7), (0.8, 1.6)],       # noise through the filter (calibration/probe_hp24_low.py, fits within 0.5-1.5 dB);
+    "H24": [(0.3, -1.5), (0.4, 0.8), (0.5, 1.6), (0.6, -0.1), (0.7, -1.7), (0.8, 1.6)],       # noise through the filter (calibration/dev/probe_hp24_low.py, fits within 0.5-1.5 dB);
     "H12": [(0.3, -1.5), (0.4, 0.8), (0.5, 1.6), (0.6, -0.1), (0.7, -1.7), (0.8, 1.6)],       # the saw-harmonic fit these replace (+7) read the first harmonics, too few points
     "B24": [(0.35, 0.0), (0.45, 3.0), (0.55, 4.0), (0.7, 4.0)], "B12": [(0.35, 0.0), (0.45, 3.0), (0.55, 4.0), (0.7, 4.0)],
 }
@@ -671,7 +671,7 @@ FILTER_RES_POT = {            # resonance percentage -> engine resonance pot, by
 }
 
 
-# Models fitted one by one against the engine's filter types (calibration/fit_filter_model.py): {model: {"type", "delta": [[cutoff, pots]], "poor", "rms_db"}}
+# Models fitted one by one against the engine's filter types (calibration/dev/fit_filter_model.py): {model: {"type", "delta": [[cutoff, pots]], "poor", "rms_db"}}
 FILTER_MODELS_FILE = Path(__file__).resolve().parent / "calibration/filter_models.json"
 FILTER_MODELS: dict = json.loads(FILTER_MODELS_FILE.read_text(encoding="utf-8")) if FILTER_MODELS_FILE.exists() else {}
 FLAT_FILTER_DB = 1.5     # a model whose harmonic levels are within this of no filter at all (Serum's own noise is about 1 dB) is left open
@@ -696,7 +696,7 @@ def filter_cutoff_delta(model: str, cut: float, reso: float | None = None) -> fl
 
 
 FILTER_RES_FILE = Path(__file__).resolve().parent / "calibration/filter_res.json"
-FILTER_RES: dict = json.loads(FILTER_RES_FILE.read_text(encoding="utf-8")) if FILTER_RES_FILE.exists() else {}      # calibration/fit_filter_res.py
+FILTER_RES: dict = json.loads(FILTER_RES_FILE.read_text(encoding="utf-8")) if FILTER_RES_FILE.exists() else {}      # calibration/dev/fit_filter_res.py
 
 
 def filter_res_pot(model: str, pct: float) -> int:
@@ -708,40 +708,40 @@ def filter_res_pot(model: str, pct: float) -> int:
 # Serum's Bend amount (0..1) against the engine's bend pot above its centre 64, from the harmonics of a sine bent in both (calibration/bend probe:
 # the engine's bend is gentle near 0 and steep near 1; the straight line 64 + 63 x amount put 3x too many harmonics on small amounts).
 # Serum's filter Drive (percent) against the engine's flt_drive pot, from the harmonics a bass sine and a saw gain through an open MgL24 in both
-# (calibration/probe_drive.py). The straight line pot = 1.27 x percent had the engine distorting 2-4x too hard up to 50 %: AVAION's 10 % drive put a
+# (calibration/dev/probe_drive.py). The straight line pot = 1.27 x percent had the engine distorting 2-4x too hard up to 50 %: AVAION's 10 % drive put a
 # -24 dB third harmonic on a 16 Hz sine where Serum's is below -140 dB.
 FILTER_DRIVE_POT = [(0.0, 0.0), (10.0, 4.0), (25.0, 8.0), (50.0, 30.0), (75.0, 65.0), (100.0, 90.0)]
-# What the voice filter's Drive does in Serum: a plain gain, every harmonic by the same amount, no distortion at ordinary levels (calibration/probe_vdrive_gain.py
+# What the voice filter's Drive does in Serum: a plain gain, every harmonic by the same amount, no distortion at ordinary levels (calibration/dev/probe_vdrive_gain.py
 # and probe_vdrive_saw.py). On a quiet noise it is +3.4 / 7.6 / 14.1 / 19.6 / 24 dB at 10 / 25 / 50 / 75 / 100 %; on a loud saw it stops near +13 dB. The table is
 # the saw's (oscillator levels are loud); the engine's gain stage after the filter supplies it and its saturating Drive pot stays at 0 (FILTER_DRIVE_POT is no longer used).
 FILTER_DRIVE_GAIN_DB = [(0.0, 0.0), (10.0, 3.3), (25.0, 7.6), (50.0, 12.5), (75.0, 13.0), (100.0, 13.0)]
 # The engine's saturating Drive pot (FILTER_DRIVE_POT) stays: it is what puts the harmonics a loud low note gets from Serum's ladder (Bass - AVAION's 320 Hz band
 # is 12 dB short without it). Its gain is a little under Serum's, so the gain stage after the filter supplies the difference: Serum's gain above (on a loud saw)
-# minus the engine's with that pot on a noise at volume 0.75 (calibration/probe_vdrive_gain.py).
+# minus the engine's with that pot on a noise at volume 0.75 (calibration/dev/probe_vdrive_gain.py).
 FILTER_DRIVE_MAKEUP_DB = [(0.0, 0.0), (10.0, 2.8), (25.0, 5.7), (50.0, 10.6), (75.0, 11.1), (100.0, 11.1)]
 # Serum's drive makes no harmonics on a saw at 50-100 % (every harmonic moves by the same dB), so the engine's saturating pot stops at its 25 % value.
 FILTER_DRIVE_POT_USED = [(0.0, 0.0), (10.0, 4.0), (25.0, 8.0), (100.0, 8.0)]
 BEND_POT = [(0.0, 64.0), (0.03, 65.0), (0.12, 65.0), (0.2, 66.0), (0.3, 67.0), (0.4, 70.0), (0.5, 74.0), (0.7, 86.0), (0.85, 100.0), (1.0, 116.0)]
 BEND_WARPS = {"kBendPos": +1, "kBendNeg": -1, "kASYMPos": +1, "kASYMNeg": -1, "kPWM": +1}
-# The "PosNeg" warps are one bipolar knob (calibration/probe_warp_phase.py: BendPosNeg 0.25 is BendPos 0.5 to the sample, 0.75 is BendNeg 0.5, 0.5 is the table as it is; the same for ASYMPosNeg):
+# The "PosNeg" warps are one bipolar knob (calibration/dev/probe_warp_phase.py: BendPosNeg 0.25 is BendPos 0.5 to the sample, 0.75 is BendNeg 0.5, 0.5 is the table as it is; the same for ASYMPosNeg):
 # below the middle the Pos warp at 2 (0.5 - a), above it the Neg warp at 2 (a - 0.5).
 BIPOLAR_WARPS = {"kBendPosNeg": ("kBendPos", "kBendNeg"), "kASYMPosNeg": ("kASYMPos", "kASYMNeg")}
-# Serum's PWM warp on a saw (calibration/probe_pwm.py): the harmonics 2..9 match the engine's Bend at these pots to within 1-2.5 dB (amount 0.2: pot 90 or 38,
+# Serum's PWM warp on a saw (calibration/dev/probe_pwm.py): the harmonics 2..9 match the engine's Bend at these pots to within 1-2.5 dB (amount 0.2: pot 90 or 38,
 # 0.4: 104 or 24, 0.6: 122 or 6; 0.8 is beyond the engine's range). A pulse-width warp and a bend are both an asymmetric phase map; the phases differ, the magnitudes do not.
-# Serum's Sync warp on a saw (calibration/probe_sync.py): the engine's sync pot whose harmonics are closest, 0.2 to 0.7 within 0.3-2.2 dB. Amounts under 0.15 are no sync.
+# Serum's Sync warp on a saw (calibration/dev/probe_sync.py): the engine's sync pot whose harmonics are closest, 0.2 to 0.7 within 0.3-2.2 dB. Amounts under 0.15 are no sync.
 SYNC_POT = [(0.0, 0.0), (0.15, 0.0), (0.2, 6.0), (0.3, 20.0), (0.4, 44.0), (0.5, 64.0), (0.6, 88.0), (0.7, 108.0), (0.8, 124.0), (1.0, 127.0)]
 PWM_BEND_POT = [(0.0, 64.0), (0.2, 90.0), (0.4, 104.0), (0.6, 122.0), (0.8, 127.0), (1.0, 127.0)]
 WARP_NOISE_FLOOR = 0.02    # a warp mode with ~0 amount is not audible
-# Warps whose modulator is a noise or a filter do nothing up to an amount, then switch on (calibration/probe_warp_noise.py, probe_warp_filt.py: the carrier of a sine is within 0.3 dB and the
+# Warps whose modulator is a noise or a filter do nothing up to an amount, then switch on (calibration/dev/probe_warp_noise.py, probe_warp_filt.py: the carrier of a sine is within 0.3 dB and the
 # skirt under -17 dB up to there): FM / FMX from the Noise 0.45 (carrier -1.1 dB at 0.5, -10 dB at 0.6), PD from the Noise 0.55 (-0.25 dB at 0.6, -14 dB at 0.8), FM from Filter 1 0.16.
 WARP_DEADZONE = {"kFM_NOISE": 0.45, "kFMX_NOISE": 0.45, "kPD_NOISE": 0.55, "kFM_FILT1": 0.16}
 # Serum's Filter LP / HP warps and its FM / PD / RM warps from the Sub, which the engine carries as one more warp per oscillator (wtN_xw, wtN_xa = Serum's amount in
-# thousandths; the laws are in wt_oscillator.h: calibration/probe_filterwarp.py, probe_warp_fm.py). One per oscillator: a second one stays unsupported.
+# thousandths; the laws are in wt_oscillator.h: calibration/dev/probe_filterwarp.py, probe_warp_fm.py). One per oscillator: a second one stays unsupported.
 XWARP_MODES = {"kFilterLPF": 1, "kFilterHPF": 2, "kFM_SUB": 3, "kPD_SUB": 4, "kRM_SUB": 5, "kSelfPD": 7}
 SELFPD_LIMIT = 0.4          # SelfPD is the implicit y = x(p + z y), z = 0.62 a^2 cycles: fitted to a sine to 0.01 rms up to there (out/scratch/fit_selfpd.py), not beyond
-# The same warps with another oscillator as the modulator (calibration/probe_warp_osc.py): the menu's "Osc" is the first of the other two oscillators (A for B and C, B for A),
+# The same warps with another oscillator as the modulator (calibration/dev/probe_warp_osc.py): the menu's "Osc" is the first of the other two oscillators (A for B and C, B for A),
 # "Osc 2" the second (C for A and B, B for C); a modulator that is switched off gives no modulation at all. PD_OSC was a Bend stand-in before this. {mode: (warp kind, which of the other two)}; the engine's xs value is that oscillator's index + 1. AM (kind 6) is the Osc-only one.
-XWARP_NOISE_MODES = {"kFM_NOISE": 3, "kFMX_NOISE": 3, "kPD_NOISE": 4, "kRM_NOISE": 5}     # driven by the Noise: engine source 4 (calibration/probe_noise_warp_law.py)
+XWARP_NOISE_MODES = {"kFM_NOISE": 3, "kFMX_NOISE": 3, "kPD_NOISE": 4, "kRM_NOISE": 5}     # driven by the Noise: engine source 4 (calibration/dev/probe_noise_warp_law.py)
 XWARP_OSC_MODES = {"kPD_OSC": (4, 0), "kFM_OSC": (3, 0), "kFM_OSC2": (3, 1), "kPD_OSC2": (4, 1), "kRM_OSC": (5, 0), "kRM_OSC2": (5, 1), "kAM_OSC": (6, 0), "kAM_OSC2": (6, 1)}
 WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves.json"
 
@@ -755,7 +755,7 @@ WARP_CURVE_FILE = Path(__file__).resolve().parent / "calibration/warp_curve_mode
 
 
 def WARP_CURVES() -> dict:
-    """Serum's static waveshaper warps the engine carries as measured transfer curves (wtN_wshape 5; schwung-tablor/tools/gen_warp_curves.py from calibration/probe_warp_curves.py):
+    """Serum's static waveshaper warps the engine carries as measured transfer curves (wtN_wshape 5; schwung-tablor/tools/gen_warp_curves.py from calibration/dev/probe_warp_curves.py):
     the mode order (= the engine's curve index), the largest amount each was measured to follow Serum (10 % rms on a second waveform) and the amount up to which it is the identity."""
     return json.loads(WARP_CURVE_FILE.read_text(encoding="utf-8"))
 
@@ -846,7 +846,7 @@ def _fit_for(path: Path, name: str):
 
 def apply_filter_fit(name: str, P: dict) -> list:
     """The cutoff, envelope depth and envelope decay measured for this preset against Serum
-    (calibration/fit_filter.py), in place of the mapper's closed-form ones. The closed form is right
+    (calibration/dev/fit_filter.py), in place of the mapper's closed-form ones. The closed form is right
     on average and wrong for any one patch: it cannot see the envelope's curve, which decides how
     fast and how far the filter closes. A fit is only used if the mapper still produces the values
     it started from, so a changed mapper or table cannot apply a stale one."""
@@ -861,7 +861,7 @@ def apply_filter_fit(name: str, P: dict) -> list:
 
 
 def apply_width_fit(name: str, P: dict) -> list:
-    """The unison spread measured for this preset against Serum (calibration/fit_width.py): the
+    """The unison spread measured for this preset against Serum (calibration/dev/fit_width.py): the
     side/mid of a stack is not a function of voice count alone, so a per-preset scale on the
     spread knobs matches what a law cannot. Same staleness guard as the filter fit."""
     fit = _fit_for(WIDTH_FITS, name) if APPLY_WIDTH_FITS else None
@@ -889,7 +889,7 @@ def apply_chain_fit(name: str, P: dict) -> list:
 
 def apply_tune_fit(name: str, P: dict) -> list:
     """The amp envelope (decay, sustain, release), the two shelves and, for a sound whose Serum rack has a
-    Distortion, Drive, measured against Serum's full chain (calibration/fit_tune.py). Runs last of the fits,
+    Distortion, Drive, measured against Serum's full chain (calibration/dev/fit_tune.py). Runs last of the fits,
     on top of everything above, with the same stale-fit guard."""
     fit = _fit_for(TUNE_FITS, name) if APPLY_TUNE_FITS else None
     if not fit:
@@ -901,7 +901,7 @@ def apply_tune_fit(name: str, P: dict) -> list:
 
 
 def apply_stereo_fit(name: str, P: dict) -> list:
-    """The Master Width that puts this preset's side/mid where Serum's full chain has it (calibration/fit_stereo.py).
+    """The Master Width that puts this preset's side/mid where Serum's full chain has it (calibration/dev/fit_stereo.py).
     Runs after the tune fit, with the same stale-fit guard."""
     fit = _fit_for(STEREO_FITS, name) if APPLY_STEREO_FITS else None
     if not fit:
@@ -967,7 +967,7 @@ UNISON_LEVEL_FIT = False                     # the oscillator-level correction b
 
 
 def unison_level_db(unison: int) -> float:
-    """How much louder an oscillator of this unison count has to be made in the engine to match Serum (calibration/osc_survey.py: each oscillator alone, level against the master law,
+    """How much louder an oscillator of this unison count has to be made in the engine to match Serum (calibration/dev/osc_survey.py: each oscillator alone, level against the master law,
     148 oscillators): a single voice comes out 2.7 dB quiet, and a stack's level falls 1.6 dB per doubling of the count faster than Serum's (4.6 dB high at 2 voices, 1.9 low at 16)."""
     return 2.7 if unison <= 1 else -4.61 + 1.61 * math.log2(unison)
 
@@ -1066,7 +1066,7 @@ def write_embedded_table(data: list, wt_out: Path, subdir: str) -> str:
 
 
 FLIP_TOLERANCE = 0.01      # Serum's Flip warp is a morph that repeats: amount 0 and 1 are the table as it is, 0.5 is the table read BACKWARDS (a time reversal, every
-#                            harmonic's phase negated, magnitudes unchanged) at every table position (calibration/probe_flip.py: at 0.5 and 0.5034 the magnitudes agree to 0.03 dB and the
+#                            harmonic's phase negated, magnitudes unchanged) at every table position (calibration/dev/probe_flip.py: at 0.5 and 0.5034 the magnitudes agree to 0.03 dB and the
 #                            phases exactly; 0.05 away it is already 1.9 dB / 70 deg off, and 0.15-0.35 is a different, noisy shape). So only those two ends are carried.
 
 
@@ -1110,7 +1110,7 @@ def reverse_table(move_path: str, wt_out: Path) -> str | None:
     return move_path[:len(move_path) - len(src.name)] + dest.name
 
 
-EVENODD_TOLERANCE = 0.01   # Serum's Even/Odd warp is y(p) = x(p) + (2 a - 1) x(p + 1/2) (calibration/probe_evenodd.py: exact on two tables, every amount 0..1); at 0.5 it is the table as it is
+EVENODD_TOLERANCE = 0.01   # Serum's Even/Odd warp is y(p) = x(p) + (2 a - 1) x(p + 1/2) (calibration/dev/probe_evenodd.py: exact on two tables, every amount 0..1); at 0.5 it is the table as it is
 LTI_WARPS = ("kFilterLPF", "kFilterHPF", "kFlip", "kEvenOdd")   # a warp that is a filter or a time shift of the whole cycle commutes with the half-cycle mix, so the baked table may come before it
 
 
@@ -1173,13 +1173,13 @@ def evenodd_table(move_path: str, amount: float, wt_out: Path) -> str | None:
     return move_path[:len(move_path) - len(src.name)] + dest.name
 
 
-LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
+LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/dev/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
-# A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
+# A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/dev/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
 # half a beat, 4 Hz at 120 BPM, where the converter had it at 14.69 Hz). A synced LFO's stored Rate is not a frequency: it picks a note division, one per band of the Rate
 # knob. Edges and divisions (in beats) as swept on Serum at 120 BPM (the 16-beat band 0.2 .. 0.45 and its lower edge near 0.16: 8.00 s periods at 0.17 .. 0.45, none measurable at 0.15 and under; PD - Depth Opens' Env-mode LFO, Rate 0.4, ran at 0.4 Hz here against Serum's 8 s); with Triplets on, the top quarter of each band plays the division's 2/3 length.
 LFO_SYNC_BANDS = [(0.16, 0.5, 16.0), (0.5, 1.25, 8.0), (1.25, 3.15, 4.0), (3.15, 5.5, 2.0), (5.5, 9.5, 1.0), (9.5, 15.8, 0.5), (15.8, 22.5, 0.25), (22.5, 1e9, 0.125)]
-# Serum's LFO Smooth (0..100) is a one-pole low-pass on the LFO's output of the same absolute time constant at any rate (calibration/probe_lfo_smooth.py, Lead - Loop's own
+# Serum's LFO Smooth (0..100) is a one-pole low-pass on the LFO's output of the same absolute time constant at any rate (calibration/dev/probe_lfo_smooth.py, Lead - Loop's own
 # tree: tau 6-8 ms at Smooth 8-25, 10 ms at 40, 15 at 55, 28 at 70, 73-91 at 85, over 150 at 100); tau = 14 ms * s / (102 - s) follows it. The engine's pot is log, 2 ms .. 0.7 s.
 LFO_SMOOTH_TAU_MS = 14.0
 
@@ -1322,7 +1322,7 @@ def lfo_class(dest_name: str) -> str:
     return "pan" if dest_name.endswith("Pan") else "other"
 
 
-# Serum LFO curves, measured by playing constant/ramp/bent curves through Serum (probe in the transcript of calibration/probe_lfo_level.py):
+# Serum LFO curves, measured by playing constant/ramp/bent curves through Serum (probe in the transcript of calibration/dev/probe_lfo_level.py):
 # a point's stored y is measured down from the top, so the LFO's value there is 1 - y; a segment from y0 to y1 travels the fraction x**p of
 # the way at x (0..1) along it, with p set by the segment's stored bend c (0.5 is straight, higher stays near y0 longer, lower leaves at once).
 LFO_BEND_C = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
@@ -1368,7 +1368,7 @@ def lfo_shape_pots(l: dict) -> list:
         return [round(127 * (0.5 + 0.5 * math.sin(2 * math.pi * k / 16))) for k in range(16)]
     if len(xs) >= 3 and xs[0] == xs[1] and abs(ys[0] - ys[-1]) > 0.05:
         # a shape whose first point sits on the second's x (a vertical edge at the start) and whose first y is not the last's: Serum's value comes back to the FIRST point's, not to the
-        # last stored y (calibration/probe_lfo_env.py on Synth_Pierre's LFO 1: 1.0 falling to 0.5 = 1 - y0, in Trig mode as well as Envelope; one shape measured)
+        # last stored y (calibration/dev/probe_lfo_env.py on Synth_Pierre's LFO 1: 1.0 falling to 0.5 = 1 - y0, in Trig mode as well as Envelope; one shape measured)
         ys = list(ys[:-1]) + [ys[0]]
     return [round(127 * curve_value(xs, ys, cs, k / (15 if one_shot else 16))) for k in range(16)]
 
@@ -1472,7 +1472,7 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             if d.get("sync") is None or d.get("sync"):         # an unwritten BeatSync is ON: the Rate picks a note division (LFO_SYNC_BANDS)
                 hz = lfo_sync_hz(d["rate"], bool(d.get("triplets"))) or hz
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
-        P[f"lfo{n}_mode"] = 2 if d.get("env") else 0 if d.get("mode") in (None, 0, 0.0) else 1          # Envelope: plays the shape once and holds its end (calibration/probe_lfo_env.py)
+        P[f"lfo{n}_mode"] = 2 if d.get("env") else 0 if d.get("mode") in (None, 0, 0.0) else 1          # Envelope: plays the shape once and holds its end (calibration/dev/probe_lfo_env.py)
         P[f"lfo{n}_smooth"] = lfo_smooth_pot(d.get("smooth"))
         # a Random S&H LFO has no period, so a sine table puts a tone on its destination that Serum does not have (Lead - Other Side:
         # its 26 Hz Random S&H into an oscillator's level was a steady tremolo against Serum's flute-like note). Built flat at its mid level instead: a
@@ -1644,9 +1644,9 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             continue
         if 25 <= src <= 32:
             mv = fxmap.macro_value(m, ph["macros"])
-            fold[key] += a * ((mv - 0.5) if m.get("bipolar") else mv)       # a bipolar route is the source minus one half (calibration/probe_macro_bipolar.py, probe_note_route.py), not 2x - 1
+            fold[key] += a * ((mv - 0.5) if m.get("bipolar") else mv)       # a bipolar route is the source minus one half (calibration/dev/probe_macro_bipolar.py, probe_note_route.py), not 2x - 1
         elif src in (16, 17):
-            # Velocity and note number are x / 127 (calibration/probe_aux_source.py, the same sources as an aux). They move with every note; the preset is static, so
+            # Velocity and note number are x / 127 (calibration/dev/probe_aux_source.py, the same sources as an aux). They move with every note; the preset is static, so
             # a velocity is taken at the nominal velocity (the engine's own default) and a note at middle C, which is where the engine's key tracking pivots. A note
             # route to the filter cutoff is carried exactly as key tracking as well (voice_filter_pots: the part per semitone), so only the value at middle C is here.
             x = (VELOCITY_NOMINAL if src == 16 else 60) / 127.0
@@ -1659,7 +1659,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             w = ph["macros"][8] / 100.0 if len(ph["macros"]) > 8 else 0.0
             fold[key] += a * ((w - 0.5) if m.get("bipolar") else w)
             mod_wheel_idle += 1
-        elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/probe_venv.py)
+        elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/dev/probe_venv.py)
             routes.append((src - 2, key, a))
             if m.get("bipolar") and key[:2] in GRAN_ROUTE_KEYS:
                 fold[key] += a * -0.5                     # the same rule for a granular knob: the engine's route adds the envelope x depth, a bipolar Serum route the envelope minus a half
@@ -1915,7 +1915,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 kind = f"noise osc plays '{nz['sample_name'].rsplit('/', 1)[-1]}' in Serum, which is not noise; a noise with that sample's octave spectrum stands in"
             note.append(kind)
         elif nz.get("sample_name"):
-            # a White / Pink / HP12 sample is that noise and Serum's Color still acts on it (calibration/probe_noise_hp12.py)
+            # a White / Pink / HP12 sample is that noise and Serum's Color still acts on it (calibration/dev/probe_noise_hp12.py)
             P["noise_hp"], P["noise_lp"] = noise_color_pots(nz.get("color"))
             if P["noise_type"] == 3 and nz.get("color") is not None:
                 # HP12 Pink with a Color above neutral: pink through one 12 dB/octave high-pass whose corner is 1.1 kHz at no Color, 1.9 kHz at 0.6, 5.3 kHz at 0.79, 12 kHz at 1.0
@@ -2229,7 +2229,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     for n, (_, e, dest, a) in enumerate(mod_routes[:2], 1):
         P[f"me{n}_a"], P[f"me{n}_d"], P[f"me{n}_s"], P[f"me{n}_r"] = pot_env(ph["envs"][e])
         if dest == "Noise Level":
-            a *= 10 ** (noise_db / 40)           # the route moves the knob and the gain is its square (calibration/probe_noise_route.py): the level offset is half in dB
+            a *= 10 ** (noise_db / 40)           # the route moves the knob and the gain is its square (calibration/dev/probe_noise_route.py): the level offset is half in dB
         P[f"me{n}_dst"], P[f"me{n}_amt"] = ME_DST[dest], round(_clamp(64 + 63 * a, 0, 127))
     if len(mod_routes) > 2:
         appr.append(f"{len(mod_routes) - 2} extra envelope route(s) dropped (Tablor has 2)")
@@ -2285,7 +2285,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         # closed-form law gives, before any loudness fit) off it
         g_db = 20 * math.log10((P["volume"] / 127) ** 2 * MASTER_MAX + 1e-9)
         # The thresholds were measured at the probe preset's default master; Serum's master comes after its effects, so a preset with another master has
-        # the compressor working at a level that many dB lower or higher at the output (the output is proportional to the master: calibration/stage_audit.py)
+        # the compressor working at a level that many dB lower or higher at the output (the output is proportional to the master: calibration/dev/stage_audit.py)
         m_db = master_vs_default_db(ph.get("master"))
         P["comp_thresh"] = int(round(_clamp((t_out + m_db - g_db + 90.0) / 120.0, 0.0, 1.0) * 127))
         for k, key in (("comp_thresh2_out_db", "comp_thresh2"), ("comp_thresh3_out_db", "comp_thresh3")):
@@ -2380,7 +2380,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
     return notes
 
 
-# The Filter FX stage's cutoff against Serum's, measured model by model (calibration/probe_fxf_static.py, merged by fit_fxf_cutoff.py): the engine model whose type stands in
+# The Filter FX stage's cutoff against Serum's, measured model by model (calibration/dev/probe_fxf_static.py, merged by fit_fxf_cutoff.py): the engine model whose type stands in
 # (Serum's default type is a 6 dB/octave low-pass, closer to an L12 than to the MgL24 it used to be given) and the semitones the formula below is short of putting the filter's
 # -10 dB point where Serum's is: +2 to +4 for MgL18, about -2 for MgL24 and MgL12, +10 for the default. A model with no entry keeps the formula alone.
 FXF_CUTOFF_FILE = Path(__file__).resolve().parent / "calibration/fxf_cutoff.json"

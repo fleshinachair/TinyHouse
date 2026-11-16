@@ -755,7 +755,7 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.hydRate = pot01(pots[TB_P_HYD_RATE]);
     s.hydWet = all ? pot01(pots[TB_P_HYD_WET]) : 0.0f;
     s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 4);
-    s.distHold = 1 + (int) pots[TB_P_DIST_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one (1..128 samples; calibration/probe_dist_downsample.py) */
+    s.distHold = 1 + (int) pots[TB_P_DIST_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one (1..128 samples; calibration/dev/probe_dist_downsample.py) */
     s.distCal = pots[TB_P_DIST_CAL] >= 1.0f;
     if (s.distCal) {
         /* Drive is the pre-gain in dB (-16..+54), Wet Gain the curve's output gain (-36..+12 dB), Level a gain on the sum (-24..+24 dB). Off with FX Enable. */
@@ -884,7 +884,7 @@ void Engine::refreshFx()
     fx.set(fxSettings(pots));
 }
 
-/* A route from an LFO or envelope to the Level Out knob of the Utils that ends a rack. Serum adds depth x source to the knob (0..1, stored 0.5 = unity, stopping at both ends: calibration/probe_utils_level_route.py)
+/* A route from an LFO or envelope to the Level Out knob of the Utils that ends a rack. Serum adds depth x source to the knob (0..1, stored 0.5 = unity, stopping at both ends: calibration/dev/probe_utils_level_route.py)
  * and the gain is (knob / 0.5)^2 (probe_utils_level.py: -12 dB at 0.25, +12 dB at 1.0, -28 dB at 0.1). The converter carries it when the stored knob is its default, so the gain here is (2 x (base + m))^2 with the base the rack's util_out pot / 127 (0 = no route).
  * The gain is ramped across the block so a fast pump does not step. */
 void Engine::applyUtilOut(int rack, float *l, float *r, int n)

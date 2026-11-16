@@ -16,7 +16,7 @@ Read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (the rule: translate from Serum'
 ## What a change must show
 1. **The rule.** A new translation rule comes from a Serum probe (`calibration/probe_*.py`) and is written into `docs/TRANSLATION_RULES.md` with what was measured. A fix that helps one preset and
    does not transfer to a new pack is not a fix.
-2. **The numbers.** Before and after on the same measurement: `calibration/midi_ab.py` (the pack's demo MIDI), `calibration/reverb_engine_only.py` (reverb tails), the stage and effect
+2. **The numbers.** Before and after on the same measurement: `calibration/dev/midi_ab.py` (the pack's demo MIDI), `calibration/dev/reverb_engine_only.py` (reverb tails), the stage and effect
    audits, or the chain report. Judge by many presets: random unison phases give about +-3 dB per preset.
 3. **The tests.** `bash schwung-tablor/scripts/zig-build.sh native`, then run `schwung-tablor/build/native_engine_test.exe`, `native_fx_test.exe` and `native_dsp_test.exe`. No Move is needed for this.
 4. **Ear reports where possible.** Only people with a Move can audition. Report it in the issue as: preset, what you hear, which side (Serum or Move). Treat it as data to check against a measurement.

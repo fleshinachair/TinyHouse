@@ -26,7 +26,7 @@ pitch-independent measures (the chord is mine, not the demo's, so only gaps over
 
 ## 2. What was done
 
-- **EQ boost cap tested, not adopted** (`calibration/eq_cap_test.py`): only 4 of 70 presets map a boost above
+- **EQ boost cap tested, not adopted** (`calibration/dev/eq_cap_test.py`): only 4 of 70 presets map a boost above
   +12 dB. Capping at +12 dB helped 3, hurt 1 (Pluck - all things break, already too dark), and left Gravity +25 dB
   over above 8 kHz: the floor, not the boost size, is the problem.
 - **Full-chain fit** (`fit_chain.py`, new refs from `fill_fx_refs.py`): filter cutoff, envelope depth, decay and

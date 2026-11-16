@@ -47,7 +47,7 @@ Installed on the Move: module 1.9.0-th (checksum verified) and the 70 presets (c
 | RMS error, \|dB\| | 0.82 | 0.83 | 0.53 |
 The choices were made on the same measurements, so the gains are optimistic. The 1-3 kHz band reads slightly darker than before (-1.3 -> -2.1 dB).
 
-## What the website demos are (calibration/transcribe.py, demo_compare.py)
+## What the website demos are (calibration/dev/transcribe.py, demo_compare.py)
 The pack has no MIDI. A rough multi-pitch transcription of a demo, played through the real Serum preset and the TinyHouse preset, shows
 how it was made. Lead - Tonic Walter: transcribed notes on the plain Serum preset match the demo's timing (loudness-shape correlation
 0.91) and stereo width (side/mid -4.1 vs demo -4.3 dB); the demo is 5 dB louder (mastering). TinyHouse: timing 0.94, but spectrum 9.0 dB

@@ -20,14 +20,15 @@ The plugin goes silent after about 1200 s of rendered audio per instance, so the
 ## Also useful
 
 - `census.py DIR --name NAME` checks a folder of presets without rendering anything in Serum and writes `census_NAME.json`: how many would import cleanly and what blocks the rest. It is quick (a few seconds per preset the first time, much less after).
+- `add_macros.py` adds macro routes to an installed bank (used by `deploy_macros_bank.sh`).
 
-## Developer tools
+## Developer tools: `calibration/dev/`
 
-Everything else is for changing the converter or the engine, not for using it:
+Everything in [dev/](dev/) is for changing the converter or the engine, not for using it:
 
 - `probe_*.py` play controlled test patches through Serum and record what it does (one setting at a time).
 - `fit_*.py`, `calibrate_*.py`, `hyperd_fit.py` turn those measurements into the `*.json` laws.
 - `validate_*.py`, `*_audit.py`, `check_*.py`, `stage_audit.py` check a rule against Serum after a change.
 - `fill_refs.py`, `fill_fx_refs.py`, `midi_ab.py`, `demo_compare.py`, `transcribe.py` and similar fill the Serum render cache or compare against a pack's own MIDI or recordings.
 
-Run any of them from the repo root, for example `python calibration/probe_lfo.py`; each one's header says what it writes.
+Run any of them from the repo root, for example `python calibration/dev/probe_lfo.py`; each one's header says what it writes.

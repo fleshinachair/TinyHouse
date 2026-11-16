@@ -286,7 +286,7 @@ static void testReverb()
     }
     CHECK(hi - lo < 3.0, "the wet level is flat across decay times (%.2f dB spread)", hi - lo);
     /* Serum's steady noise at wet 100 is -0.5 dB; the engine is set 3.5 dB above that (kRevOut 2.25, 1.5 times the noise-matched 1.50) because the tail of a played note,
-     * the thing heard, ran 2-5 dB under Serum's with the noise-matched level (calibration/reverb_engine_only.py). Noise-like sources therefore get a wet that is about 3 dB hot. */
+     * the thing heard, ran 2-5 dB under Serum's with the noise-matched level (calibration/dev/reverb_engine_only.py). Noise-like sources therefore get a wet that is about 3 dB hot. */
     CHECK(std::fabs(0.5 * (hi + lo) - 3.0) < 1.5, "and sits 3.5 dB over Serum's noise figure of -0.5 dB, the level that matches played-note tails (%.2f dB)", 0.5 * (hi + lo));
 
     /* a stage that is switched off and on again must not replay its old tail */

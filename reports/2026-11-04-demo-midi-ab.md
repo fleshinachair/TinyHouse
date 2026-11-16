@@ -1,6 +1,6 @@
 # The pack's demo MIDI, played through Serum and through TinyHouse (2026-11-04)
 
-`calibration/midi_ab.py` plays each preset's own demo MIDI file (real notes, velocities, note lengths) through Serum with its whole chain and through the installed preset, both at a host tempo of 120 BPM. The paired WAVs are in `out/ab_midi/` (git-ignored: they are Serum's renders). The pack has demo MIDI for 22 of the 70 presets; Lynnic, Kisaya and Catching Flies are not among them.
+`calibration/dev/midi_ab.py` plays each preset's own demo MIDI file (real notes, velocities, note lengths) through Serum with its whole chain and through the installed preset, both at a host tempo of 120 BPM. The paired WAVs are in `out/ab_midi/` (git-ignored: they are Serum's renders). The pack has demo MIDI for 22 of the 70 presets; Lynnic, Kisaya and Catching Flies are not among them.
 
 Reading the table: `level` is engine minus Serum in rms dB; `centroid` is the spectral centroid (Serum / engine, Hz); the band columns are the engine's octave-band level minus Serum's (re each render's own total), 31 Hz to 8 kHz. Bands above 4 kHz sit 50 to 100 dB under the peak in most of these presets: do not chase them. The low bands (31, 62 Hz) are small absolute levels too, but a +15 to +25 dB error there is sub-bass the engine has and Serum does not.
 

@@ -183,7 +183,7 @@ namespace fxdetail {
 inline constexpr int kLineLen[8] = { 1087, 1283, 1481, 1699, 1907, 2131, 2347, 2593 };
 inline constexpr int kApLen[4] = { 113, 197, 311, 431 };
 inline constexpr float kApGain = 0.6f;
-inline constexpr float kRevOut = 2.25f;          /* Serum's tail on a played note, held 1 s and released (calibration/reverb_engine_only.py, 54 presets with a master reverb): with the older 1.50
+inline constexpr float kRevOut = 2.25f;          /* Serum's tail on a played note, held 1 s and released (calibration/dev/reverb_engine_only.py, 54 presets with a master reverb): with the older 1.50
  * (the steady-noise level, wet 100 = -0.5 dB re the dry) the engine's tail ran a median 2-5 dB under Serum's at 0.1-1.5 s after the release. At 2.25 the medians are -0.9 / -2.8 / -2.1 dB, and the
  * level the reverb adds to the held note stays within +0.3 dB of Serum's. 3.00 would centre them but put steady noise 5.5 dB hot (test_fx), so 2.25 is the compromise; the spread between presets (4-6 dB) is not a gain problem. */
 inline constexpr float kDelayOut = 1.17f;        /* the echo of a noise burst at wet 100 against Serum's (the filter now acts on it, calibration/probe_delay_filter.py); was 0.94 with the filter on the repeats only */        /* a tap at wet 100: -0.5 dB, the energy of a 0.3 s burst through Serum's delay */
@@ -427,7 +427,7 @@ public:
     }
 
 private:
-    /* fitted to Serum's HyperD alone on a sine and a saw (calibration/hyperd_fit.py) */
+    /* fitted to Serum's HyperD alone on a sine and a saw (calibration/dev/hyperd_fit.py) */
     static constexpr float kDepthMs = 20.0f, kDepthExp = 1.0f, kRateHz = 0.25f, kRateExp = 1.8f, kSpeedLo = 0.3f, kSpeedHi = 1.8f, kVoiceGain = 0.95f, kVoicesRef = 7.0f, kVoicesExp = 0.3f, kHpHz = 150.0f;
     float sr;
     FxSettings st;
@@ -562,7 +562,7 @@ public:
         anyActive = baseActive || xfOn;
     }
 
-    /* wet: the Filter FX's Wet knob as a fraction of 0..100 %. Serum mixes it as a smoothstep s with the dry part kept, (1 - s^2) dry + s filtered (calibration/probe_fxfilter_wet.py). */
+    /* wet: the Filter FX's Wet knob as a fraction of 0..100 %. Serum mixes it as a smoothstep s with the dry part kept, (1 - s^2) dry + s filtered (calibration/dev/probe_fxfilter_wet.py). */
     void setFilter(bool on, int type, float hz, float q, float wet = 1.0f)
     {
         xfWetKnob = std::min(std::max(wet, 0.0f), 1.0f);
@@ -759,7 +759,7 @@ private:
     }
 
     /* The stages of a Split / SplitMS branch: the band (or Mid / Side) goes through them and joins the rest again. A 4th-order Linkwitz-Riley split (two Butterworth biquads each way) sums
-     * flat, so a branch that changes nothing leaves the signal as it was (calibration/probe_split_band.py: Serum's Split is -6 dB at Freq and 24 dB/octave). */
+     * flat, so a branch that changes nothing leaves the signal as it was (calibration/dev/probe_split_band.py: Serum's Split is -6 dB at Freq and 24 dB/octave). */
     void processBand(float *L, float *R, int n, int stages)
     {
         for (int at = 0; at < n; at += 128) processBandChunk(L + at, R + at, std::min(128, n - at), stages);
@@ -834,7 +834,7 @@ private:
         distCur = distTarget;
     }
 
-    /* The calibrated law (calibration/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py): Serum's Wet is a smoothstep s with the dry part
+    /* The calibrated law (calibration/dev/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py): Serum's Wet is a smoothstep s with the dry part
      * (1 - s^2), and its LevelOut a gain on the sum. The curve is out * f(gain x): tanh, the biased tanh (a bias of 0.004 at the input, its DC taken
      * out), a hard clip, or a sine. distTarget is 1 whenever the stage runs, so the ramp is only the switching. */
     void processDistCal(float *L, float *R, int n)

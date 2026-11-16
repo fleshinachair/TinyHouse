@@ -1,6 +1,6 @@
 # Serum 2 Granular oscillator: measured behaviour
 
-Measured 2026-11-13 with `calibration/granwave.py` (one Granular oscillator straight to the output, note 60, velocity 100, host at 120 BPM). Nothing is built yet; the engine design is in
+Measured 2026-11-13 with `calibration/dev/granwave.py` (one Granular oscillator straight to the output, note 60, velocity 100, host at 120 BPM). Nothing is built yet; the engine design is in
 `docs/GRANULAR_DESIGN.md`.
 
 ## Test files
@@ -77,7 +77,7 @@ With a = Param / 100 and u = the skewed position:
 ## Still to measure
 See the probe plan in `docs/GRANULAR_DESIGN.md`.
 
-## Random settings (P5, measured 2026-11-14, `calibration/probe_granular_random.py`)
+## Random settings (P5, measured 2026-11-14, `calibration/dev/probe_granular_random.py`)
 Method: one grain at a time (Density 0.001), Scan 0, a rectangular window (Tukey Param 0) where the grain's extent is read, a click or a linear chirp (`chirp.wav`, 300 -> 3000 Hz over 8 s) where its read position is read.
 Every Random value is a percent (0..100), the amount v = Random / 100. The grain's draw is uniform, taken at its birth.
 - **Not seeded**: two renders of the same settings differ (pan sequences differ), and so do two notes. No seed rule is needed; any PRNG will do.
@@ -116,7 +116,7 @@ Positions in percent of the file; the scan position p(t) = Start + Scan x t (t s
   The overlap is then births x length (the gain table follows it). Engine: `glenm`, `gdenm`.
 - **Unison** (7 oscillators): every grain is born once per voice (the same grid, each voice its own Random draws is assumed), voices spread evenly across the Detune: total span 4 d^1.25 semitones for Detune d (0.25 -> 0.71 st, 0.5 -> 1.68, 1 -> 3.96), pan like the sample oscillator
   (the first voice left, alternating, the middle one of an odd stack in the centre; UnisonStereo 100 % = hard, 50 % = pan 0.59, 25 % = 0.31), level 1/sqrt(n) per voice. Detune Width does nothing. The engine reuses `smpN_uni/det/spread`; UnisonWarp and UnisonStack are not carried (gap).
-- **Warp on the grains** (probes `calibration/probe_granular_warp.py`): a Dist* warp is applied to the file's raw samples inside each grain, before the window and the grain gain (the gain it adds does not change with the overlap
+- **Warp on the grains** (probes `calibration/dev/probe_granular_warp.py`): a Dist* warp is applied to the file's raw samples inside each grain, before the window and the grain gain (the gain it adds does not change with the overlap
   of 1..100 grains but does with the file's own level: SoftSat at Warp 1: +13.4 dB for a 0.2-rms noise file, +8.6 dB at 0.33). Not built yet: needs the shaper law in absolute file units (probe the transfer curve with files of known level).
 
 ## CPU on the Move (2026-11-14, `tablor_granular_test` built for aarch64, run from a scratch folder, load average ~2.5 from the Move's own processes)

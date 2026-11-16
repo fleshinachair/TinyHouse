@@ -14,5 +14,5 @@ pre = Path("out_g16/move/data/UserData/schwung/presets/tinyhouse")
 for n in json.load(open("calibration/g16_changed.json")):
     shutil.copy(pre / f"{n}.json", "calibration/g16_in")
 PY
-python -u calibration/post_level.py calibration/g16_in calibration/g16_post > calibration/g16_post.out 2>&1
+python -u calibration/dev/post_level.py calibration/g16_in calibration/g16_post > calibration/g16_post.out 2>&1
 echo done > calibration/g16.done

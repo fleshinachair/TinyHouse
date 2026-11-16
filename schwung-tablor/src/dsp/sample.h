@@ -173,7 +173,7 @@ private:
                 const double d = (pingPong && dir < 0) ? pos - ls : le - pos;       /* the distance to the turn */
                 if (d < xfLen) {
                     const double pp = !pingPong ? pos - (le - ls) : (dir > 0 ? 2.0 * le - pos : 2.0 * ls - pos);
-                    const float w = std::pow((float) (1.0 - d / xfLen), 0.8f);    /* measured on Serum (calibration/probe_loop_mode.py): a weight rising a little faster than linear */
+                    const float w = std::pow((float) (1.0 - d / xfLen), 0.8f);    /* measured on Serum (calibration/dev/probe_loop_mode.py): a weight rising a little faster than linear */
                     float a2, b2;
                     read(std::min(std::max(pp, 0.0), (double) fr - 1.001), a2, b2);
                     a += (a2 - a) * w; b += (b2 - b) * w;

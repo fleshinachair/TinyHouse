@@ -156,7 +156,7 @@ preset through the real Serum 2 plugin** and measures it, so it can do three thi
   `skipped_<bank>.md` report. It is stricter than the browser: a preset that uses something TinyHouse cannot carry is dropped, not imported with a part missing.
 
 You need Serum 2 installed on the computer (the VST3 plugin), Windows,
-Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine). Only a handful of the files in `calibration/` are used to import; the rest are the developer workbench
+Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine). Only a handful of the files in `calibration/` are used to import; the developer workbench is in `calibration/dev/`
 (see [calibration/README.md](calibration/README.md)).
 
 ```

@@ -149,7 +149,7 @@ VFILTER2 = dict(
     key   = pot("flt2_key",    "V2KY", "Filter 2 Key Track", 0),
 )
 # Serum's voice filter Drive is a plain gain, every harmonic by the same amount (+3.3 dB at 10 %, +7.6 at 25, +12.5 at 50; on a loud saw it stops at about
-# +13 dB, on a quiet noise it goes on to +24: calibration/probe_vdrive_gain.py and probe_vdrive_saw.py), with no distortion at ordinary levels. The converter
+# +13 dB, on a quiet noise it goes on to +24: calibration/dev/probe_vdrive_gain.py and probe_vdrive_saw.py), with no distortion at ordinary levels. The converter
 # writes it as this gain after each filter (0..24 dB) and leaves the engine's saturating Drive pot at 0.
 VGAIN = dict(
     g1 = pot("flt_gain",  "FGN",  "Filter Makeup", 0),
@@ -165,7 +165,7 @@ BALANCES = dict(
     smp2 = pot("smp2_bal", "BSM2", "Sample 2 Filter Balance", 0),
     smp3 = pot("smp3_bal", "BSM3", "Sample 3 Filter Balance", 0),
 )
-# Where each source goes, as Serum's routing buttons (calibration/probe_bus.py and the rack-0 filter probe): through the voice filter (the default); "Direct" past the
+# Where each source goes, as Serum's routing buttons (calibration/dev/probe_bus.py and the rack-0 filter probe): through the voice filter (the default); "Direct" past the
 # filter and into the effects (Serum's Master); "None", to the FX buses only; "Out", past the filter AND the effects, straight to the output (Serum's Direct).
 ROUTE = ["Filter", "Direct", "None", "Out"]
 ROUTES = dict(
@@ -267,7 +267,7 @@ CONV = dict(
     mix = pot("conv_mix", "CNVM", "Conv Mix", 0),
 )
 # Serum's Split / SplitMS: the stages named in Stages (HyperD 1, Distortion 2, Chorus / Flanger / Phaser 4, Width 32) work on one band only. Band 1 is the low band below Freq, 2 the high band
-# above it (a 4th-order Linkwitz-Riley crossover, measured: calibration/probe_split_band.py), 3 the Mid and 4 the Side of a SplitMS. Freq is 20 Hz .. 20 kHz (log). Off by default.
+# above it (a 4th-order Linkwitz-Riley crossover, measured: calibration/dev/probe_split_band.py), 3 the Mid and 4 the Side of a SplitMS. Freq is 20 Hz .. 20 kHz (log). Off by default.
 CTUNE = dict(
     f1 = num("flt_cfine",  "CTU1", "Filter Comb Tune", 0, 127, 64),
     f2 = num("flt2_cfine", "CTU2", "Filter 2 Comb Tune", 0, 127, 64),
@@ -404,7 +404,7 @@ LFOS = [dict(
     rate = pot(f"lfo{n}_rate", f"L{n}RT", f"LFO{n} Rate", 60),
     mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free", "Env"], 0),
     shape = [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)],
-    # Serum's LFO Smooth: a one-pole low-pass on the LFO's output, 2 ms to 0.7 s (log), 0 = off (calibration/probe_lfo_smooth.py)
+    # Serum's LFO Smooth: a one-pole low-pass on the LFO's output, 2 ms to 0.7 s (log), 0 = off (calibration/dev/probe_lfo_smooth.py)
     smooth = pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0),
 ) for n in range(1, N_LFO + 1)]
 LROUTES = [dict(
@@ -487,7 +487,7 @@ def eqband(n):
         q    = pot(f"eq{n}_q",     f"E{n}Q",  f"EQ{n} Q",    64),
     )
 EQ1, EQ2, EQ3, EQ4 = eqband(1), eqband(2), eqband(3), eqband(4)
-# The EQs inside a SplitMS node's two branches (calibration/probe_splitms.py: the first branch is the Mid, the second the Side): four bands each, applied in the
+# The EQs inside a SplitMS node's two branches (calibration/dev/probe_splitms.py: the first branch is the Mid, the second the Side): four bands each, applied in the
 # mid/side domain at the EQ stage. No page on the device: set by the converter, in the main rack and as "b1." / "b2." keys in a bus rack.
 def msband(side, n):
     return dict(

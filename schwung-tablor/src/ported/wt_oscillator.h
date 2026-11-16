@@ -70,7 +70,7 @@ public:
         float asym      = 0.0f;
         float fold      = 0.0f;
         float sync      = 0.0f;   /* 0..1 hard sync amount */
-        /* Serum's Dist* oscillator warps: a static shaper out = shapeOut f(shapeGain x) of every stream's sample (calibration/fit_warp_dist.py) */
+        /* Serum's Dist* oscillator warps: a static shaper out = shapeOut f(shapeGain x) of every stream's sample (calibration/dev/fit_warp_dist.py) */
         int   shape     = 0;      /* 0 off, 2 hard clip, 3 softsign, 4 cubic soft clip (1 is unused: std::tanh costs 7x the others per sample) */
         float shapeGain = 1.0f, shapeOut = 1.0f;
         int   curveMode = 0;      /* shape 5: one of Serum's static waveshapers as a measured transfer curve (warp_curves.h), curveMode its index, curveAmt Serum's 0..1 amount */
@@ -548,7 +548,7 @@ struct VoicedWTParams {
     int   curveMode = 0;
     float curveAmt = 0.0f;
     /* One more of Serum's warps on the oscillator: 0 none, 1 Filter LP, 2 Filter HP, 3 FM from Sub, 4 PD from Sub, 5 RM from Sub; xamount is
-     * Serum's 0..1 amount. The laws are measured (calibration/probe_warp_fm.py, probe_filterwarp.py). */
+     * Serum's 0..1 amount. The laws are measured (calibration/dev/probe_warp_fm.py, probe_filterwarp.py). */
     int   xwarp = 0;
     float xamount = 0.0f;
     int   xsrc = 0;                       /* the modulator of an FM / PD / RM / AM warp: 0 the Sub, 1..3 oscillator A..C */
@@ -577,7 +577,7 @@ inline constexpr float kXwarpPdCycles = 33.6f / 6.28318530718f;   /* PD index in
 inline constexpr float kXwarpFmHz     = 58200.0f;                  /* FM deviation at amount 1, Hz (x a^4) */
 inline constexpr float kXwarpRmGain   = 1.314f;
 inline constexpr float kXwarpOscScale = 1.52f;
-/* The Noise as the modulator (calibration/probe_noise_warp_law.py, averaged over renders, calibration/validate_noise_warps.py).
+/* The Noise as the modulator (calibration/dev/probe_noise_warp_law.py, averaged over renders, calibration/dev/validate_noise_warps.py).
  *  - FM from the Noise is a real FM by white noise: the carrier becomes a Lorentzian line (the power stays) whose half width H grows exponentially with the amount (about x 3.3 per 0.1), read from the
  *    share of the power left in the carrier's +-1.4 Hz (H = 1.4 / tan(pi share / 2)). A white frequency noise of standard deviation d cycles per sample has H = pi d^2 fs, so d = sqrt(H / (pi fs)).
  *    Nothing audible below 0.45.
@@ -608,7 +608,7 @@ inline constexpr float kXwarpNoiseRmGain = 0.409f;
 /* SelfPD: the phase is pushed by the wave's own value, y = x(p + z y), z = 0.62 a^2 cycles (measured: the implicit form fits a sine to 0.003-0.01 rms up to amount 0.4, where z is 0.095;
  * z / a^2 reads 0.63, 0.61, 0.59, 0.56 at 0.2 .. 0.5). */
 inline float selfPdCycles(float a) { return a <= 0.5f ? 0.62f * a * a : 0.155f + (a - 0.5f) * 0.4f; }
-/* An oscillator as the modulator is 1.52 times as strong as the Sub at the same amount (calibration/probe_warp_osc.py: FM deviation 90 000 a^4 Hz against the Sub's
+/* An oscillator as the modulator is 1.52 times as strong as the Sub at the same amount (calibration/dev/probe_warp_osc.py: FM deviation 90 000 a^4 Hz against the Sub's
  * 58 200, PD index 51 a^4 against 33.6, RM / AM sidebands a against 0.657 a). Mode 6, AM, is x (1 + a 1.314 k S). */
 
 /* The stack is DC-blocked ONCE, on its own buffer, not by each stream.

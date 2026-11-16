@@ -29,7 +29,7 @@ from serum_paths import SERUM_ROOT      # noqa: E402  (set the SERUM_ROOT enviro
 # under BROWSER_DIR/Samples and BROWSER_DIR/Multisamples (the layout of Serum's own folder). With BROWSER_DIR set the reader looks there instead.
 BROWSER_DIR: Path | None = None
 
-# Serum plays a Multisample oscillator 7.3 dB louder than the engine plays the same files at the same oscillator volume (calibration/probe_multisample_level.py:
+# Serum plays a Multisample oscillator 7.3 dB louder than the engine plays the same files at the same oscillator volume (calibration/dev/probe_multisample_level.py:
 # Trumpets LE, Full Strings LE, Violins Mute LE and Bass Clarinet LE at volumes 0.25 / 0.5 / 1.0, every one within 0.1 dB of +7.3). A Sample oscillator agrees
 # within 0.3 dB with no offset (probe_sample_level.py: six files spanning 22 dB of recorded level), so the offset is the multisample's alone and goes into each
 # of its regions' volume, where the engine applies it at playback (sample.h); the int16 samples stay as recorded.
@@ -163,7 +163,7 @@ def write_set(regions: list[bytes], dest: Path) -> Path:
 
 def export_multisample(sfz_rel: str, dest: Path) -> Path | None:
     """A Multisample oscillator's SFZ as one set. Its loops are the SFZ's own: Serum renders the same whatever Loop Mode and Loop Start/End the
-    oscillator stores (calibration/probe_loop_mode.py), and a region without a loop in the SFZ does not loop."""
+    oscillator stores (calibration/dev/probe_loop_mode.py), and a region without a loop in the SFZ does not loop."""
     sfz = _root("Multisamples") / sfz_rel.replace("\\", "/")
     if not sfz.is_file():
         return None
@@ -339,7 +339,7 @@ def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
 
 
 # Serum's noise slot playing a sample plays it at its own spectrum, 11.6 dB under the sample's rms at oscillator volume 0.75, while Serum's White noise at that
-# volume is -22.4 dB (calibration/probe_noise_sample.py: AC hum1/2, J 60, J106, H-Breath, AlphaNz, MicrKrg Noise, every octave band within 1 dB, level within 0.3 dB).
+# volume is -22.4 dB (calibration/dev/probe_noise_sample.py: AC hum1/2, J 60, J106, H-Breath, AlphaNz, MicrKrg Noise, every octave band within 1 dB, level within 0.3 dB).
 # The engine has no sample to play there, so a noise shaped to the sample's octave spectrum stands in: its Type's slope (White +3 dB/octave, Pink flat, Brown -3,
 # equal at the 1-2 kHz octave) through the engine's 12 dB/octave high-pass and low-pass, fitted to the sample's octave levels (every octave within 40 dB of the loudest alike).
 NOISE_PLAYBACK_DB, NOISE_WHITE_DB = -11.6, -22.4

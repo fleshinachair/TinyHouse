@@ -107,7 +107,7 @@ private:
 };
 
 /* Brown noise: white through a one-pole leak (corner about 5 Hz), 6 dB/octave per Hz above it, 3 dB per octave in an octave band. The gain sets its level against pink's
- * (Serum's Brown is 0.6 dB above its Pink, calibration/probe_noise_color.py). */
+ * (Serum's Brown is 0.6 dB above its Pink, calibration/dev/probe_noise_color.py). */
 class BrownNoise {
 public:
     inline float nextSample()
@@ -115,7 +115,7 @@ public:
         y = kLeak * y + dist.next();
         return y * kGain;
     }
-    static constexpr float kLeak = 0.9873f;           /* corner about 90 Hz: Serum's Brown stops rising below 100 Hz (calibration/probe_noise_color.py) */
+    static constexpr float kLeak = 0.9873f;           /* corner about 90 Hz: Serum's Brown stops rising below 100 Hz (calibration/dev/probe_noise_color.py) */
     static constexpr float kGain = 0.0275f;
 private:
     FastGauss dist { 1.0f };
@@ -324,7 +324,7 @@ private:
     double sampleRate = 44100.0;
     int notesPerTable = 3, tableSize = 2048;
     FrameTable sineTable, sawUpTable, sawDownTable, triangleTable;
-    static constexpr float kWhiteGain = 3.05f;       /* white's level against pink's: Serum's White is 4.1 dB above its Pink (calibration/probe_noise_color.py) */
+    static constexpr float kWhiteGain = 3.05f;       /* white's level against pink's: Serum's White is 4.1 dB above its Pink (calibration/dev/probe_noise_color.py) */
     WhiteNoise white;
     PinkNoise pink;
     BrownNoise brown;

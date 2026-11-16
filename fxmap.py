@@ -93,7 +93,7 @@ DRY_KINDS = ("Distortion", "Comp", "Bode", "Filter", "Utils", "Split", "Split3",
 
 def idle_effect(x: dict) -> bool:
     """A Delay or HyperD that does nothing: Wet under 1 % (a HyperD also no Dimension Wet; an unwritten Dimension Wet is 0), and no Level Out (an unwritten one is 0.5, no gain).
-    calibration/probe_split_dry_wet0.py: a saw through a Delay at Wet 0 (Time, Feedback, Freq and BW stored or not) or a HyperD at Wet 0 (Detune, Unison, Dimension Size stored) leaves the
+    calibration/dev/probe_split_dry_wet0.py: a saw through a Delay at Wet 0 (Time, Feedback, Freq and BW stored or not) or a HyperD at Wet 0 (Detune, Unison, Dimension Size stored) leaves the
     Mid at +-0.07 dB and the Side inside the source's own spread; a Delay at Wet 0 with Level Out 0.576 was +2.4 dB louder, and a Dimension Wet of 45 % added 4 to 14 dB of Side."""
     k, pp = kind_of(x), plain(x)
     if k not in ("Delay", "HyperD") or abs(float(pp.get("kParamLevelOut", 0.5)) - 0.5) >= 0.02:
@@ -123,7 +123,7 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
     return out
 
 
-# Macro routes into an EQ band's knobs, measured on Serum (calibration/probe_fx_macro.py eq: noise through a bell / low-pass with a route from Macro 1 at 100 %): the gain
+# Macro routes into an EQ band's knobs, measured on Serum (calibration/dev/probe_fx_macro.py eq: noise through a bell / low-pass with a route from Macro 1 at 100 %): the gain
 # knob spans -24..+24 dB, so a route adds 0.48 dB per percent (25 % from 0 dB gave +11.9, 50 % from -12 dB +11.8, 100 % clipped at +24); the frequency knob is a log scale from
 # 21.5332 Hz (the value Serum stores for the knob's left end) to 20 kHz, so a route adds its amount to the knob position (+10 % = +0.99 octave, +25 % from 3 kHz = 16.9 kHz). A
 # macro only sits at its saved position (a bipolar route is the macro minus one half, probe_macro_bipolar.py), so the route is folded into the stored value. Before this a
@@ -132,15 +132,15 @@ def fold_macro_wets(nodes: list[dict], mods: list[dict], macros: list[float]) ->
 # drive of the sum on the 3rd harmonic of a sine, to 0.1).
 EQ_GAIN_RANGE_DB = 48.0
 EQ_FREQ_MIN, EQ_FREQ_MAX = 21.5332, 20000.0
-# A Utils Width is a knob with its own law (calibration/probe_utils.py width: a stored 0 plus a route of 10..100 % at macro 100 % reads the width at that knob position): the
+# A Utils Width is a knob with its own law (calibration/dev/probe_utils.py width: a stored 0 plus a route of 10..100 % at macro 100 % reads the width at that knob position): the
 # width in percent is about 100 (2 x)^3 for the knob position x (0.2: 6 %, 0.4: 50 %, 0.5: 99 %, 0.6: 172 %, 0.8: 397 %, 1.0: 768 %), side scale = width / 100 (stored 25 / 50 /
 # 150 / 200: -12 / -6 / +3.5 / +6 dB of side against mid), and a route adds its amount to the position (a stored 50 % = position 0.4 plus 25 % read 213 %, measured 207-213).
 UTILS_WIDTH_KNOB = [(0.0, 0.0), (0.1, 0.8), (0.2, 6.2), (0.3, 21.8), (0.4, 49.5), (0.5, 98.6), (0.6, 171.5), (0.7, 265.1), (0.8, 397.2), (0.9, 566.0), (1.0, 767.5)]
-# The Utils HPF / LPF knobs are logarithmic and a route moves them by about 8.6 octaves per 100 % (calibration/probe_utils.py route: +10 % = +0.82..0.92 octaves, +25 % = +1.9..2.2,
+# The Utils HPF / LPF knobs are logarithmic and a route moves them by about 8.6 octaves per 100 % (calibration/dev/probe_utils.py route: +10 % = +0.82..0.92 octaves, +25 % = +1.9..2.2,
 # -10 % = -0.85..-0.94); the LPF knob's stored ends are 50 Hz and 19.9 kHz, 8.64 octaves, which is the span taken for both (the HPF's top end is not known, 640 Hz assumed).
 UTILS_CUT_OCTAVES = 8.64
 UTILS_CUT_RANGE = {"kParamHPF": (1.34, 640.0), "kParamLPF": (50.0, 19924.0)}
-# A Comp's own knobs (calibration/probe_comp_macro.py: a sine through one Comp, the level against the stored value, then with a route from Macro 1 at 100 %): the three band Gains are in
+# A Comp's own knobs (calibration/dev/probe_comp_macro.py: a sine through one Comp, the level against the stored value, then with a route from Macro 1 at 100 %): the three band Gains are in
 # dB and a route adds 0.48 dB per percent (the EQ gain law: +10 % = +4.8 dB, +25 % = +12.0, +50 % = +24.0 and clamped there, -50 % from 0 = -24.0; stored -12 + 25 % = 0.0, stored 6 + 25 % = +18.0);
 # Thresh is a knob 0..1 and a route adds its amount to the knob position (0.3 + 10 / 25 / 50 % read as the static 0.40 / 0.55 / 0.80, 0.5 - 10 % as 0.40, 0.7 - 25 % as 0.45). Makeup is
 # a knob with its own curve over 0..+30.1 dB (stored factor 1 = 0 dB is the left end, anything over a factor of 32 reads +30.1): a route adds its amount to the knob position, and the position
@@ -259,7 +259,7 @@ def biquad_db(kind: str, fc: float, gain_db: float, q: float, f) -> np.ndarray:
 def branch_nodes(nodes: list[dict]) -> set[int]:
     """Indices of the nodes that sit inside a Split / SplitMS branch rather than on the master
     signal. After a split node come ModuleCount1 modules for the first branch (Mid for a SplitMS) and ModuleCount2
-    for the second (Side), each 0 when unwritten (calibration/probe_splitms.py: with three EQs after a SplitMS that stores only ModuleCount2 = 1,
+    for the second (Side), each 0 when unwritten (calibration/dev/probe_splitms.py: with three EQs after a SplitMS that stores only ModuleCount2 = 1,
     the first EQ acted on the side alone and the other two on the whole signal); everything after those is back on the master. An
     EQ inside a branch shapes only that part of the signal, so it is not a master EQ."""
     inside, skip = set(), 0
@@ -277,7 +277,7 @@ def branch_nodes(nodes: list[dict]) -> set[int]:
 
 def ms_branches(nodes: list[dict]) -> dict[int, str]:
     """{node index: "mid" | "side"} for the modules inside the two branches of a SplitMS node (the first ModuleCount1 are the Mid branch, the next ModuleCount2 the Side:
-    calibration/probe_splitms.py). A plain Split is a frequency split and is not in here."""
+    calibration/dev/probe_splitms.py). A plain Split is a frequency split and is not in here."""
     out, skip = {}, 0
     for i, n in enumerate(nodes):
         if skip > 0:
@@ -368,7 +368,7 @@ def serum_filter_hz(norm: float) -> float:
     return 8.18 * 2697.0 ** min(max(norm, 0.0), 1.0)
 
 
-# The default-type Filter FX with resonance, measured on Serum (calibration/probe_fxfilter_drive.py: noise through one Filter FX, half-octave points,
+# The default-type Filter FX with resonance, measured on Serum (calibration/dev/probe_fxfilter_drive.py: noise through one Filter FX, half-octave points,
 # cutoff 0.7 = 2062 Hz at its -3 dB point). Resonance lowers the passband (about -2.8 dB at the default Reso 10, -7.3 at 35, -14 at 100) and puts a peak
 # at the cutoff (+2 dB above the passband at 10, +10 at 35, +13 at 50), while the stop band stays on the 6 dB/octave slope. Drive is a plain gain
 # (+3.2 dB at 10, +7.7 at 25, +14 at 50, +23.5 at 100) that does not depend on the level, whatever the type.
@@ -518,7 +518,7 @@ _fx_models = None
 
 
 def fx_models() -> dict:
-    """The Filter FX models other than the ladders, as magnitude curves measured on Serum (calibration/probe_fxfilter_models.py): {model: {reso: dB on the probe grid}} at Freq 0.55."""
+    """The Filter FX models other than the ladders, as magnitude curves measured on Serum (calibration/dev/probe_fxfilter_models.py): {model: {reso: dB on the probe grid}} at Freq 0.55."""
     global _fx_models
     if _fx_models is None:
         d = json.loads(FX_MODEL_FILE.read_text(encoding="utf-8")) if FX_MODEL_FILE.exists() else {}
@@ -586,7 +586,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
         if spec is not None and spec["index"] == i:
             continue                                    # moved by an envelope: the engine's second filter carries it (dynamic_filter)
         dynamic = any(not foldable_source(m, macros) for m in node_mods(fmods, i, (ctx or {}).get("rack", 0)))
-        # An unwritten type is Serum's default, measured with test patches (calibration/probe_filterfx.py): a 6 dB/octave
+        # An unwritten type is Serum's default, measured with test patches (calibration/dev/probe_filterfx.py): a 6 dB/octave
         # low-pass with its -3 dB point at the stated cutoff.
         ty = str(pp.get("kParamType", "default"))
         kind = "lp" if (ty in FX_FILTER_LP or ty == "default") else "hp" if ty in FX_FILTER_HP else None
@@ -631,7 +631,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             handled.add(i)
             continue                                    # out of the audible band: nothing to carry
         handled.add(i)
-        # Wet is a smoothstep s with the dry part kept, (1 - s^2) + s h, as for the other effects (calibration/probe_fxfilter_wet.py: MgL24 / MgL12 at Wet 25 / 50 / 75 fit it to
+        # Wet is a smoothstep s with the dry part kept, (1 - s^2) + s h, as for the other effects (calibration/dev/probe_fxfilter_wet.py: MgL24 / MgL12 at Wet 25 / 50 / 75 fit it to
         # 0.4-1.0 dB, a linear mix is 2-3 dB off at 25 and 50). The default-type branch used a linear mix, and every other type ignored the Wet.
         s_w = smoothstep(min(max(wet, 0.0), 100.0) / 100.0)
         if kind == "lp" and (ty in ("default", "MgL6", "L6")):
@@ -680,7 +680,7 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
 
 
 # Serum's Split / SplitMS branch -> the engine's band stage (fx.h processBand: split_band / split_freq / split_stages). A Split is a 4th-order Linkwitz-Riley crossover, -6 dB at Freq
-# (calibration/probe_split_band.py); the Distortion and the Chorus / Flanger / Phaser stages of ONE branch (the Mid or Side of a SplitMS: the Distortion only) then work on that band
+# (calibration/dev/probe_split_band.py); the Distortion and the Chorus / Flanger / Phaser stages of ONE branch (the Mid or Side of a SplitMS: the Distortion only) then work on that band
 # alone. The nodes are tagged "_hoisted", which branch_nodes / ms_branches read as "on the master signal", so every master mapping below takes them as it takes a master effect.
 MOD_KINDS = ("Chorus", "Flanger", "Phaser")
 
@@ -788,9 +788,9 @@ def split_pots(nodes: list[dict], hoist: dict) -> tuple[dict, list[str]]:
 
 
 # The Distortion effect has a filter of its own, before or after the distorting (PrePost 2 is before, 1 is after; 0 and unwritten is off: noise through
-# Overdrive at Drive 100, calibration/probe_dist_prepost.py, and Bass - AVAION, whose bass keeps the harmonics the overdrive makes above its 144 Hz filter), a 12 dB/octave state-variable filter
+# Overdrive at Drive 100, calibration/dev/probe_dist_prepost.py, and Bass - AVAION, whose bass keeps the harmonics the overdrive makes above its 144 Hz filter), a 12 dB/octave state-variable filter
 # at Freq with BW as its resonance and LPHP morphing from low-pass (0, and unwritten) to high-pass (100). Measured with noise through Drive 0
-# (calibration/probe_dist_filter.py): at Freq 0.5 the -3 dB point is the stated cutoff (serum_filter_hz), the peak over the passband is 1.3 dB at BW 1, 4.3 at
+# (calibration/dev/probe_dist_filter.py): at Freq 0.5 the -3 dB point is the stated cutoff (serum_filter_hz), the peak over the passband is 1.3 dB at BW 1, 4.3 at
 # BW 2 (the unwritten BW is about 2) and 6.9 at BW 3, which is a biquad with Q = 0.5 + 0.55 BW. Only the two ends of LPHP are carried, and only a filter AFTER
 # the distortion: the engine's EQ comes after it, and a filter before it (PrePost 2) decides what the distortion makes harmonics of, which an EQ cannot do.
 DIST_FILTER_Q_BASE, DIST_FILTER_Q_PER_BW, DIST_FILTER_BW_DEFAULT = 0.5, 0.55, 2.0
@@ -839,7 +839,7 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
         q = DIST_FILTER_Q_BASE + DIST_FILTER_Q_PER_BW * float(pp.get("kParamBW", DIST_FILTER_BW_DEFAULT))
         if DIST_MORPH_EDGE < t < 1.0 - DIST_MORPH_EDGE:
             # Between its ends the filter morphs LP -> band-pass -> HP linearly in the three outputs of the state-variable filter, the band-pass being j x / D (its peak is Q): measured
-            # (calibration/probe_dist_morph.py: LPHP 20..80 % within 0.7-1.1 dB rms of the measured transfer, the crossfade of LP and HP 6-17 dB off). Carried as a few EQ bands fitted to that curve.
+            # (calibration/dev/probe_dist_morph.py: LPHP 20..80 % within 0.7-1.1 dB rms of the measured transfer, the crossfade of LP and HP 6-17 dB off). Carried as a few EQ bands fitted to that curve.
             x = FGRID / fc
             den = 1.0 - x ** 2 + 1j * x / q
             lp, bp, hp = 1.0 / den, 1j * x / den, -(x ** 2) / den
@@ -864,14 +864,14 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
     return out, why
 
 
-# Serum's Distortion onto the engine's stage, from measurement (calibration/probe_dist.py plays a sine through every mode and drive;
+# Serum's Distortion onto the engine's stage, from measurement (calibration/dev/probe_dist.py plays a sine through every mode and drive;
 # calibrate_dist.py finds the engine drive whose 2nd and 3rd harmonics match). The modes differ in kind as well as in scale: the
 # clippers (SoftClip, HardClip, Overdrive) are clean until the drive passes a threshold, the default and the asymmetric/diode modes
 # distort from the start. An unwritten mode is the default mode; an unwritten drive is 25 (its harmonics match the drive-25 curve).
 # Downsample is a sample-and-hold (the engine's Hold mode, dist_params).
 DIST_SCALES_FILE = Path(__file__).resolve().parent / "calibration/dist_scales.json"
 DIST_DEFAULT_DRIVE = 25.0
-# The calibrated law (the engine's dist_cal; calibration/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py). Serum's curve is measured at its
+# The calibrated law (the engine's dist_cal; calibration/dev/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py). Serum's curve is measured at its
 # output with the probe preset's default master; the engine stage sits before its own master gain, which at that default master is 10^(master_default_db/20),
 # so a measured pre-gain G becomes G x that and an output gain K becomes K / that. Wet is a smoothstep s with the dry part (1 - s^2); LevelOut (unwritten 0.5)
 # is a gain on the sum of (LevelOut / 0.5)^2.
@@ -971,7 +971,7 @@ def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
         wet = float(pp.get("kParamWet", 100.0))
         drive = float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE))
         if mode == "kDownsample":
-            # A sample-and-hold of N samples, N = 1 + 0.0088 Drive^2 (calibration/probe_dist_downsample.py: images at 44100/N +- f0 for N = 2, 5, 9, 15, 23, 33, 44, 57, 72, 89 at Drive 10..100;
+            # A sample-and-hold of N samples, N = 1 + 0.0088 Drive^2 (calibration/dev/probe_dist_downsample.py: images at 44100/N +- f0 for N = 2, 5, 9, 15, 23, 33, 44, 57, 72, 89 at Drive 10..100;
             # none at 0), the held level unchanged. The engine's Hold mode takes N - 1 on its Drive pot; the curve's output gain is 0 dB, LevelOut and Wet as for the other modes.
             hold = int(min(max(round(1.0 + DOWNSAMPLE_HOLD_PER_DRIVE2 * drive * drive), 1), 128))
             lo = float(pp.get("kParamLevelOut", DIST_LEVELOUT_DEFAULT))
@@ -1004,12 +1004,12 @@ def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
     return {}, []
 
 
-# Serum's compressor, measured with a saw through it (calibration/probe_comp2.py, probe_comp3.py): the static curve of every setting fitted
+# Serum's compressor, measured with a saw through it (calibration/dev/probe_comp2.py, probe_comp3.py): the static curve of every setting fitted
 # with the engine's own law (12 dB soft knee, on the peak level), the attack and release from the gain-reduction trajectory. Omitted
 # parameters are Serum's defaults: threshold 0.5, ratio 4, attack 90, release 90, makeup 1 (unity, a linear factor), wet 100.
 COMP_THRESH_DB = [(0.0, -1.0), (0.3, -3.0), (0.4, -7.0), (0.5, -12.0), (0.6, -17.0), (0.7, -24.0), (0.8, -34.0), (0.85, -41.5), (0.9, -52.0), (0.95, -70.0), (1.0, -90.0)]
 COMP_THRESH_LIMIT_DB = [(0.0, -8.0), (0.4, -14.5), (0.5, -19.0), (0.6, -24.5), (0.7, -32.0), (0.8, -43.0), (0.9, -58.0), (1.0, -80.0)]   # at an infinite ratio
-COMP_ATTACK_K, COMP_RELEASE_K = 0.75, 0.45                # fitted on the gain-reduction trajectory (calibration/fit_comp_time.py)
+COMP_ATTACK_K, COMP_RELEASE_K = 0.75, 0.45                # fitted on the gain-reduction trajectory (calibration/dev/fit_comp_time.py)
 COMP_ATTACK_LAG_MS = 15.0                                     # the engine's 20 ms detector adds its own lag                    # Serum's Attack / Release setting (ms) -> the engine's time constant
 
 
@@ -1092,14 +1092,14 @@ def comp_params(nodes: list[dict], dyn_i: int | None = None) -> tuple[dict, list
 UTILS_STEREO_KEYS = ("kParamWidth", "kParamLFMono", "kParamLFXover", "kParamBalance")
 
 
-UTIL_OUT_UNITY = 0.5                    # the Level Out knob's default (its gain is (knob / 0.5)^2: calibration/probe_utils_level.py)
+UTIL_OUT_UNITY = 0.5                    # the Level Out knob's default (its gain is (knob / 0.5)^2: calibration/dev/probe_utils_level.py)
 UTIL_OUT_AFTER = ("EQ", "Filter", "Utils")      # the effects that may sit behind a Utils whose gain pumps: they are linear, so the gain commutes with them
 
 
 def util_out_plan(nodes: list[dict], mods: list, macros: list, rack: int) -> tuple[list[dict], list[str]]:
     """The routes from an envelope or LFO to the Level Out of a Utils that the engine carries as a gain on the rack's output (the main rack is 0, the buses 1 and 2; a bus rack's mod
     destination id is 100 x rack + the node's place), and why any were not. The engine's gain is (2 x (the stored knob + the route's offset, kept in 0..1))^2, Serum's law
-    (calibration/probe_utils_level_route.py: the route adds to the knob and the knob stops at 0 and 1); it is carried for one Utils per rack when that Utils is not in a
+    (calibration/dev/probe_utils_level_route.py: the route adds to the knob and the knob stops at 0 and 1); it is carried for one Utils per rack when that Utils is not in a
     Split branch and only linear effects (EQ, Filter, Utils) follow it in the rack, so the gain on the output is the gain at the node. The stored knob goes to the engine as the rack's util_out pot."""
     carried, why = [], []
     inside = branch_nodes(nodes)
@@ -1171,7 +1171,7 @@ def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | No
     return width, mono, why
 
 
-# The Utils effect's own HPF and LPF knobs (Hz), measured with noise through one Utils node (calibration/probe_utils.py filters): the high-pass is a 3rd-order Butterworth (-12 dB at
+# The Utils effect's own HPF and LPF knobs (Hz), measured with noise through one Utils node (calibration/dev/probe_utils.py filters): the high-pass is a 3rd-order Butterworth (-12 dB at
 # 0.70 and -24 dB at 0.45 of the stated 100 Hz, 0.74 / 0.47 at 400 Hz) whose -3 dB point sits at about 1.14 x the stated frequency; the low-pass is a 2nd-order Butterworth at the stated
 # frequency (-12 dB at 2.0 x, -24 dB at 3.9 x). The knob ends (HPF under 25 Hz, LPF over 19 kHz) are off. 32 factory presets store an HPF (median 60 Hz) and 17 an LPF (median 1.2 kHz),
 # which the EQ stage now carries (a Utils with only these used to read "not carried").
@@ -1204,7 +1204,7 @@ def utils_filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None 
 
 
 # Serum's Convolution reverb with a SHORT embedded IR (a microphone or speaker response, a few tens of ms) is a static filter, which the EQ stage can stand in for. Measured on Serum
-# (calibration/probe_conv_size.py: noise through one Conv at Wet 100 %, its 1/3-octave power response against the same noise without it; Synth_Pierre's 33 ms condenser-mic IR):
+# (calibration/dev/probe_conv_size.py: noise through one Conv at Wet 100 %, its 1/3-octave power response against the same noise without it; Synth_Pierre's 33 ms condenser-mic IR):
 #   - the response is the IR's |H| after the IR is stretched in time by s = max(0.2, (Size / 100) ** 0.7)  (fit 0.3-0.6 dB rms from Size 20 up, 1.2 dB at the 0.2 floor), not the stored IR's own;
 #   - the gain is the IpTrim knob in dB plus a level that depends on Size (CONV_LEVEL_DB, over the response's mean in dB between 80 Hz and 14 kHz, resampled the way conv_target does);
 #   - unstored Size and IpTrim are 100 % and -18 dB.
@@ -1770,7 +1770,7 @@ def map_wide(fp: dict | None, cache: dict, cli: Path = CLI) -> tuple[dict, list[
 FX_LAWS = ROOT / "calibration/fx_laws.json"
 REVERB_DEFAULTS = {"size": 35.0, "dly": 31.0, "fb": 0.0, "fq": 0.0, "fqb": 35.0, "w": 20.0}
 REVERB_KEYS = {"size": "kParamSize", "dly": "kParamDelay", "fb": "kParamFeedback", "fq": "kParamFreq", "fqb": "kParamFreqB", "w": "kParamWidth"}
-REVERB_FEATURES = {          # the feature vectors calibration/fit_fx_laws.py regresses log RT60 on
+REVERB_FEATURES = {          # the feature vectors calibration/dev/fit_fx_laws.py regresses log RT60 on
     "quad": lambda f: [f["size"], f["dly"], f["fqb"], f["fq"], f["fb"], f["size"] * f["dly"] / 100, f["dly"] * f["fqb"] / 100, f["size"] * f["fqb"] / 100,
                        f["dly"] ** 2 / 100, f["size"] ** 2 / 100, f["fqb"] ** 2 / 100, 1.0],
     "size": lambda f: [f["size"], 1.0],
@@ -1787,7 +1787,7 @@ def fx_laws() -> dict:
 
 
 def map_reverb_static(nodes: list[dict]) -> tuple[dict, list[str]]:
-    """The engine's reverb from Serum's Reverb node alone (calibration/fit_fx_laws.py): the same mapping the closed loop reaches, read off the node's own settings, for a preset that
+    """The engine's reverb from Serum's Reverb node alone (calibration/dev/fit_fx_laws.py): the same mapping the closed loop reaches, read off the node's own settings, for a preset that
     has no Serum fingerprint (a user's own: the remote UI's Import). Size / Delay / FreqB / Freq / Feedback give the RT60, the engine's decay table turns that into the decay pot, damping and
     width follow the reverb Type, mix follows Wet. The rack's loudest Reverb is carried."""
     P = {"rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127}
@@ -1817,7 +1817,7 @@ def map_reverb_static(nodes: list[dict]) -> tuple[dict, list[str]]:
 
 
 def map_wide_static(nodes: list[dict]) -> tuple[dict, list[str]]:
-    """The engine's width from a HyperD node's Wet and Dimension Wet (calibration/fit_fx_laws.py), for a preset with no Serum fingerprint."""
+    """The engine's width from a HyperD node's Wet and Dimension Wet (calibration/dev/fit_fx_laws.py), for a preset with no Serum fingerprint."""
     P = {"fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64}
     law = fx_laws().get("wide")
     cands = [n for n in nodes if kind_of(n) == "HyperD" and enabled(n)]
@@ -1928,7 +1928,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     p, n, i = map_delay(nodes, fp)
     P.update(p); notes += n; info.update(i)
     if fp is None and any(kind_of(x) in ("Reverb", "Conv", "HyperD") for i, x in enumerate(nodes) if i not in inside):
-        # No fingerprint (a preset Serum was never run on: a user's own): the static laws read the same pots off the node's own settings (calibration/fit_fx_laws.py)
+        # No fingerprint (a preset Serum was never run on: a user's own): the static laws read the same pots off the node's own settings (calibration/dev/fit_fx_laws.py)
         outer = [x for i, x in enumerate(nodes) if i not in inside]
         p, n = map_reverb_static(outer)
         P.update(p); notes += n
@@ -1983,8 +1983,8 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # (macro routes are already folded into the Wet above), so it has nothing to carry. Modulation effects are not covered: a flanger at Wet 0 still adds side.
     wet_mod = {m.get("dest_type") for m in (ctx or {}).get("mods", []) if (m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros") or [None])) or m.get("dest_param") == "kParamDimEWet"}
     # A Bode that stores nothing that shifts, delays or blurs (no Shift, Feedback, Blur, DelayTime, OutputMix or width: a stored LevelOut / Range / sync flag only) is a frequency shift of 0 Hz
-    # through an empty delay: transparent (calibration/probe_bode_default.py, a Bode with no stored params: band differences +-0.1 dB, the render's own floor). A stored Blur alone, with no
-    # Shift, Feedback or DelayTime to smear, is the same (calibration/probe_bode_blur.py / probe_bode_blur2.py: Blur 99 at Wet 100 changes the level by -0.04 dB; the attack and the faint tail after release,
+    # through an empty delay: transparent (calibration/dev/probe_bode_default.py, a Bode with no stored params: band differences +-0.1 dB, the render's own floor). A stored Blur alone, with no
+    # Shift, Feedback or DelayTime to smear, is the same (calibration/dev/probe_bode_blur.py / probe_bode_blur2.py: Blur 99 at Wet 100 changes the level by -0.04 dB; the attack and the faint tail after release,
     # -57 dB, are those of any Bode node).
     bode_idle = lambda x: kind_of(x) == "Bode" and set(plain(x)) <= (BODE_IDLE_KEYS | {"kParamBlur"})
     dry = lambda x: ((kind_of(x) in DRY_KINDS and (float(plain(x).get("kParamWet", 100.0)) < 1.0 or bode_idle(x))) or idle_effect(x)) and "FX" + kind_of(x) not in wet_mod
@@ -1996,7 +1996,7 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     # Balance (a pan, 6 factory presets) is not carried.
     utils_ok = lambda i, x: i in info.get("filter_fx_handled", ()) and not uwhy and abs(float(plain(x).get("kParamBalance", 0.0))) < 1.0
     # A Split / SplitMS whose branches hold nothing that does anything (every module off or dry) is transparent: a frequency split with dry modules in either branch, or with none, is
-    # within 0.1 dB of no split (calibration/probe_split_plain.py; probe_splitms.py found the same for the mid / side split).
+    # within 0.1 dB of no split (calibration/dev/probe_split_plain.py; probe_splitms.py found the same for the mid / side split).
     def split_clear(i, x):
         pp = plain(x)
         k = sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3))

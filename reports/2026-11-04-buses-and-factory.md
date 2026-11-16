@@ -12,7 +12,7 @@ Nothing here is installed on the Move or committed.
 
 **Converter**: `CARRY_BUSES`, routing slot parse (`physical`: `route_none`, `route_out`, `bus`, `filter_dest`, `bus_nodes`), macro routes into send levels folded at the saved value, `map_bus_racks` (racks mapped like the main one, fingerprints under `<preset>#bus1/2`), a bus muted by an all-wet reverb with Level Out 0 drops its sends (Bass - Gravity), serial filter carried with Filter 2's envelope. `params_sig` ignores the new keys when zero.
 
-**Tools**: `calibration/probe_bus.py`, `probe_bus_sources.py`, `bus_audit.py`, `measure_bus_fp.py`, `run_g16.sh`; `import_pack.py` gained `measure_fingerprints` (covers bus racks), `quality()` and the gate `--max-level-gap 3` / `--max-band-rms 14`; NaN / '796s' crashes fixed; `deploy_presets.sh` takes `SRC=`.
+**Tools**: `calibration/dev/probe_bus.py`, `probe_bus_sources.py`, `bus_audit.py`, `measure_bus_fp.py`, `run_g16.sh`; `import_pack.py` gained `measure_fingerprints` (covers bus racks), `quality()` and the gate `--max-level-gap 3` / `--max-band-rms 14`; NaN / '796s' crashes fixed; `deploy_presets.sh` takes `SRC=`.
 
 ## What Serum does (measured)
 Slots 0-4 = osc A, B, C, noise, sub; 5, 6 = outputs of Filter 1, 2. Dest Filter / Master (into the main rack) / Direct (past the racks) / None. Send = level%^3 (all sources, any dest). A bus return goes through the main rack. Filter-dest on slot 5 = Filter 1 into Filter 2 in series: 169 of 626 factory presets (it was invisible in the census before).

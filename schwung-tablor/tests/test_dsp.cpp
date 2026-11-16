@@ -617,7 +617,7 @@ static double stackDb(VoicedWTOscillator &a, VoicedWTOscillator *silent, float n
 
 /* Serum's Dist* oscillator warps: a static shaper on every stream's sample. A sine through it gains odd harmonics, a pre-gain of 0.02 with an output gain of 50 is transparent,
  * and a hard clip at high gain squares the wave off at the output gain. */
-/* Serum's Sub-driven FM / PD / RM warps and its filter warps against what Serum measured (calibration/probe_warp_fm.py, probe_filterwarp.py): a sine oscillator at
+/* Serum's Sub-driven FM / PD / RM warps and its filter warps against what Serum measured (calibration/dev/probe_warp_fm.py, probe_filterwarp.py): a sine oscillator at
  * note 48, the Sub a sine a fifth above it, read as the carrier and its first sidebands re the unwarped carrier. */
 static void testXwarp()
 {
@@ -654,7 +654,7 @@ static void testXwarp()
         { "FM 0.20", 3, 0.20f, 0.944, 0.230, 0.028, 0 }, { "FM 0.30", 3, 0.30f, 0.001, 0.517, 0.432, 0 },
         { "PD 0.40", 4, 0.40f, 0.828, 0.386, 0.085, 0 }, { "PD 0.50", 4, 0.50f, 0.183, 0.569, 0.369, 0 },
         { "RM 0.50", 5, 0.50f, 0.500, 0.329, 0.000, 0 }, { "RM 1.00", 5, 1.00f, 0.000, 0.657, 0.000, 0 },
-        /* the same warps with an oscillator as the modulator (calibration/probe_warp_osc.py): 1.52 times as strong */
+        /* the same warps with an oscillator as the modulator (calibration/dev/probe_warp_osc.py): 1.52 times as strong */
         { "FM osc 0.20", 3, 0.20f, 0.874, 0.337, 0.062, 1 }, { "FM osc 0.25", 3, 0.25f, 0.361, 0.579, 0.298, 1 },
         { "PD osc 0.40", 4, 0.40f, 0.625, 0.518, 0.181, 1 },
         { "RM osc 0.60", 5, 0.60f, 0.400, 0.600, 0.000, 1 }, { "AM osc 0.60", 6, 0.60f, 1.000, 0.600, 0.000, 1 },
@@ -681,7 +681,7 @@ static void testXwarp()
         render(84.0f, 1, 1.0f, lo);
         CHECK(std::fabs(amp(lo, f) / amp(dry, f) - 1.0) < 0.03, "low-pass warp at 1.0 is open (%.3f)", amp(lo, f) / amp(dry, f));
     }
-    /* SelfPD: the phase pushed by the wave's own value. A sine at amount 0.2 has its 2nd harmonic at -23.1 dB (Serum, calibration/validate_static_warps.py), at 0.35 -14.0 dB (this table peaks at 1, the loader's at 0.9, so the push reads about 1 dB strong here) */
+    /* SelfPD: the phase pushed by the wave's own value. A sine at amount 0.2 has its 2nd harmonic at -23.1 dB (Serum, calibration/dev/validate_static_warps.py), at 0.35 -14.0 dB (this table peaks at 1, the loader's at 0.9, so the push reads about 1 dB strong here) */
     {
         render(48.0f, 7, 0.2f, x);
         const double h2 = 20.0 * std::log10(amp(x, 2 * f0) / a0);
@@ -691,7 +691,7 @@ static void testXwarp()
         CHECK(std::fabs(h2b + 14.0) < 2.0, "SelfPD 0.35: 2nd harmonic %.1f dB (Serum -14.0)", h2b);
     }
     /* the Noise as the modulator (source 4): RM is (1 - a) x + 0.409 a^2 x n, so the carrier line is 1 - a; FM below 0.45 and PD below 0.55 do nothing; PD at 0.8 leaves the carrier
-     * at -13.6 dB (Serum, calibration/probe_noise_warp_law.py), FM at 0.5 at -0.9 dB */
+     * at -13.6 dB (Serum, calibration/dev/probe_noise_warp_law.py), FM at 0.5 at -0.9 dB */
     {
         FastGauss g(1.0f);
         auto renderN = [&](int xw, float a, std::vector<float> &out) {

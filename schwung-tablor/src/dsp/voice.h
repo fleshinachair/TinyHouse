@@ -119,7 +119,7 @@ static_assert(TB_P_LR2_SRC - TB_P_LR1_SRC == 4 && TB_P_LR1_DST == TB_P_LR1_SRC +
 inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
 
 /* An LFO's Smooth pot as the time constant of a one-pole low-pass on its output: 2 ms to 0.7 s, logarithmic; 0 is off. Serum's Smooth was measured
- * as such a filter, of the same absolute time constant at any LFO rate (calibration/probe_lfo_smooth.py). */
+ * as such a filter, of the same absolute time constant at any LFO rate (calibration/dev/probe_lfo_smooth.py). */
 inline float potLfoSmoothTau(float v) { return v < 0.5f ? 0.0f : 0.002f * std::pow(350.0f, pot01(v)); }
 
 inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[TB_P_LFO1_MODE + lfo * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)]); }
@@ -328,7 +328,7 @@ public:
 
         /* Each source goes through the filter (pre) or straight to the amp (post: Serum's "direct" routing). Through the filters it has a
          * balance t from -1 (Filter 1 only) to +1 (Filter 2 only): Filter 1 gets (1 - t) / 2 of it and Filter 2 (1 + t) / 2, as Serum's
-         * (calibration/probe_filter2.py). Filter 2 only runs if some source reaches it. */
+         * (calibration/dev/probe_filter2.py). Filter 2 only runs if some source reaches it. */
         bool usesF2 = false;
         float dryL[kBlock], dryR[kBlock];
         clr(dryL); clr(dryR);
@@ -349,7 +349,7 @@ public:
             }
         };
         /* The FX buses: a source can also send to Bus 1 and Bus 2 (gain = pot/127, which the converter writes as Serum's level cubed), taken
-         * before the filter and after the amp envelope (calibration/probe_bus.py), and its route can be None, which leaves it on the buses alone,
+         * before the filter and after the amp envelope (calibration/dev/probe_bus.py), and its route can be None, which leaves it on the buses alone,
          * or Out, which takes it past the effects as well. */
         float busL[2][kBlock], busR[2][kBlock];
         clr(busL[0]); clr(busL[1]); clr(busR[0]); clr(busR[1]);
@@ -665,7 +665,7 @@ private:
                 if (dst > MD_NONE && dst < MD_COUNT) {
                     const float e = modEnv[i].getOutput() * potBipolar(P[k[i].amt]);
                     /* Serum adds an envelope route to the oscillator volume KNOB and the knob's taper (gain = knob^2) comes after, as for the LFOs:
-                     * from volume 0 a route of depth a gives gain a^2, not a (calibration/probe_noise_route.py: noise slot and WT oscillator, 12 dB per halving of the depth) */
+                     * from volume 0 a route of depth a gives gain a^2, not a (calibration/dev/probe_noise_route.py: noise slot and WT oscillator, 12 dB per halving of the depth) */
                     if (isLevelDst(dst)) lfoLvl[dst] += e;
                     else modOff[dst] += e;
                 }

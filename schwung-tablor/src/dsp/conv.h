@@ -152,6 +152,20 @@ inline float h2f(uint16_t h)
     float f; std::memcpy(&f, &u, 4); return f;
 }
 
+/* acc += h * x over n complex bins in float (the head: 32 partitions of 129 bins per engine block; as plain loops the compiler left them scalar, about 60 us per block). */
+inline void macFloat(const float *hr, const float *hi, const float *xr, const float *xi, float *ur, float *ui, int n)
+{
+    int k = 0;
+#if defined(__aarch64__)
+    for (; k + 4 <= n; k += 4) {
+        const float32x4_t a = vld1q_f32(hr + k), b = vld1q_f32(hi + k), c = vld1q_f32(xr + k), d = vld1q_f32(xi + k);
+        vst1q_f32(ur + k, vfmsq_f32(vfmaq_f32(vld1q_f32(ur + k), a, c), b, d));
+        vst1q_f32(ui + k, vfmaq_f32(vfmaq_f32(vld1q_f32(ui + k), a, d), b, c));
+    }
+#endif
+    for (; k < n; k++) { ur[k] += hr[k] * xr[k] - hi[k] * xi[k]; ui[k] += hr[k] * xi[k] + hi[k] * xr[k]; }
+}
+
 /* acc += s * (h * x) over n complex bins, h and x in half precision as [re bins][im bins]; acc in float. (Summing several partitions per pass with the accumulator in
  * registers was measured on the Move and is slower: -10 % at 2 partitions, -20 % at 4, the extra streams defeat the prefetcher.) */
 inline void macHalf(const uint16_t *hr, const uint16_t *hi, const uint16_t *xr, const uint16_t *xi, float s, float *ur, float *ui, int n)
@@ -235,8 +249,7 @@ private:
                 const int hc = channels == 1 ? 0 : c;
                 const float *hr = &head[hc][(size_t) p * 2 * nb], *hi = hr + nb;
                 const float *xr = x + (c ? 2 * nb : 0), *xi = xr + nb;
-                float *ur = yr[c], *ui = yi[c];
-                for (int k = 0; k < nb; k++) { ur[k] += hr[k] * xr[k] - hi[k] * xi[k]; ui[k] += hr[k] * xi[k] + hi[k] * xr[k]; }
+                macFloat(hr, hi, xr, xi, yr[c], yi[c], nb);
             }
         }
         headPos = (headPos + 1) % kHeadParts;

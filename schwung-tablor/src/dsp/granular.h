@@ -19,6 +19,10 @@
 
 #include "sample.h"
 
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 namespace tb {
 
 /* Level factor for M grains at once, M = floor(N) + 1, measured (index 0 unused; 31 is the step at Density exactly 1000). */
@@ -255,8 +259,41 @@ struct GrainCloud {
                         const int w0 = std::min((int) fx, kWinN - 1);
                         wi[k] = w0; wf[k] = fx - (float) w0;
                     }
+                    int k = 0;
+#if defined(__aarch64__)
+                    /* four samples at a time: the reads from the file and the window are gathers (one load each), the interpolation, the window, the gain and the pan are vectors */
+                    const float32x4_t vga = vdupq_n_f32(ga), vgl = vdupq_n_f32(gl), vgr = vdupq_n_f32(gr);
+                    const int32x4_t vbase = vdupq_n_s32(base), vlo = vdupq_n_s32(0), vhi = vdupq_n_s32(fr - 2);
+                    for (; k + 4 <= c; k += 4) {
+                        int32_t ix[4];
+                        vst1q_s32(ix, vminq_s32(vmaxq_s32(vaddq_s32(vld1q_s32(ii + k), vbase), vlo), vhi));
+                        const float w0[4] = { W[wi[k]], W[wi[k + 1]], W[wi[k + 2]], W[wi[k + 3]] };
+                        const float w1[4] = { W[wi[k] + 1], W[wi[k + 1] + 1], W[wi[k + 2] + 1], W[wi[k + 3] + 1] };
+                        const float32x4_t a = vld1q_f32(w0), b = vld1q_f32(w1);
+                        const float32x4_t kk = vmulq_f32(vga, vfmaq_f32(a, vsubq_f32(b, a), vld1q_f32(wf + k)));
+                        const float32x4_t vff = vld1q_f32(ff + k);
+                        float32x4_t x0, x1, y0, y1;                             /* the left and right file samples at the integer position and the next one */
+                        if (ch == 1) {
+                            const float s0[4] = { (float) pcm[ix[0]], (float) pcm[ix[1]], (float) pcm[ix[2]], (float) pcm[ix[3]] };
+                            const float s1[4] = { (float) pcm[ix[0] + 1], (float) pcm[ix[1] + 1], (float) pcm[ix[2] + 1], (float) pcm[ix[3] + 1] };
+                            x0 = y0 = vld1q_f32(s0); x1 = y1 = vld1q_f32(s1);
+                        } else {
+                            const float32x4_t f0 = vcvtq_f32_s32(vmovl_s16(vld1_s16(pcm + (size_t) ix[0] * 2))), f1 = vcvtq_f32_s32(vmovl_s16(vld1_s16(pcm + (size_t) ix[1] * 2)));
+                            const float32x4_t f2 = vcvtq_f32_s32(vmovl_s16(vld1_s16(pcm + (size_t) ix[2] * 2))), f3 = vcvtq_f32_s32(vmovl_s16(vld1_s16(pcm + (size_t) ix[3] * 2)));
+                            const float32x4x2_t t0 = vtrnq_f32(f0, f1), t1 = vtrnq_f32(f2, f3);       /* each f is [l0 r0 l1 r1] of one sample: transpose to one vector per field */
+                            x0 = vcombine_f32(vget_low_f32(t0.val[0]), vget_low_f32(t1.val[0]));
+                            y0 = vcombine_f32(vget_low_f32(t0.val[1]), vget_low_f32(t1.val[1]));
+                            x1 = vcombine_f32(vget_high_f32(t0.val[0]), vget_high_f32(t1.val[0]));
+                            y1 = vcombine_f32(vget_high_f32(t0.val[1]), vget_high_f32(t1.val[1]));
+                        }
+                        const float32x4_t lv = vmulq_f32(vmulq_f32(vfmaq_f32(x0, vsubq_f32(x1, x0), vff), kk), vgl);
+                        const float32x4_t rv = vmulq_f32(vmulq_f32(vfmaq_f32(y0, vsubq_f32(y1, y0), vff), kk), vgr);
+                        vst1q_f32(L + i + k, vaddq_f32(vld1q_f32(L + i + k), lv));
+                        vst1q_f32(R + i + k, vaddq_f32(vld1q_f32(R + i + k), rv));
+                    }
+#endif
                     if (ch == 1) {
-                        for (int k = 0; k < c; k++) {
+                        for (; k < c; k++) {
                             const int i0 = std::clamp(base + ii[k], 0, fr - 2);
                             const float x0 = pcm[i0], x1 = pcm[i0 + 1];
                             const float w = W[wi[k]] + (W[wi[k] + 1] - W[wi[k]]) * wf[k];
@@ -264,7 +301,7 @@ struct GrainCloud {
                             L[i + k] += v * gl; R[i + k] += v * gr;
                         }
                     } else {
-                        for (int k = 0; k < c; k++) {
+                        for (; k < c; k++) {
                             const int i0 = std::clamp(base + ii[k], 0, fr - 2);
                             const int16_t *q = pcm + (size_t) i0 * 2;
                             const float l0 = q[0], r0 = q[1], l1 = q[2], r1 = q[3];
@@ -295,6 +332,16 @@ struct GrainCloud {
                 pos += g.step; age++;
             }
             g.pos = pos; g.age = age; g.off = 0;
+            /* The next block's stretch of the file, asked for now: a cloud reads from dozens of places at once, more streams than the hardware prefetcher follows, and the file is
+             * bigger than the cache, so every sixteenth frame of every grain was a trip to main memory. The grain comes round again after all the others, by when the lines have arrived. */
+            if (g.alive) {
+                const double span = (double) n * g.step;                                         /* frames the next block will cover (signed) */
+                const double a = span >= 0.0 ? pos : pos + span, b = span >= 0.0 ? pos + span : pos;
+                const long f0 = std::max(0L, (long) a), f1 = std::min((long) fr - 1, (long) b + 1);
+                const char *base0 = (const char *) pcm + (size_t) f0 * (size_t) ch * 2, *end0 = (const char *) pcm + (size_t) std::max(f1, f0) * (size_t) ch * 2;
+                int lines = 0;
+                for (const char *q = base0; q <= end0 && lines < 40; q += 64, lines++) __builtin_prefetch(q, 0, 2);
+            }
         }
         scanSec += scan * (double) n / (double) sr;
     }

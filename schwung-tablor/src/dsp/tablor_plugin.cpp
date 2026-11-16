@@ -170,6 +170,8 @@ struct tablor_instance {
 static constexpr const char *kPresetDir =
     "/data/UserData/UserLibrary/Tablor DH Presets";
 
+static constexpr bool kMacroUnits = false;            /* see tb_publish_selection: macro names as knob units change the contract per preset */
+
 static std::string sanitize_preset_name(const char *raw)
 {
     std::string n;
@@ -1068,10 +1070,13 @@ static void tb_publish_selection(tablor_instance *inst)
     out.insert(tb_chain_params_prio_len, hand);      /* right after the page keys: inside the host's 256-key cache */
     out += "]";
 
-    /* The macro knobs carry the preset's macro names as their `unit`: the cell label stays "MCR 1", and touching a knob shows the
+    /* The macro knobs could carry the preset's macro names as their `unit`: the cell label stays "MCR 1", and touching a knob shows the
      * value with the name beside it ("64 More Delay") in the top bar. A macro the preset does not use gets no unit. The key's entry
-     * is found by its key; the unit goes in right after the key (so it does not depend on the knob having a custom widget). */
-    {
+     * is found by its key; the unit goes in right after the key (so it does not depend on the knob having a custom widget).
+     * OFF (kMacroUnits): the names make chain_params differ from one preset to the next (332 of the 384 Factory presets), and the host
+     * answers a changed contract after every landing by parsing all of it again and planning every page over -- the pause and the "--" when
+     * you stop scrolling a big bank. The names stay on the `macro_names` key, which the remote UI and the macro widget read. */
+    if (kMacroUnits) {
         const std::string names = *std::atomic_load(&inst->macn_pub);
         size_t pos = 0;
         for (int m = 0; m < 8; m++) {
@@ -1238,6 +1243,7 @@ static void build_state_blob(tablor_instance *inst)
  * re-reads the contract a moment after a preset change and is_loading holds it off until this is done. */
 static void republish_macro_names(tablor_instance *inst)
 {
+    if (!kMacroUnits) return;                         /* nothing in chain_params depends on the names */
     if (*std::atomic_load(&inst->macn_pub) == inst->macn_str) return;
     std::atomic_store(&inst->macn_pub, std::make_shared<const std::string>(inst->macn_str));
     inst->pub_pending.fetch_add(1);

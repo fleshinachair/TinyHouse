@@ -68,6 +68,27 @@ int main(int argc, char **argv)
         api->destroy_instance(inst);
         return 0;
     }
+    /* "contract": how many different chain_params strings does the bank produce? The host re-plans every page when the bytes it reads move. */
+    if (argc > 3 && !strcmp(argv[3], "contract")) {
+        static char big[65536], prev[65536];
+        static int16_t blk[256];
+        int changed = 0; size_t firstDiff = 0, lastLen = 0;
+        for (int i = 0; i < n; i++) {
+            char idx[16]; snprintf(idx, sizeof idx, "%d", i);
+            api->set_param(inst, "preset", idx);
+            for (int k = 0; k < 400; k++) { api->render_block(inst, blk, 128); api->get_param(inst, "is_loading", b, sizeof b); if (b[0] == '0' && k > 2) break; struct timespec g = { 0, 1000000 }; nanosleep(&g, nullptr); }
+            api->get_param(inst, "chain_params", big, sizeof big);
+            if (i && strcmp(big, prev)) {
+                changed++;
+                size_t d = 0; while (big[d] && big[d] == prev[d]) d++;
+                if (changed <= 3) printf("  preset %d differs at byte %zu: ...%.50s\n", i, d, big + (d > 20 ? d - 20 : 0));
+            }
+            memcpy(prev, big, sizeof prev); lastLen = strlen(big); (void) firstDiff;
+        }
+        printf("chain_params: %d of %d presets changed it from the one before (%zu bytes)\n", changed, n, lastLen);
+        api->destroy_instance(inst);
+        return 0;
+    }
     std::vector<R> rs;
     for (int i = 0; i < n; i++) {
         char idx[16]; snprintf(idx, sizeof idx, "%d", i);

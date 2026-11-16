@@ -200,9 +200,10 @@ int main(int argc, char **argv)
             nanosleep(&ts, nullptr);
         }
         CHECK(lb[0] == '0', "is_loading falls once the macro names are published");
-        CHECK(unitOf(1) == "More Delay", "macro 1 carries its name as unit (\"%s\")", unitOf(1).c_str());
-        CHECK(unitOf(2) == "", "an unused macro has no unit (\"%s\")", unitOf(2).c_str());
-        CHECK(unitOf(3) == "Cutoff", "macro 3 carries its name (\"%s\")", unitOf(3).c_str());
+        /* The names are NOT written into chain_params as units: that made the contract differ per preset (332 of 384 Factory presets) and the host
+         * re-planned every page after each landing. They are on macro_names. */
+        CHECK(unitOf(1) == "" && unitOf(2) == "" && unitOf(3) == "", "chain_params carries no macro units (\"%s\"/\"%s\"/\"%s\")", unitOf(1).c_str(), unitOf(2).c_str(), unitOf(3).c_str());
+        { char mn[256] = {}; api->get_param(inst, "macro_names", mn, sizeof mn); CHECK(!strcmp(mn, "More Delay||Cutoff|||||"), "macro_names carries the names (\"%s\")", mn); }
         api->set_param(inst, "state", "TBLR2;");
         for (int i = 0; i < 400; i++) {
             api->get_param(inst, "is_loading", lb, sizeof lb);
@@ -243,7 +244,7 @@ int main(int argc, char **argv)
             settleMacros();
         }
         CHECK(read("macro_names") == "|Level||||||", "the first knob names the macro (\"%s\")", read("macro_names").c_str());
-        CHECK(unitOf(2) == "Level", "the Move gets the name as macro 2's unit (\"%s\")", unitOf(2).c_str());
+        CHECK(unitOf(2) == "", "chain_params still carries no unit for macro 2 (\"%s\")", unitOf(2).c_str());
         api->set_param(inst, "macro_edit", "travel|2|wt1_level|-17.5");
         api->set_param(inst, "macro_edit", "name|2|Brightness");
         settleMacros();

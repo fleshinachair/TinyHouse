@@ -156,6 +156,7 @@ def bode_only(why):
     for w in why:
         if "no Serum fingerprint" in w or "measure the fingerprint again" in w or "in a Split branch" in w:
             continue
+        w = re.sub(r"^FX bus \d: ", "", w)               # a bus rack's Bode is the same Bode
         if not w.startswith("not carried: "):
             return False
         kinds |= set(w[len("not carried: "):].split(", "))
@@ -165,40 +166,46 @@ def bode_only(why):
 def ignored_effects_off(tree, header, name, why):
     """When the only thing besides a missing fingerprint that stops a preset is effects the converter leaves out (a Filter FX with a model or a modulator, a Bode, a Split with
     its branch modules, a Comp / Distortion / Utils it has no stage for): the tree with exactly those nodes switched off (a Split takes its branch modules with it), else None.
-    A Distortion's own filter, a bus rack's effects and every other reason are not this case."""
-    kinds = set()
+    The same in an FX bus rack when the reason is its plain "not carried: <kinds>". A Distortion's own filter, a bus rack's Filter FX with a modulator and every other reason are not this case."""
+    kinds = {}                                           # rack (0 = main, 1 / 2 = bus) -> the kinds left out there
     for w in why:
         if "no Serum fingerprint" in w or "in a Split branch" in w:
             continue
+        mb = re.match(r"FX bus (\d): (not carried: .*)$", w)
+        rack, w = (int(mb.group(1)), mb.group(2)) if mb else (0, w)
         if w.startswith("not carried: "):
-            kinds |= set(w[len("not carried: "):].split(", "))
-        elif w.startswith("Filter FX not carried: ") and "Distortion filter" not in w:
-            kinds.add("Filter")
+            kinds.setdefault(rack, set()).update(w[len("not carried: "):].split(", "))
+        elif rack == 0 and w.startswith("Filter FX not carried: ") and "Distortion filter" not in w:
+            kinds.setdefault(0, set()).add("Filter")
         else:
             return None
-    if not kinds or not kinds <= set(INAUDIBLE_KINDS):
+    if not kinds or not set().union(*kinds.values()) <= set(INAUDIBLE_KINDS):
         return None
     ph = d2m.physical(tree, header)
-    nodes = ph.get("fx_nodes", [])
-    _, _, info = fxmap.map_fx(name, nodes, ctx={"mods": ph["mods"], "macros": ph["macros"]})
-    handled = set(info.get("filter_fx_handled", ()))
-    off = set()
-    for i, n in enumerate(nodes):
-        k = fxmap.kind_of(n)
-        if k in kinds and fxmap.enabled(n) and not (k == "Filter" and i in handled):
-            off.add(i)
-            if k in ("Split", "Split3", "SplitMS"):
-                pp = fxmap.plain(n)
-                off |= set(range(i + 1, min(i + 1 + sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3)), len(nodes))))
+    off = {}                                             # rack -> node indexes
+    for rack, ks in kinds.items():
+        nodes = ph.get("fx_nodes", []) if rack == 0 else ph.get("bus_nodes", [[], []])[rack - 1]
+        handled = set()
+        if rack == 0:
+            _, _, info = fxmap.map_fx(name, nodes, ctx={"mods": ph["mods"], "macros": ph["macros"]})
+            handled = set(info.get("filter_fx_handled", ()))
+        for i, n in enumerate(nodes):
+            k = fxmap.kind_of(n)
+            if k in ks and fxmap.enabled(n) and not (k == "Filter" and i in handled):
+                off.setdefault(rack, set()).add(i)
+                if k in ("Split", "Split3", "SplitMS"):
+                    pp = fxmap.plain(n)
+                    off[rack] |= set(range(i + 1, min(i + 1 + sum(int(round(pp.get(f"kParamModuleCount{b}", 0))) for b in (1, 2, 3)), len(nodes))))
     if not off:
         return None
     t2 = copy.deepcopy(tree)
-    for i in off:
-        n = t2["FXRack0"]["FX"][i]
-        k = fxmap.kind_of(n)
-        if not isinstance(n[f"FX{k}"].get("plainParams"), dict):
-            n[f"FX{k}"]["plainParams"] = {}
-        n[f"FX{k}"]["plainParams"]["kParamEnable"] = 0.0
+    for rack, idx in off.items():
+        for i in idx:
+            n = t2[f"FXRack{rack}"]["FX"][i]
+            k = fxmap.kind_of(n)
+            if not isinstance(n[f"FX{k}"].get("plainParams"), dict):
+                n[f"FX{k}"]["plainParams"] = {}
+            n[f"FX{k}"]["plainParams"]["kParamEnable"] = 0.0
     return t2
 
 
@@ -394,7 +401,9 @@ def main():
             serum_peak = float(max(np.abs(r).max() for r in it["refs"]))
             held_db = capped_db if serum_peak > 1.0 else 0.0
             cap_note = f"; held {-held_db:.1f} dB under Serum's loudness by the output clipper (Serum's render peaks at {serum_peak:.2f})" if held_db < -0.5 else ""
-            if abs(gap - held_db) > a.max_level_gap or berr > a.max_band_rms:
+            # Too quiet beyond what the clipper's hold explains, or louder than Serum: a fail. Louder than the hold predicts but still under Serum is not (a signal squeezed by the
+            # limiter loses less than the gain it was cut by: BS - Reso held 16.5 dB under, finished 10 dB under, octave bands within 1.8 dB).
+            if gap - held_db < -a.max_level_gap or gap > a.max_level_gap or berr > a.max_band_rms:
                 skipped.append((name, [f"too far from Serum after the fit: level {gap:+.1f} dB, octave bands {berr:.1f} dB rms"]))
                 print(f"  dropped {name}: level {gap:+.1f} dB, bands {berr:.1f} dB rms (volume {int(PF.getk(state, 'volume', 0))}{cap_note})", flush=True)
                 continue

@@ -3,11 +3,11 @@
 gives (no loudness fit), the first sounding note, the rms of the sustained part in dB. The master law is only right if the engine's voice reaches the same level
 as Serum's from the same settings; this is how far off each preset is. Everything level-dependent before the master gain (the compressor and distortion
 thresholds) inherits the error. Output: calibration/voice_level.json, the worst first printed."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, math, os, re, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import test_render_calibration as H

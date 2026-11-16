@@ -9,7 +9,7 @@ with a 1024 hop. Notes that persist for several frames become events. This is fo
 preset to compare with the demo, not a score: octave errors and missed quiet notes are expected.
 Output: a piano-roll list of (start s, end s, midi note) and calibration/transcripts/<name>.json
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import sys
 from pathlib import Path

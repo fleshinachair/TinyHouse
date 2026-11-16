@@ -2,7 +2,7 @@
 """What stops a folder of Serum presets from importing whole? No Serum renders: the converter's own verdict (unsupported_reasons) on each
 preset, its blockers grouped, and what removing each group (alone, then greedily) would free. A missing effect fingerprint does not count: the
 importer measures it. Output: calibration/classify_<name>.json and a printed summary."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import os
 import re
@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import test_render_calibration as H
 from serum2_preset_loader.codec import decode_preset_file

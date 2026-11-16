@@ -4,7 +4,7 @@ Lead - Loop's own tree (effects stripped; its LFO 1 drives oscillator A's level 
 Triplets and BeatSync set; the trace's period is read by autocorrelation and given in seconds and in beats at the harness tempo (120 BPM).
 Output: calibration/probe_lfo_sync.json and a printed table.
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy
 import json
 import os
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import test_render_calibration as H

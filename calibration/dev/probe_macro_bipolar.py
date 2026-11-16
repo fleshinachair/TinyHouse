@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """A macro route to the voice filter cutoff, unipolar and bipolar, at macro values 0 / 25 / 50 / 75 / 100 %: the cutoff offset (fraction of the knob) read back from the noise
 level against a swept base cutoff, route +50 %. Tells whether a bipolar route is x - 0.5 or 2x - 1. Output: printed."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

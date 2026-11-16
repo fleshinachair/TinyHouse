@@ -2,11 +2,11 @@
 """The multiband compressor's thresholds when ThreshUD0..2 are not written (Lead - Consoul Training): noise through a Comp with Multiband on and Makeup 1,
 the thresholds left out, written as 100 (the converter's assumed default) and as 143 / 170 / 200, the output level against the same noise without it.
 Output: printed (dB, and the same for the levels of the three bands is implied by the broadband result)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

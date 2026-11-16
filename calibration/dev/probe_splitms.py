@@ -2,11 +2,11 @@
 """Serum's SplitMS node: which branch is Mid and which Side, and whether the split is transparent.  A wide saw (unison 7 spread 100 %) through [SplitMS(ModuleCount2 = 1), EQ A, EQ B]
 (branch 1 = the first ModuleCount1 modules, branch 2 = the next ModuleCount2) with a +12 dB peak at 1 kHz in A or in B, against the same signal with no SplitMS.  Prints the
 change of the mid (L+R) and side (L-R) third-octave bands near 1 kHz and of the overall level.  Output: printed."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

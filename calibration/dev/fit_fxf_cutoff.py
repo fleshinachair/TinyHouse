@@ -4,7 +4,7 @@
 the converter's formula (cutoff x knob span + offset - 8 + the voice-filter delta) for its -10 dB point to land where Serum's does; cutoffs under 0.2 are left out
 (the point falls at the first harmonic and the reading is noise), so the table is flat below its first entry.
 Usage: fit_fxf_cutoff.py   (after probe_fxf_static.py <model> for each model; the default type is probed as an L12: FXF_ENGINE=L12 probe_fxf_static.py default)"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 from pathlib import Path
 CAL = Path(__file__).resolve().parents[1]

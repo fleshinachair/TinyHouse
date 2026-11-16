@@ -8,7 +8,7 @@ so an inverted aux works as 1 - x. deephouse2move.aux_scale applies it before th
 45 of the 626 factory presets have an inverted aux (9 on a voice-filter cutoff, 9 on an oscillator volume, 8 on the octave).
 Usage: python calibration/dev/probe_aux_inverted.py <FX - Office Telephone.SerumPreset>
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import sys, copy, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np

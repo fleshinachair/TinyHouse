@@ -4,7 +4,7 @@ biased curve) bias B of y = K f(G x) whose fundamental and 2nd..5th harmonics ma
 probe are at Serum's output (after its master, with the probe preset's default master); the engine stage sits before its own master gain, so the table
 is written in the probe's units and the converter scales it by the engine's gain at that default master (fxmap.DIST_PROBE_GAIN).
 Output: calibration/dist_curves.json  {mode: {"drives": [...], "G": [...], "K": [...], "B": [...], "engine_mode": n, "err_db": [...]}}"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import math
 from pathlib import Path

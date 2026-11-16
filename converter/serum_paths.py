@@ -10,6 +10,6 @@ SERUM_ROOT = Path(os.environ["SERUM_ROOT"]) if os.environ.get("SERUM_ROOT") else
 SERUM_TABLES = SERUM_ROOT / "Tables"
 SERUM_VST = os.environ.get("SERUM_VST", r"C:\Program Files\Common Files\VST3\Serum2.vst3")
 
-if __name__ == "__main__":                       # used by the shell scripts: python serum_paths.py tables
+if __name__ == "__main__":                       # used by the shell scripts: python converter/serum_paths.py tables
     import sys
     print({"root": SERUM_ROOT, "tables": SERUM_TABLES, "vst": SERUM_VST}[sys.argv[1] if len(sys.argv) > 1 else "root"].as_posix())

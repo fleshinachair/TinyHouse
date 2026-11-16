@@ -2,7 +2,7 @@
 """The static warps against Serum through the real converter and engine: for each warp and amount a held Default Shapes saw (or the table named) goes through Serum and through
 tablor_cli; the harmonics 1..12 of each, in dB against that side's own unwarped note, must agree (rows print the largest difference among harmonics above -40 dB).
 Usage: validate_static_warps.py   (needs a built calibration/tablor_cli.exe: bash schwung-tablor/scripts/zig-build.sh native)"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

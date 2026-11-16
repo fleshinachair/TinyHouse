@@ -163,7 +163,7 @@ Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine). Only a h
 
 ```
 pip install -r requirements.txt
-python import_pack.py "C:\path\to\folder of .SerumPreset" --bank "My Pack"      # converts, renders in Serum, fits levels; writes out_import/My Pack/
+python converter/import_pack.py "C:\path\to\folder of .SerumPreset" --bank "My Pack"      # converts, renders in Serum, fits levels; writes out_import/My Pack/
 BANK="My Pack" sh ./deploy_wavetables.sh                                         # copy to the Move over SSH (each step keeps a rollback copy)
 sh ./deploy_samples.sh
 SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh
@@ -173,8 +173,8 @@ To bring in Serum's own Factory presets, point it at `Presets\Factory` inside yo
 only the presets that match Serum's render within the check above (about 290 of the 626). It takes hours, because every preset is rendered, so leave it running;
 if it stops, run the same command again with `--resume` and it carries on where it left off.
 
-Reload the slot afterwards and the bank is in the preset browser next to your imported ones. `deephouse2move.py` converts a `.SerumPack` directly and
-`serum_paths.py` explains how Serum's folders are found (set `SERUM_ROOT` and `SERUM_VST` if yours are elsewhere). The first run on a pack is slow because
+Reload the slot afterwards and the bank is in the preset browser next to your imported ones. `converter/deephouse2move.py` converts a `.SerumPack` directly and
+`converter/serum_paths.py` explains how Serum's folders are found (set `SERUM_ROOT` and `SERUM_VST` if yours are elsewhere). The first run on a pack is slow because
 every preset is rendered; the renders are cached, so a second run is fast. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) goes into the options and the rules behind them.
 
 ## Installing

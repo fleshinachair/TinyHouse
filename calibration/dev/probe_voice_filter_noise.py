@@ -3,12 +3,12 @@
 filtered noise minus that of the same noise with the filter off, on each side.  Cases: Filter 1 or Filter 2 (balance 100), model, cutoff knob, resonance.
 Serum side cached in calibration/probe_voice_filter_noise_serum.json.
   probe_voice_filter_noise.py [--models MgL24,...] [--cutoffs .3,.5] [--resos 0,41.6] [--filters 1,2]   prints, per case, engine - Serum in dB per band."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import argparse, copy, json, os, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

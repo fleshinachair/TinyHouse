@@ -2,11 +2,11 @@
 """The reverb on the preset's own sound: Serum with only its master Reverb nodes enabled against the engine with only its reverb stage on, the first sounding note held 1 s and
 released: the level of the tail at 0.1-0.3, 0.3-0.7 and 0.7-1.5 s after the release, in dB re the sustained level (before release), and the extra sustained level the reverb adds.
 The effect audit measures a noise burst; this is the tail of a played note, where a wrong wet level or decay is heard. [names...] limits it. calibration/reverb_stage_audit.json"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, math, os, re, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fxmap

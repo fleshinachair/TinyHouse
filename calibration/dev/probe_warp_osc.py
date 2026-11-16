@@ -3,11 +3,11 @@
 A sine carrier on oscillator CAR with the warp MODE at each amount; a sine modulator a perfect fifth up on oscillator MOD (or the Noise / Sub), at its own level 0 (only the warp is
 heard). Lines at fc + n fm are read as in probe_warp_fm.py. Env: CAR (0..2), MODS (comma list of oscillator indexes to try as the modulator: 0,1,2 = A,B,C, 3 = noise, 4 = Sub), OUT.
 Usage: probe_warp_osc.py MODE [note] [amount,...]   Output: calibration/probe_warp_osc.json"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V

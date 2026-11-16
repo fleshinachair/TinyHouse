@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Import a folder of Serum 2 presets into a TinyHouse bank, keeping only what the engine can carry whole.
 
-  import_pack.py SRC_DIR --bank "Serum Bass" [--out out_import] [--limit N] [--no-level]
+  converter/import_pack.py SRC_DIR --bank "Serum Bass" [--out out_import] [--limit N] [--no-level]
 
 For every .SerumPreset under SRC_DIR:
   1. convert it with the converter's own mapping (deephouse2move.map_to_tablor), no per-preset tuning;
@@ -22,8 +22,8 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 import numpy as np
 import fit_chain as C
 import fit_level as L

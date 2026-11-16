@@ -2,11 +2,11 @@
 """Serum's oscillator warps that take the Sub oscillator as the modulator (FM from Sub, RM from Sub, PD from Sub; the Sub's own level 0 so only the warp is heard): a sine oscillator
 at the note, the Sub a sine at the same pitch (octave 0) or one octave down (-1), harmonics 1..12 (dB, absolute) at amounts 0..1, and the fundamental's level change.
 Output: calibration/probe_warp_sub.json {mode: {octave: {amount: [dB 1..12]}}, "ref": [...]}.  Usage: probe_warp_sub.py [mode ...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V

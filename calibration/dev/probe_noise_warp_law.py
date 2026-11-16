@@ -4,11 +4,11 @@ A held Basic Shapes sine with the warp at each amount, the Noise on at level 0 (
 Gaussian noise that is -4.34 s^2 dB with s the rms phase deviation in radians), the total power against the unwarped note (dB; 0 for a phase modulation, which keeps the power), and the
 skirt's share (power outside the carrier's +-4 bins, within +-45 % of its frequency, over the whole).
 Usage: probe_noise_warp_law.py MODE [note] [amount,...]   Env: REPS (default 3).  Output: calibration/probe_noise_warp_law_<MODE>.json"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V
 import test_render_calibration as H

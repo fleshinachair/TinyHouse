@@ -12,6 +12,7 @@ boosts a quiet tail, and a later note comes out of it far too loud. rescale() mo
 import math
 import re
 
+import sys, pathlib; sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "converter"))
 import deephouse2move as d2m
 
 KEYS = ("comp_thresh", "comp_thresh2", "comp_thresh3")

@@ -21,7 +21,7 @@ DST=$ROOT_DST${BANK:+/$BANK}
 STAGE=/data/UserData/tinyhouse-presets-staging
 RB=${RB:-/data/UserData/tinyhouse-rollback-p6}      # the tablor-dh copies stay in ...tablor-dh-rollback-p5
 
-[ -d "$SRC" ] || { echo "no $SRC: run deephouse2move.py first"; exit 1; }
+[ -d "$SRC" ] || { echo "no $SRC: run converter/deephouse2move.py first"; exit 1; }
 # Git Bash prints "hash *name", the Move prints "hash  name": same sums, so normalise before comparing
 norm() { sed -E 's/^([0-9a-f]+) [ *]/\1  /'; }
 want=$(cd "$SRC" && md5sum *.json | norm)

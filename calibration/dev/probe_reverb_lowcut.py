@@ -4,7 +4,7 @@ octave-band level (voice_survey.bands: 20-40, 40-80, ... Hz) against Freq 20.  R
 the engine's one-pole rev_lo gives (it also takes 2-10 dB off the mids, which a high pass does not).  NOT adopted: a three-pole rev_lo with the corner at 0.85 x Hz
 fixed the sub-bass of Self Control (40-80 Hz +11 -> +4 dB re body) but was neutral across the 20 presets with a reverb Freq of 30 Hz or more (mean octave-band rms
 9.27 -> 9.22), because it also cut sub-bass the engine was already short of (Bass - Rivo, Keys - BUNT).   probe_reverb_lowcut.py"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy
 import math
 import os
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V

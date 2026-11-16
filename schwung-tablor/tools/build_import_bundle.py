@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pack the browser importer: build/import_bundle.zip.
 
-The remote UI's Import runs the converter (deephouse2move.py and its helpers, ../../import_web.py) under Pyodide. The page downloads this zip
+The remote UI's Import runs the converter (deephouse2move.py and its helpers, ../../converter/import_web.py) under Pyodide. The page downloads this zip
 from the module's folder on the Move once per session and unpacks it into Pyodide's file system. It holds:
   - the converter's Python files,
   - the measured data tables it reads (calibration/*.json: filter models, resonance and distortion curves, LFO scales). Per-preset fits and
@@ -36,7 +36,7 @@ def main() -> None:
     n = 0
     with zipfile.ZipFile(a.out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for f in PY:
-            z.write(REPO / f, f); n += 1
+            z.write(REPO / "converter" / f, f); n += 1
         for d in DATA:
             # minified: the page downloads this
             z.writestr(f"calibration/{d}.json", json.dumps(json.loads((REPO / "calibration" / f"{d}.json").read_text(encoding="utf-8")), separators=(",", ":"))); n += 1

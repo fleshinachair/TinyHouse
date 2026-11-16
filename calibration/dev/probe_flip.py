@@ -2,10 +2,10 @@
 """Serum's Flip warp on the Default Shapes table: at amounts 0 / 0.5 / 1 / 0.5034 / 0.45 / 0.55 and several table positions, the harmonics 1..20 against the unwarped table.
 Result (2026-11-13): 0 and 1 are the table as it is; 0.5 and 0.5034 are the table read backwards (same magnitudes to 0.03 dB, phases negated exactly); 0.45 and 0.55 are 1.9 dB / 70 deg off.
 The converter carries only those ends (deephouse2move.FLIP_TOLERANCE, reverse_table)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[2];sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"calibration")); os.chdir(ROOT)
+ROOT = Path(__file__).resolve().parents[2];sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT/"calibration")); os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V
 import test_render_calibration as H

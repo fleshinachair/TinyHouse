@@ -2,11 +2,11 @@
 """Serum's noise oscillator: Type (unwritten / White / Pink / Brown) x Color (0 .. 1 in tenths; 0.5 is neutral), third-octave band levels from 50 Hz to 16 kHz and the
 overall level in dB, all at oscillator volume 0.75 with the voice filter off. (The probe base carries Bass - Gravity's Pink / Color 0.75 noise, so its NoiseOsc3 is
 removed first: that was the 'unwritten' noise that was measured before.) Output: calibration/probe_noise_color.json, a printed octave summary."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

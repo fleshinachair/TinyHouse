@@ -4,7 +4,7 @@ Most of this folder is the workbench that the converter's rules came from. **You
 
 ## Needed to import with `import_pack.py`
 
-These are loaded when you run the importer, together with the top-level `import_pack.py`, `deephouse2move.py`, `fxmap.py`, `fxmetrics.py`, `sample_export.py`, `serum_paths.py` and `test_render_calibration.py`:
+These are loaded when you run the importer, together with the converter in `../converter/` (`import_pack.py`, `deephouse2move.py`, `fxmap.py`, `fxmetrics.py`, `sample_export.py`, `serum_paths.py`) and `test_render_calibration.py`, the render harness that lives here:
 
 | File | What it does |
 |---|---|

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Serum's Even/Odd warp is a mix of the waveform with itself half a cycle later: y(p) = a1 x(p) + a2 x(p + 1/2). Fitted by least squares on two different tables (Default Shapes saw
 and a Basic Shapes frame) at amounts 0..1; the coefficients must agree between the tables.  Output: calibration/evenodd_measured.json {"amounts": [...], "coef": [[a1, a2], ...], "err": [...]}."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

@@ -11,7 +11,7 @@ Presets are matched to the pack's Serum presets by name (letters and digits only
 import json, os, re, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import test_render_calibration as H
 d2m = H.d2m

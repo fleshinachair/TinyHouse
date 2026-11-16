@@ -3,11 +3,11 @@
 (wet 100, LevelOut unwritten). probe_dist_transfer.py only read harmonics 1..5; the engine's hard clip was fitted to those, and Bass - AVAION showed it makes
 high-order harmonics Serum does not. Output calibration/probe_dist_od.json {"ref": {vol: amp}, "rows": [{mode, drive, vol, a_in, amps: [A1..A15]}]}.
 Usage: probe_dist_od.py [mode ...]   (default kOverdrive kHardClip)"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fxmap

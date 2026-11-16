@@ -8,7 +8,7 @@ The importer has no Serum, so it cannot match each preset's loudness. What the d
 2.7 dB (40 log10 of fitted / starting volume), with a spread of 5 dB that is NOT explained by the preset's engine parameters (a ridge regression on 18 of them,
 leave-one-out, does no better than the constant). So the law is the offset, and the rest is left to the user's ear (Volume on the Move UI / remote UI).
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import math
 import statistics

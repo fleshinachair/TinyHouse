@@ -2,14 +2,14 @@
 """The second voice filter and the balance, end to end: a synthetic Serum patch (one saw through Filter 1 and/or Filter 2 at a given balance) is rendered
 in Serum and, converted by deephouse2move.py, in the engine, and the level of each harmonic is compared (the engine's level is set by the unfiltered saw
 of the same patch, so only the filtering differs).  check_filter2.py    prints per case the harmonic-by-harmonic difference (dB)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy
 import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import deephouse2move as d2m

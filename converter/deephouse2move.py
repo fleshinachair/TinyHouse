@@ -2,7 +2,7 @@
 """Serum 2 pack -> .vital JSON -> Tablor presets for Ableton Move (Schwung).
 
     pip install serum2-preset-loader
-    python deephouse2move.py "Loopsy - DEEP HOUSE.SerumPack" -o out \
+    python converter/deephouse2move.py "Loopsy - DEEP HOUSE.SerumPack" -o out \
         [--serum-tables "<your Serum 2 Presets>/Tables"] [--wt-subdir "Deep House"]
 
 Stages
@@ -46,6 +46,9 @@ import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parent                       # the repository (the converter lives in converter/); the browser bundle has calibration/ beside the modules
+if not (REPO / "calibration").is_dir(): REPO = REPO.parent
 
 import fxmap
 import sample_export as SE
@@ -673,7 +676,7 @@ FILTER_RES_POT = {            # resonance percentage -> engine resonance pot, by
 
 
 # Models fitted one by one against the engine's filter types (calibration/dev/fit_filter_model.py): {model: {"type", "delta": [[cutoff, pots]], "poor", "rms_db"}}
-FILTER_MODELS_FILE = Path(__file__).resolve().parent / "calibration/filter_models.json"
+FILTER_MODELS_FILE = REPO / "calibration/filter_models.json"
 FILTER_MODELS: dict = json.loads(FILTER_MODELS_FILE.read_text(encoding="utf-8")) if FILTER_MODELS_FILE.exists() else {}
 FLAT_FILTER_DB = 1.5     # a model whose harmonic levels are within this of no filter at all (Serum's own noise is about 1 dB) is left open
 
@@ -696,7 +699,7 @@ def filter_cutoff_delta(model: str, cut: float, reso: float | None = None) -> fl
     return interp(FILTER_CUTOFF_DELTA.get(model, [(0.0, 0.0)]), cut)
 
 
-FILTER_RES_FILE = Path(__file__).resolve().parent / "calibration/filter_res.json"
+FILTER_RES_FILE = REPO / "calibration/filter_res.json"
 FILTER_RES: dict = json.loads(FILTER_RES_FILE.read_text(encoding="utf-8")) if FILTER_RES_FILE.exists() else {}      # calibration/dev/fit_filter_res.py
 
 
@@ -744,7 +747,7 @@ SELFPD_LIMIT = 0.4          # SelfPD is the implicit y = x(p + z y), z = 0.62 a^
 # "Osc 2" the second (C for A and B, B for C); a modulator that is switched off gives no modulation at all. PD_OSC was a Bend stand-in before this. {mode: (warp kind, which of the other two)}; the engine's xs value is that oscillator's index + 1. AM (kind 6) is the Osc-only one.
 XWARP_NOISE_MODES = {"kFM_NOISE": 3, "kFMX_NOISE": 3, "kPD_NOISE": 4, "kRM_NOISE": 5}     # driven by the Noise: engine source 4 (calibration/dev/probe_noise_warp_law.py)
 XWARP_OSC_MODES = {"kPD_OSC": (4, 0), "kFM_OSC": (3, 0), "kFM_OSC2": (3, 1), "kPD_OSC2": (4, 1), "kRM_OSC": (5, 0), "kRM_OSC2": (5, 1), "kAM_OSC": (6, 0), "kAM_OSC2": (6, 1)}
-WARP_DIST_FILE = Path(__file__).resolve().parent / "calibration/warp_dist_curves.json"
+WARP_DIST_FILE = REPO / "calibration/warp_dist_curves.json"
 
 
 def WARP_SHAPERS() -> dict:
@@ -752,7 +755,7 @@ def WARP_SHAPERS() -> dict:
     return json.loads(WARP_DIST_FILE.read_text(encoding="utf-8"))
 
 
-WARP_CURVE_FILE = Path(__file__).resolve().parent / "calibration/warp_curve_modes.json"
+WARP_CURVE_FILE = REPO / "calibration/warp_curve_modes.json"
 
 
 def WARP_CURVES() -> dict:
@@ -811,12 +814,12 @@ def pot_env(e: dict, decay_mult: float = 1.0) -> tuple[int, int, int, int]:    #
             pot_time(env_time(e["release"], e.get("curve3"), CAL["release_curve"], CAL["release_scale"]) * decay_mult))
 
 
-FILTER_FITS = Path(__file__).resolve().parent / "calibration/filter_fits.json"
-WIDTH_FITS = Path(__file__).resolve().parent / "calibration/width_fits.json"
-CHAIN_FITS = Path(__file__).resolve().parent / "calibration/chain_fits.json"
-TUNE_FITS = Path(__file__).resolve().parent / "calibration/tune_fits.json"
-STEREO_FITS = Path(__file__).resolve().parent / "calibration/stereo_fits.json"
-LEVEL_FITS = Path(__file__).resolve().parent / "calibration/level_fits.json"
+FILTER_FITS = REPO / "calibration/filter_fits.json"
+WIDTH_FITS = REPO / "calibration/width_fits.json"
+CHAIN_FITS = REPO / "calibration/chain_fits.json"
+TUNE_FITS = REPO / "calibration/tune_fits.json"
+STEREO_FITS = REPO / "calibration/stereo_fits.json"
+LEVEL_FITS = REPO / "calibration/level_fits.json"
 # FAITHFUL: the preset is translated from Serum's own settings and nothing is tuned per preset against a loss function.
 # What is calibrated is the engine's unit conversions (global constants, measured by playing test patches through Serum:
 # CAL, calibration/lfo_scales.json) and each preset's loudness (APPLY_LEVEL_FITS). The per-preset fits (filter cutoff and
@@ -1208,7 +1211,7 @@ def lfo_sync_hz(rate: float, triplets: bool) -> float | None:
     return None
 
 
-LFO_SCALES = Path(__file__).resolve().parent / "calibration/lfo_scales.json"
+LFO_SCALES = REPO / "calibration/lfo_scales.json"
 LFO_SCALE: dict = json.loads(LFO_SCALES.read_text(encoding="utf-8")) if LFO_SCALES.exists() else {}
 
 
@@ -2402,7 +2405,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
 # The Filter FX stage's cutoff against Serum's, measured model by model (calibration/dev/probe_fxf_static.py, merged by fit_fxf_cutoff.py): the engine model whose type stands in
 # (Serum's default type is a 6 dB/octave low-pass, closer to an L12 than to the MgL24 it used to be given) and the semitones the formula below is short of putting the filter's
 # -10 dB point where Serum's is: +2 to +4 for MgL18, about -2 for MgL24 and MgL12, +10 for the default. A model with no entry keeps the formula alone.
-FXF_CUTOFF_FILE = Path(__file__).resolve().parent / "calibration/fxf_cutoff.json"
+FXF_CUTOFF_FILE = REPO / "calibration/fxf_cutoff.json"
 FXF_CUTOFF: dict = json.loads(FXF_CUTOFF_FILE.read_text(encoding="utf-8")) if FXF_CUTOFF_FILE.exists() else {}
 
 
@@ -2448,7 +2451,7 @@ def trim_for_headroom(m: dict, move_root: Path) -> None:
     the preset through the real engine and turn it down only if a full-velocity chord
     gets that far. Skipped, with a note in the report, if calibration/tablor_cli.exe has
     not been built."""
-    cli = Path(__file__).resolve().parent / "calibration/tablor_cli.exe"
+    cli = REPO / "calibration/tablor_cli.exe"
     if not cli.exists():
         m["notes"].append("not checked for clipping: calibration/tablor_cli.exe is not built")
         return

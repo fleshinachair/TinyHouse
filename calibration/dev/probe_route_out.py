@@ -3,13 +3,13 @@
 Billboard carry it on their oscillator coarse-pitch routes at 0.86 to 7.4) scales its depth: amount x Out / 100, Out defaulting to 100.  Without the scale the
 converter built full-depth vibrato (+/- 6 st) where Serum is flat, which was the sub-bass excess and dull centroid on those presets.
 Measured: a 4.3 Hz sine LFO into Oscillator coarse pitch (pitch swing, max - min over the held note), and into the voice filter cutoff (centroid swing)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import probe_lfo as P

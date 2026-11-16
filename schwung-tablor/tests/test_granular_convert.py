@@ -1,4 +1,4 @@
-"""Checks for the Granular oscillator half of the converter (no Serum needed): python test_granular_convert.py
+"""Checks for the Granular oscillator half of the converter (no Serum needed): python schwung-tablor/tests/test_granular_convert.py
 
   * deephouse2move.ME_DST agrees with the engine's destination list in schwung-tablor/tools/gen_params.py (the preset stores the INDEX);
   * granular_pots turns Serum's stored settings into the engine's knob positions (docs/GRANULAR_PROBE_NOTES.md laws) and flags what is not carried.
@@ -8,6 +8,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "converter"))
 import deephouse2move as D
 
 fails = 0
@@ -20,7 +21,7 @@ def check(name, ok, detail=""):
 
 
 # 1. the destination table
-src = (Path(__file__).parent / "schwung-tablor/tools/gen_params.py").read_text(encoding="utf-8")
+src = (Path(__file__).resolve().parents[1] / "tools/gen_params.py").read_text(encoding="utf-8")
 block = src[src.index("MOD_DST = ["):]
 block = block[:block.index("]")]
 names = re.findall(r'"([^"]+)"', re.sub(r"#[^\n]*", "", block))

@@ -3,7 +3,7 @@
 amount: the curve family chosen per mode (the best of hard clip / softsign / cubic soft clip over the odd harmonics 3..11), then G per amount (harmonics re fundamental, dB)
 and K (the fundamental against the unwarped sine). Diode 2 is asymmetric (even harmonics) and not fitted. Output: calibration/warp_dist_curves.json
 {mode: {"curve", "amounts", "G", "K", "err_db"}}."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]

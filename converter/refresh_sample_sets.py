@@ -4,14 +4,14 @@ refitting them: each installed preset's source Serum preset is mapped again, its
 installed preset are changed (the fit and every other value stay as installed). A preset whose sample slots no longer line up with the source (it was converted by an
 older converter) is listed and left alone: it needs a full conversion.
 
-  python refresh_sample_sets.py INSTALLED_DIR OUT_DIR       INSTALLED_DIR: the Move's presets/tinyhouse folder, copied here (banks below it);
+  python converter/refresh_sample_sets.py INSTALLED_DIR OUT_DIR       INSTALLED_DIR: the Move's presets/tinyhouse folder, copied here (banks below it);
                                                             OUT_DIR gets the changed presets (same layout); the new sets are written under out/move/.../Samples
 Then ./deploy_samples.sh and the presets from OUT_DIR (deploy_presets.sh with SRC=OUT_DIR/<bank> BANK=<bank>).
 """
 import json, os, re, sys
 from pathlib import Path
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 import test_render_calibration as H
 import serum_paths
 from serum2_preset_loader.codec import decode_preset_file

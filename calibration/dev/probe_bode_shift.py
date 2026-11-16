@@ -3,11 +3,11 @@
 and the line's level, so Shift and Range can be read as a frequency law.
 Result (2026-11-13): per channel, the left is shifted DOWN and the right UP (Shift > 0) by Shift/100 x Range Hz (Range is a linear Hz span: 10.68, 43.45 and 100 measured), one sideband only
 (width unstored = 100); calibration/dev/probe_bode_width_wet.py: OutputWidth 0 puts both sidebands in both channels at about -6 dB each (M = (L+R)/2 of the two)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
 import numpy as np
 import fx_probe as P
 import test_render_calibration as H

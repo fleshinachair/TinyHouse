@@ -2,14 +2,14 @@
 """Serum's Filter FX models other than the low-pass / high-pass ladders, as a magnitude response: white noise through one Filter FX of each model, transfer in dB on a quarter-octave
 grid (40 Hz to 16 kHz), at Freq 0.4 / 0.55 / 0.7 with Reso 0 and at Freq 0.55 with Reso 50 / 100 (Drive and Wet unwritten, Wet 100).  The shape is read against the cutoff the preset states (fxmap.serum_filter_hz).
 Output: calibration/fxfilter_models_probe.json {"grid": [...], "<model>|f<freq>|r<reso>": [dB, ...]}.  Usage: probe_fxfilter_models.py [model ...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

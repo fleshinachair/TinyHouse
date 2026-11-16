@@ -2,11 +2,11 @@
 """Helpers for probing Serum's Granular oscillator with synthetic samples (tone1k.wav: a steady 1 kHz sine, 8 s; ruler.wav: 16 half-second tones, segment k at 300 * 2^(k/4) Hz, so the
 frequency says which part of the file a grain came from). The two files live in Serum's Samples/User/_tinyhouse_probe/ (made by granwave.make_samples(); delete that folder when done).
 render(sample, gran, osc, ...) puts one Granular oscillator straight to the output and returns the stereo audio.  gran = GranularOsc plainParams, osc = the oscillator's plainParams."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
 import numpy as np
 import test_render_calibration as H
 SR = H.SR

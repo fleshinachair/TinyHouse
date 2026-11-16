@@ -2,7 +2,7 @@
 """The comb / flanger voice filters against Serum on a held saw (deterministic, unlike noise): the dB change of each harmonic 1..60 against that side's own unfiltered saw.
 Prints the mean-power difference (engine minus Serum, over the harmonics below 12 kHz) and the rms of the per-harmonic dB difference. Because the comb's teeth are 425 Hz apart and the
 harmonics 130.8 Hz, the harmonics sample the response at many points of the teeth.   Usage: validate_comb_saw.py [model:cut:reso ...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

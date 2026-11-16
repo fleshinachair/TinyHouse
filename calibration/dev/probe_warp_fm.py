@@ -3,11 +3,11 @@
 modulator share no harmonics), the Sub's own level 0 (only the warp is heard). A phase modulation by a sine puts lines at fc + n fm with amplitude A J_n(beta), so
 the index beta is read from the lines, per amount, at two notes (does the index follow the note?) and for another Sub shape.
 Output: calibration/probe_warp_fm.json {mode|note|shape|amount: {line: amplitude re the unwarped carrier}}.  Usage: probe_warp_fm.py [mode,...] [note,...] [shape,...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V

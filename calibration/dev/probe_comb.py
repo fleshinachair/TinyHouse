@@ -3,7 +3,7 @@
 comb's teeth and a phaser's notches show where a saw's harmonics would skip them.
   probe_comb.py MODEL [cutoff reso [var]] ...      one response per setting, printed as a coarse table and cached in calibration/probe_comb_serum.json
 Usage example: probe_comb.py CombP 0.5 0.0   CombP 0.5 0.6"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

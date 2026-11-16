@@ -3,11 +3,11 @@
 A sine carrier on oscillator A (warp MODE at each amount, routed Direct), a sine a perfect fifth up on oscillator B (level LEVEL, routed to Filter 1, which is on, wide open, LP unless FILT
 says otherwise). Lines at fc + n fm are read as in probe_warp_osc.py, against the carrier with the warp at 0.  Env: LEVEL (B's level, default 0.5), FILT (Filter 1 model), CUT (Filter 1 cutoff),
 NOMOD=1 leaves B out.   Usage: probe_warp_filt.py MODE [note] [amount,...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V
 import test_render_calibration as H

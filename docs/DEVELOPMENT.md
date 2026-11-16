@@ -71,15 +71,15 @@ Bode frequency shifter, Utils width inside a bus rack, a filter placed before th
 
 | Path | What it is |
 |---|---|
-| `deephouse2move.py` | the converter: Serum preset to engine parameters. Every translation rule has a comment saying what was measured |
-| `import_pack.py` | import a folder of Serum presets into a bank: convert, drop what cannot be carried, set loudness from a Serum render, gate on the result |
-| `fxmap.py`, `fxmetrics.py` | effect mapping (rack to engine stages) and the metrics used to fingerprint Serum's effects |
-| `sample_export.py` | Serum sample / multisample oscillators to `.tbs` sample sets |
+| `converter/deephouse2move.py` | the converter: Serum preset to engine parameters. Every translation rule has a comment saying what was measured |
+| `converter/import_pack.py` | import a folder of Serum presets into a bank: convert, drop what cannot be carried, set loudness from a Serum render, gate on the result |
+| `converter/fxmap.py`, `converter/fxmetrics.py` | effect mapping (rack to engine stages) and the metrics used to fingerprint Serum's effects |
+| `converter/sample_export.py` | Serum sample / multisample oscillators to `.tbs` sample sets |
 | `calibration/` | the measurement harness: probes against Serum, per-stage audits, chain report, level fits. `probe_*.py` find Serum's rules; `fx_audit.py`, `stage_audit.py`, `chain_report.py` check the result |
 | `schwung-tablor/` | the engine (a fork of Tablor): `src/dsp/` is the voice, FX and plugin; `tests/` are native tests |
 | `deploy_all.sh`, `deploy_presets.sh`, `deploy_wavetables.sh`, `deploy_samples.sh` | install a bank on the Move over SSH, with checksums and a rollback copy |
 | `docs/TRANSLATION_RULES.md` | the measured Serum facts and the translation rules built on them |
-| `serum_paths.py`, `requirements.txt` | where Serum is found (environment variables override), and the Python packages |
+| `converter/serum_paths.py`, `requirements.txt` | where Serum is found (environment variables override), and the Python packages |
 | `calibration/dev/midi_ab.py` | play a preset's own demo MIDI through Serum and through TinyHouse and compare (writes paired WAVs); `reports/2026-11-04-demo-midi-ab.md` has the results for the Loopsy pack |
 | `reports/` | what each round of work changed and measured. `2026-11-04-*.md` are the newest; `FX_COVERAGE.md` and `MISSING_FEATURES.md` predate the compressor, distortion, LFO and bus work and are out of date |
 
@@ -102,7 +102,7 @@ why each rule exists. Read it before changing a rule.
 
 **Typical loop**
 ```
-python import_pack.py "<folder of .SerumPreset>" --bank "My Pack"      # writes out_import/My Pack/ and its wavetables
+python converter/import_pack.py "<folder of .SerumPreset>" --bank "My Pack"      # writes out_import/My Pack/ and its wavetables
 BANK="My Pack" sh ./deploy_wavetables.sh
 sh ./deploy_samples.sh
 SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh          # the bank then shows on the Bank knob (8th knob of the Main page)

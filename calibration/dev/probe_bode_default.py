@@ -2,11 +2,11 @@
 """What a Bode node does in Serum when its Mix is unwritten or ~0: a saw through the node against the same saw with no node.  Deep House has six Bode nodes (type id 10): two with no
 params (oskar med k, Kisaya), HotLap's with a Blur / DelayTime / Feedback but no mix, NOTSOBAD's OutputMix 26.7, Origins' OutputMix 0.32.  Prints level and spectrum difference (dB)
 of node-vs-none for each case, and the same render against itself (the floor)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

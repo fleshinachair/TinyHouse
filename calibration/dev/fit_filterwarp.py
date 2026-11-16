@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fit probe_filterwarp.json: each (mode, amount) as a first-order filter with corner c (Hz) on harmonics k * F0 of notes 48 and 60. Prints c per amount and the rms error."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json, sys
 from pathlib import Path
 import numpy as np

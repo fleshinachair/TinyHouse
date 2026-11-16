@@ -128,7 +128,7 @@ Done and tested natively (all test exes pass; `scripts/zig-build.sh native`):
 Not done (resume here): step 4, the converter (`deephouse2move.py`: kOsc_Granular -> slot kind/gdens/glen/gscan/gstart/window; the MOD_DST name->index table near line 557 needs the 9 new names at indices 27..35; unsupported features as sound gaps), step 5 the 46-preset render gate. Unison is ignored in granular mode (P7). Nothing committed or deployed. The Move CPU is still unmeasured.
 
 ## 10. Status after the converter (step 4 done, 2026-11-14)
-`deephouse2move.py` carries a Granular oscillator as a sample slot in granular mode (`granular_pots`, `sample_export.granular_osc`; `python test_granular_convert.py` checks the laws):
+`deephouse2move.py` carries a Granular oscillator as a sample slot in granular mode (`granular_pots`, `sample_export.granular_osc`; `python schwung-tablor/tests/test_granular_convert.py` checks the laws):
 - the file exported as a one-region set (root = the file's baseNote, default C4), `kind = Granular`, Density / Grain Length as knob positions (127 k, stored 0 stays 0), Scan Rate,
   Start, window shape / param / skew; Pitch Track off -> fixed pitch. Macro, wheel, velocity and note routes into Density, Grain Length, Scan Rate and Start are folded in at their
   saved value (k += a x source; Scan 400 a %, Start 100 a %); LFO and spare-envelope routes use the 9 destinations (`ME_DST` 27..35); a bipolar envelope route moves the base by -a/2.

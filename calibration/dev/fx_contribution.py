@@ -11,7 +11,7 @@ renders of the same preset is the noise floor (unison phases are random) and is 
 preset has all uncarried kinds off together. Output: calibration/fx_contribution.json, resumable.
 Serum is rendered here, one process, 4 s each: the plugin renders about 1200 s, so it stops at 1100 and can be re-run.
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy
 import json
 import os
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter"))
 sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import fit_chain as C

@@ -2,11 +2,11 @@
 """Serum's Bode with Blur only: does a note's attack and release tail change?  Short saw note (hold 0.12 s) on note 48: 5 ms-hop envelope of the first 60 ms and the tail after release, node against none.
 Result (2026-11-13): Blur 99.21 alone leaves the attack inside the render's own spread (first 5 ms 5 dB lower, the unison phase varies that much) and the tail after release at -57 dB, as any Bode node does (even Blur 0, Wet 100).
 probe_bode_blur.py: level -0.04 dB.  Blur with nothing to smear is transparent (fxmap bode_idle)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
 import numpy as np
 import fx_probe as P
 import test_render_calibration as H

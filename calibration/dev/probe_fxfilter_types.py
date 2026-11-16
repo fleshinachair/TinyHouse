@@ -2,14 +2,14 @@
 """The low-pass Filter FX types' shape as Serum plays it: white noise through one Filter FX of each type (Reso and Drive unwritten), transfer in dB at
 half-octave points from 50 Hz to 12.8 kHz, at three cutoffs to see that the shape scales with the cutoff.   Output: calibration/fxfilter_type_probe.json (--hp: the high-pass types, fxfilter_type_probe_hp.json)
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import fx_probe as P
 from probe_fxfilter_drive import GRID2, tf2

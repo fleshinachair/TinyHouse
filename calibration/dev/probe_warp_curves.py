@@ -3,7 +3,7 @@
 the unwarped sine it gives out = f(in) over the whole -1..1 range (input in table units: the sine's peak is 1). The curve is then used to predict the Default Shapes saw through the
 same warp (cross-check: relative rms error).  Output: calibration/warp_curves_measured.json {mode: {"amounts": [...], "x": [...], "f": [[...]], "err": [...]}}.
 Usage: probe_warp_curves.py [mode ...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

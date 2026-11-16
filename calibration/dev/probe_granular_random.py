@@ -2,7 +2,7 @@
 """P5 of docs/GRANULAR_DESIGN.md: Serum's Granular Random* settings. One grain at a time (Density 0.001: N = 30 (0.001/1000)^(1/4) = 0.9487), Scan 0, grain length T2, and Start
 chosen so the single +0.9 click of click1.wav (at 50 ms) lies CL ms into each grain: the pulse of grain k then sits at birth_k + CL / pitch ratio (milliseconds after the grid birth),
 its height is window(age) x gain, its L / R heights are the pan. Births are on the grid k * T2 / N. Run: python calibration/dev/probe_granular_random.py [pan|pitch|offset|len|gain|dir|seed|all]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

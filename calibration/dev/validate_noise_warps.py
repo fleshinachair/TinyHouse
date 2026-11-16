@@ -3,7 +3,7 @@
 Per case: the carrier line's share (dB against the unwarped note), the total power (dB), and the power in six bands (carrier-relative: 0.5-0.9, 0.9-1.1 (without the line), 1.1-2, 2-4, 4-8, 8-16 times
 the carrier) as dB of the total.  Serum and engine side by side.
 Usage: validate_noise_warps.py [mode:amount ...]   (needs a built calibration/tablor_cli.exe)"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

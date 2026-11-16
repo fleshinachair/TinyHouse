@@ -4,7 +4,7 @@ the fundamental and of the 2nd..5th harmonics at the output, against the same si
 the level the signal reaches the stage decides how hard it is driven, so the curve is needed at several.
 Also LevelOut: the default mode at drive 50 with LevelOut 0.25 / 0.5 / 0.75 / 1.0, and Wet 50.
 Output: calibration/probe_dist_transfer.json  {"ref": {vol: amp}, "rows": [{mode, drive, vol, a_in, amps: [A1..A5]}], "levelout": [...]}  (amplitudes are sine peaks, linear)"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy
 import json
 import os
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fxmap

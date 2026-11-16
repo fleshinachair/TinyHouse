@@ -2,11 +2,11 @@
 """A macro route into an oscillator's pitch and warp knobs in Serum (the converter's static fold, deephouse2move.physical). Usage: probe_macro_osc.py pitch|warp.
 Measured: Coarse pitch 128 semitones per unit (route amount x source), the Pitch knob 25 in whole semitones, Octave 10 octaves in whole octaves, Fine 2 semitones (stops at +-1),
 a Warp knob adds amount x source on its 0..1 scale (bipolar routes: the source minus a half)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import os, sys, copy
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration")); os.chdir(ROOT)
 import numpy as np
 import test_render_calibration as H
 import probe_vfilter as V

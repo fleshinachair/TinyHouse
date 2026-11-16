@@ -234,7 +234,7 @@ def _level_law(m: dict) -> list:
     """The volume offset of calibration/level_law.json: the converter's starting level runs hot against Serum by a median of 2.7 dB (the per-preset spread cannot be predicted without Serum)."""
     global _LEVEL_LAW
     if _LEVEL_LAW is None:
-        f = Path(d2m.__file__).resolve().parent / "calibration/level_law.json"
+        f = d2m.REPO / "calibration/level_law.json"
         _LEVEL_LAW = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
     off = _LEVEL_LAW.get("offset_db")
     if not off:

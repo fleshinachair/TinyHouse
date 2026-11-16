@@ -22,7 +22,7 @@ Read [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (the rule: translate from Serum'
 4. **Ear reports where possible.** Only people with a Move can audition. Report it in the issue as: preset, what you hear, which side (Serum or Move). Treat it as data to check against a measurement.
 
 ## What you bring yourself
-- Serum 2 (the full plugin) and your own packs, for the reference renders. `serum_paths.py` finds them; the `SERUM_ROOT` and `SERUM_VST` environment variables override.
+- Serum 2 (the full plugin) and your own packs, for the reference renders. `converter/serum_paths.py` finds them; the `SERUM_ROOT` and `SERUM_VST` environment variables override.
 - Never commit Serum presets, packs, wavetables, samples or renders, nor the effect fingerprints (`calibration/fx_fingerprints*.json`): they are measurements of a pack's own effects and are rebuilt
   by `calibration/fx_fingerprint.py` and `import_pack.py`. The `.gitignore` already covers `out/`, `out_*/` and `calibration/refs/`.
 - Do not install on a shared Move without a rollback: `deploy_all.sh` makes one.

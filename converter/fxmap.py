@@ -32,7 +32,9 @@ import numpy as np
 
 import fxmetrics as M
 
-ROOT = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parent                       # the repository (the converter lives in converter/); the browser bundle has calibration/ beside the modules
+if not (REPO / "calibration").is_dir(): REPO = REPO.parent
+ROOT = REPO
 CLI = ROOT / "calibration/tablor_cli.exe"
 FINGERPRINTS = ROOT / "calibration/fx_fingerprints.json"
 TABLOR_CACHE = ROOT / "calibration/fx_tablor_cache.json"
@@ -441,7 +443,7 @@ def serum_filter_hz(norm: float) -> float:
 # at the cutoff (+2 dB above the passband at 10, +10 at 35, +13 at 50), while the stop band stays on the 6 dB/octave slope. Drive is a plain gain
 # (+3.2 dB at 10, +7.7 at 25, +14 at 50, +23.5 at 100) that does not depend on the level, whatever the type.
 FX_FILTER_DRIVE_DB = [(0, 0.0), (10, 3.2), (25, 7.7), (50, 14.0), (75, 18.8), (100, 23.5)]
-FX_FILTER_RESO_FILE = Path(__file__).resolve().parent / "calibration/fxfilter_drive_probe2.json"
+FX_FILTER_RESO_FILE = ROOT / "calibration/fxfilter_drive_probe2.json"
 FX_FILTER_RESO_MAXDB = 14.0              # the half-octave probe cannot resolve the self-oscillating peak above Reso 70; a peak that high is not asked of one band
 _reso_table: dict = {}
 
@@ -578,7 +580,7 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) ->
     return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "wet": wet, "envs": envs, "lfos": lfos, "wet_envs": wet_envs, "wet_lfos": wet_lfos, "ignored": ignored}
 
 
-FX_MODEL_FILE = Path(__file__).resolve().parent / "calibration/fxfilter_models_probe.json"
+FX_MODEL_FILE = ROOT / "calibration/fxfilter_models_probe.json"
 FX_MODEL_FIXED = {"HEQ6", "HEQ12", "LB12"}      # their shape does not scale with the cutoff (probe_fxfilter_models.py: 4-7 dB between Freq 0.4, 0.55 and 0.7; the rest scale to within 1.7 dB): read at the
 #                                                 stated Freq between the three measured cutoffs in absolute Hz, only inside 0.4 .. 0.7 and at Reso 0
 FX_MODEL_FIT_MAX_DB = 4.0                       # a model whose three-band fit is further than this (rms dB, floored at -40) from Serum's curve is not carried
@@ -937,13 +939,13 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
 # clippers (SoftClip, HardClip, Overdrive) are clean until the drive passes a threshold, the default and the asymmetric/diode modes
 # distort from the start. An unwritten mode is the default mode; an unwritten drive is 25 (its harmonics match the drive-25 curve).
 # Downsample is a sample-and-hold (the engine's Hold mode, dist_params).
-DIST_SCALES_FILE = Path(__file__).resolve().parent / "calibration/dist_scales.json"
+DIST_SCALES_FILE = ROOT / "calibration/dist_scales.json"
 DIST_DEFAULT_DRIVE = 25.0
 # The calibrated law (the engine's dist_cal; calibration/dev/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py). Serum's curve is measured at its
 # output with the probe preset's default master; the engine stage sits before its own master gain, which at that default master is 10^(master_default_db/20),
 # so a measured pre-gain G becomes G x that and an output gain K becomes K / that. Wet is a smoothstep s with the dry part (1 - s^2); LevelOut (unwritten 0.5)
 # is a gain on the sum of (LevelOut / 0.5)^2.
-DIST_CURVES_FILE = Path(__file__).resolve().parent / "calibration/dist_curves.json"
+DIST_CURVES_FILE = ROOT / "calibration/dist_curves.json"
 DIST_PROBE_GAIN = 10 ** (-2.4186 / 20)
 DOWNSAMPLE_HOLD_PER_DRIVE2 = 0.0088          # Serum's Downsample: hold length = 1 + 0.0088 Drive^2 samples (Drive in percent)
 DIST_LEVELOUT_DEFAULT = 0.5

@@ -2,11 +2,11 @@
 """Serum's Distortion filter between its ends: noise through Drive 0, PrePost 1 (after), Freq 0.5, BW 2, LPHP at 0 / 20 / 35 / 50 / 65 / 80 / 100 %: the measured transfer
 (dB on probe_fxfilter_drive.GRID2) against candidates for the morph: the crossfade (1 - t) LP + t HP of one 12 dB state-variable filter (Q = 0.5 + 0.55 BW), the same
 as a power fade, and the band-pass-style sum. Prints the measured rows and each candidate's rms error (dB).  Output: calibration/probe_dist_morph.json"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

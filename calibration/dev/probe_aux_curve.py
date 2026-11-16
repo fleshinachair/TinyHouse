@@ -3,11 +3,11 @@
 with Env2 (sustain 1) routed to the cutoff at 60 %; the aux of that route is a macro (25) at 0 / .25 / .5 / .75 / 1 with an aux curve of various shapes, or aux 21 / 22
 over several notes.  The route's effective scale s is read by inverting the same patch without an aux and with the amount scaled (level at 1 s against amount).
 Output: printed.  Finding (Lead - Other Side, 2026-11-08): the aux curve's value is 1 - y (like every curve in Serum) and it replaces the straight x (scale = x without a curve)."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import fx_probe as P

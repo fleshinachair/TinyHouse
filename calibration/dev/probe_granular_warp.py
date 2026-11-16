@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """P8: what a Warp does to the Granular oscillator (is it applied to each grain, or to the summed output?).
 python calibration/dev/probe_granular_warp.py <probe>   probes: dist, ..."""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import sys
 sys.path.insert(0, __file__.rsplit("calibration", 1)[0] + "calibration")
 import numpy as np

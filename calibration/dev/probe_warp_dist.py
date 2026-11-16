@@ -2,11 +2,11 @@
 """Serum's waveshaper warps (Dist Tube / SoftSat / TapeSat / Diode 1 / Diode 2 / StompBox) on a pure sine oscillator: the harmonics 1..12 (dB, absolute) at amounts 0..1,
 read from a held note. The warp is applied to the oscillator's waveform, so with one voice it is a static shaper of the sine; the amplitude of the fundamental against the
 unwarped sine shows its gain law and the harmonics its curve.  Output: calibration/probe_warp_dist.json {mode: {amount: [dB 1..12]}, "ref": [dB]}.  Usage: probe_warp_dist.py [mode ...]"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import copy, json, os, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "calibration"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "converter")); sys.path.insert(0, str(ROOT / "calibration"))
 os.chdir(ROOT)
 import numpy as np
 import probe_vfilter as V

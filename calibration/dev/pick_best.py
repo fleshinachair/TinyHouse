@@ -6,7 +6,7 @@ else the old one stays: a refit that is no better is noise, and noise should not
   pick_best.py OLD_DIR NEW_DIR OUT_DIR report_insample.json report_shift5.json
 Writes OUT_DIR/*.json and calibration/pick_best.json (the choice and the numbers).
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import shutil
 import sys

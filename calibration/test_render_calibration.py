@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Measure Tablor against Serum 2 and fit the mapper's scaling laws.
 
-    python test_render_calibration.py            measure, fit, choose, validate
-    python test_render_calibration.py --apply    also write the chosen table into deephouse2move.py
-    python test_render_calibration.py --stage choose     one stage: fit, choose, validate or fx
+    python calibration/test_render_calibration.py            measure, fit, choose, validate
+    python calibration/test_render_calibration.py --apply    also write the chosen table into deephouse2move.py
+    python calibration/test_render_calibration.py --stage choose     one stage: fit, choose, validate or fx
 
 The plugin goes silent after 1200 s of rendered audio per plugin instance (measured:
 render 599 of 2 s each). So each stage runs in its own process, Serum's renders of whole
@@ -39,8 +39,8 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "converter"))
 import deephouse2move as d2m                                     # noqa: E402
 
 import dawdreamer as daw                                         # noqa: E402
@@ -847,7 +847,7 @@ def summary(scores, roles=None):
 
 
 def write_cal_into_mapper(cal):
-    p = ROOT / "deephouse2move.py"
+    p = ROOT / "converter/deephouse2move.py"
     t = p.read_text(encoding="utf-8")
     def tidy(v):
         return round(v, 4) if isinstance(v, float) else [tidy(x) for x in v] if isinstance(v, list) else v

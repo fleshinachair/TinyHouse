@@ -6,7 +6,7 @@ The engine's stage (fx.h processDist: gain g = 1 + 14 a^2 into a tanh / biased t
 the same sine, and for every (mode, Serum drive) the engine drive whose 2nd and 3rd harmonics are closest (floored at -60 dB, where
 nothing is audible) is taken. Output: calibration/dist_scales.json  {mode: {"drives": [...], "pots": [...], "engine_mode": n}}
 """
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import json
 import math
 from pathlib import Path

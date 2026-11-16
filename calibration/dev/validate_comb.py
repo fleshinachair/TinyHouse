@@ -3,7 +3,7 @@
 noise (so level differences between the two noise generators drop out).  Per case: the mean power gain on each side, the rms difference of the two responses in dB (3-bin smoothed,
 200 Hz .. 12 kHz; the estimate itself is good to about 1.3 dB) and the tooth spacing read from the spectrum.
 Usage: validate_comb.py   (needs a built calibration/tablor_cli.exe)"""
-import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root and calibration/ (this script lives in calibration/dev/)
+import sys as _sys, pathlib as _pl; _sys.path[:0] = [_p for _p in (str(_pl.Path(__file__).resolve().parents[2]), str(_pl.Path(__file__).resolve().parents[2] / "converter"), str(_pl.Path(__file__).resolve().parents[1])) if _p not in _sys.path]  # the repo root, converter/ and calibration/ (this script lives in calibration/dev/)
 import os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

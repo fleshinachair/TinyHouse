@@ -1177,8 +1177,8 @@ LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/probe_lfo2.py): a de
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 # A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
 # half a beat, 4 Hz at 120 BPM, where the converter had it at 14.69 Hz). A synced LFO's stored Rate is not a frequency: it picks a note division, one per band of the Rate
-# knob. Edges and divisions (in beats) as swept on Serum at 120 BPM; with Triplets on, the top quarter of each band plays the division's 2/3 length.
-LFO_SYNC_BANDS = [(0.5, 1.25, 8.0), (1.25, 3.15, 4.0), (3.15, 5.5, 2.0), (5.5, 9.5, 1.0), (9.5, 15.8, 0.5), (15.8, 22.5, 0.25), (22.5, 1e9, 0.125)]
+# knob. Edges and divisions (in beats) as swept on Serum at 120 BPM (the 16-beat band 0.2 .. 0.45 and its lower edge near 0.16: 8.00 s periods at 0.17 .. 0.45, none measurable at 0.15 and under; PD - Depth Opens' Env-mode LFO, Rate 0.4, ran at 0.4 Hz here against Serum's 8 s); with Triplets on, the top quarter of each band plays the division's 2/3 length.
+LFO_SYNC_BANDS = [(0.16, 0.5, 16.0), (0.5, 1.25, 8.0), (1.25, 3.15, 4.0), (3.15, 5.5, 2.0), (5.5, 9.5, 1.0), (9.5, 15.8, 0.5), (15.8, 22.5, 0.25), (22.5, 1e9, 0.125)]
 # Serum's LFO Smooth (0..100) is a one-pole low-pass on the LFO's output of the same absolute time constant at any rate (calibration/probe_lfo_smooth.py, Lead - Loop's own
 # tree: tau 6-8 ms at Smooth 8-25, 10 ms at 40, 15 at 55, 28 at 70, 73-91 at 85, over 150 at 100); tau = 14 ms * s / (102 - s) follows it. The engine's pot is log, 2 ms .. 0.7 s.
 LFO_SMOOTH_TAU_MS = 14.0

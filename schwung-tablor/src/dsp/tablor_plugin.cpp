@@ -117,6 +117,10 @@ struct tablor_instance {
      * knobs' `unit`, which the host shows beside the value when a knob is touched), on the worker; is_loading says "1" until that is done. */
     std::shared_ptr<const std::string> macn_pub { std::make_shared<std::string>() };
     std::atomic<int> pub_pending { 0 };
+    /* Worker jobs that rebuild chain_params (a wavetable pack change, a rescan, a demo pack, a restored demo). is_loading says "1" while one is owed, because the
+     * host reads the contract again when it falls. It does NOT say "1" for sample and wavetable loads: they change no contract, and each preset landing in a fast
+     * scroll used to raise it and make the host read and compare chain_params + ui_hierarchy (60 KB) again, over and over while the knob turned. */
+    std::atomic<int> contract_jobs { 0 };
 
     /* ---- Turnable wavetable selection -------------------------------
      * The filepath control (wt1_table/wt2_table) is OPAQUE to the host:
@@ -1291,6 +1295,12 @@ static void build_state_blob(tablor_instance *inst)
 
 /* The macro names changed (a preset loaded, or the sound reset): publish chain_params again so the knobs' units follow. On the worker; the host
  * re-reads the contract a moment after a preset change and is_loading holds it off until this is done. */
+static void post_contract_job(tablor_instance *inst, std::function<void()> f)
+{
+    inst->contract_jobs.fetch_add(1);
+    inst->loader.post([inst, f] { f(); inst->contract_jobs.fetch_sub(1); });
+}
+
 static void republish_macro_names(tablor_instance *inst)
 {
     if (!kMacroUnits) return;                         /* nothing in chain_params depends on the names */
@@ -1430,7 +1440,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
         auto w = std::make_shared<tablor_instance::WantDemo>();
         w->pack = dm_pack; w->part = dm_part; w->on = dm_on;
         std::atomic_store(&inst->want_demo, std::shared_ptr<const tablor_instance::WantDemo>(w));
-        inst->loader.post([inst] { if (inst->loader.stopping()) return; if (apply_want_demo(inst)) tb_publish_selection(inst); });
+        post_contract_job(inst, [inst] { if (inst->loader.stopping()) return; if (apply_want_demo(inst)) tb_publish_selection(inst); });
     }
 }
 
@@ -1611,7 +1621,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     /* The remote UI's Import has written presets and wavetables into the store: look again. The scan and the republish run on the worker
      * (the same ones the load does), so nothing here touches a folder; the preset list the page reads is replaced when they finish. */
     if (!strcmp(k, "rescan")) {
-        inst->loader.post([inst] {
+        post_contract_job(inst, [inst] {
             if (inst->loader.stopping()) return;
             tb::PartJoin::joinAll("/data/UserData/UserLibrary/Samples");     /* big sample sets the Import sent in pieces */
             inst->scanner.scan();
@@ -1636,7 +1646,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         const int n = std::min(std::max(atoi(val), 0), (int) dl->packs.size() - 1);
         inst->demo_pack = n;
         inst->demo_part = 0;
-        inst->loader.post([inst] { if (inst->loader.stopping()) return; load_demo(inst); tb_publish_selection(inst); });
+        post_contract_job(inst, [inst] { if (inst->loader.stopping()) return; load_demo(inst); tb_publish_selection(inst); });
         return;
     }
     if (!strcmp(k, "demo_part")) {
@@ -1679,7 +1689,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
          * wants two agreeing reads (CONTRACT_SETTLE_MS), and is_loading below
          * holds it off meanwhile, so the snapshot is always long since
          * published by the time anyone reads it. */
-        inst->loader.post([inst] { tb_publish_selection(inst); });
+        post_contract_job(inst, [inst] { tb_publish_selection(inst); });
         return;
     }
     if (tb_is_wt_key(k, "_select")) {
@@ -1802,7 +1812,7 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "is_loading"))
         return write_str(buf, buf_len,
                          (!inst->ready.load(std::memory_order_relaxed) ||
-                          inst->loader.busy() || inst->pub_pending.load() > 0) ? "1" : "0");
+                          inst->contract_jobs.load() > 0 || inst->pub_pending.load() > 0) ? "1" : "0");
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */

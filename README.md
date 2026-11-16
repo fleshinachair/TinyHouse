@@ -6,13 +6,12 @@ TinyHouse is a sound-generator module for [Schwung](https://github.com/charlesve
 TinyHouse converts them, and they play on the Move as native patches: polyphonic, with unison, filters, modulation, eight macros, a sample and granular
 oscillator, and a full effects rack.
 
-It is a re-creation, not Serum. Every setting is translated from what Serum does, and the filters, effects and levels were measured against the real plugin,
-then tuned by ear and by computer. It is a different engine on a small ARM box: **expect presets to sound close, and a little different.** Some features are
+TinyHouse is its own engine on a small ARM box, not a copy of Serum: **expect presets to sound close, and a little different.** Some features are
 not built yet (see [What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound.
 
-**This is experimental.** Importing in the browser is the easy route, but it has no copy of Serum to measure against, so it sets loudness, reverb and width
-from general rules. If you have Serum 2 on Windows and want presets as close as possible to the original, use the
-[Python scripts](#more-accurate-conversion-with-the-python-scripts), which render each preset through the real plugin and match it.
+**This is experimental.** Importing in the browser is the easy route; it sets loudness, reverb and width from general rules. If you have Serum 2 on Windows and
+want presets to land closer to what you hear in the plugin, use the [Python scripts](#more-accurate-conversion-with-the-python-scripts), which can compare
+each preset against your own copy of it.
 
 ![The TinyHouse remote UI: tabs along the top, three wavetable oscillators on the Osc tab](docs/img/remote-ui.png)
 
@@ -88,13 +87,13 @@ Each keeps its own travel, so one macro can open a filter a little, bring a reve
 
 ## The effects chain
 
-Each stage was measured against Serum with controlled test patches, so the effects follow Serum's own curves:
+The effects are laid out as a rack in the order a Serum 2 preset uses them:
 
 ![The FX tab is a rack like Serum's: chips along the top switch an effect on or off, and the effects that are on are stacked in signal order](docs/img/remote-fx.png)
 
-| Stage | Serum effect | |
+| Stage | Serum 2 effect it stands in for | |
 |---|---|---|
-| Distortion | Distortion | tanh, biased, hard clip and sine curves, with Serum's wet law |
+| Distortion | Distortion | tanh, biased, hard clip and sine curves |
 | Filter FX | Filter | static or following the filter envelope; low-pass, high-pass, band, notch |
 | Compressor | Comp | single band and three-band multiband |
 | Mod FX | Chorus, Flanger, Phaser | real modulated stages |
@@ -130,11 +129,11 @@ A preset using something in the second list still imports, with that part left o
 
 ## More accurate conversion with the Python scripts
 
-The Python importer does the same conversion but also **plays each preset through the real Serum 2 plugin** and measures it. That lets it:
+The Python importer does the same conversion but can also **play each preset through your own installed copy of Serum 2** and compare. That lets it:
 
-- **Match the loudness** of every preset to Serum's, instead of using one general offset.
-- **Match the reverb and width** to Serum's own.
-- **Check the result**: it compares octave-band levels with the Serum render and leaves out a preset that ends up too far from it, with the reason in a
+- **Set the loudness** of every preset from a measurement, instead of using one general offset.
+- **Set the reverb and width** from a measurement.
+- **Check the result**: it compares octave-band levels with that render and leaves out a preset that ends up too far from it, with the reason in a
   `skipped_<bank>.md` report. It is stricter than the browser: a preset that uses something unsupported is dropped, not imported with a part missing.
 
 You need Serum 2 (the VST3 plugin) installed on Windows, Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine). The developer workbench is in

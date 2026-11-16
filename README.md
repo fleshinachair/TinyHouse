@@ -22,7 +22,7 @@ out as close as possible to the original, use the Python scripts instead: they r
 
 1. **Bring a Serum 2 preset.** Drop a `.SerumPreset` (or a whole pack) on the remote UI's Import dialog. It is converted in your browser and stored on the Move.
 2. **Fine-tune it on the remote UI.** Everything is a live control, in both directions with the Move: wavetables and their positions, unison, the filter curve, envelopes, the whole effects rack. Change a knob and you hear it on the Move straight away.
-3. **Put the eight controls you care about on macros.** Right-click any knob, on any tab, and choose a macro (see [Macros you set yourself](#macros-you-set-yourself)). Name them if you like. The Move shows them as its eight macro knobs.
+3. **Put the eight controls you care about on macros.** Right-click any knob, on any tab, and choose a macro (see [Macros you set yourself](#macros-you-set-yourself)). Name them if you like. **One macro can move as many controls as you like**: add a cutoff, a reverb mix and a wavetable position to the same macro and one knob sweeps all three. The Move shows them as its eight macro knobs.
 4. **Jam on the Move.** Pick the sound, play, and work the eight macros and the performance pages. No computer is needed from here; the sound is saved with the slot and with your set.
 
 ## Getting started
@@ -69,7 +69,7 @@ importer has no Serum to compare against), so set **Volume** and the effects to 
 |---|---|
 | **Main** | filter freq, res and envelope amount, decay, sub, width, space, **Unison Cap** |
 | **Tone** | the three wavetable positions (an oscillator that is off shows an empty slot), attack, release, drive, high shelf, volume |
-| **Macros** | the preset's eight Serum macros, as dials. A macro the preset does not use is shown as an empty slot. Touch a knob and the top bar shows its name and value |
+| **Macros** | the preset's eight Serum macros, as dials. A macro the preset does not use is shown as an empty slot. On the Move's Macros page each cell shows the macro's name over a bar for its value |
 | **Effects**, **Mod FX** | each effect on or off, with its main controls |
 | **Voice** | voice mode, **Voices**, **Unison Cap**, glide, glide mode, legato, pitch-bend range, volume |
 | **Demo** | plays a MIDI part from a folder on the Move so you can audition a bank: it waits for Play and joins on the next bar |
@@ -87,6 +87,8 @@ A preset's macros come across live: turning a macro moves the same parameters Se
 
 Any preset can have macros, not only the ones that came with a Serum preset. On the remote UI, **right-click a knob** (on any tab) and a small menu lists the eight
 macros. Pick one and the knob is now on that macro: it shows a small **M** tag, and turning the macro, on the Move or on the page, moves it.
+**You can add as many knobs to one macro as you want**: right-click another knob and pick the same macro again. Each knob keeps its own travel, so one macro can open a
+filter a little, bring a reverb up a long way and pull a delay down, all at once.
 
 ![Right-clicking a knob: the menu lists the eight macros, each with its name and an add or remove entry](docs/img/remote-macro-menu.png)
 

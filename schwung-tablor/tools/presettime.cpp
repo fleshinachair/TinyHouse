@@ -44,14 +44,22 @@ int main(int argc, char **argv)
         const double gap = argc > 4 ? atof(argv[4]) : 40;
         static int16_t blk[256];
         const double t0 = now_ms();
+        long loadTicks = 0, allTicks = 0, run = 0, longest = 0;
         for (int i = 0; i < n; i++) {
             char idx[16]; snprintf(idx, sizeof idx, "%d", i);
             api->set_param(inst, "preset", idx);
             char nm0[128] = {};
             api->get_param(inst, "preset_name", nm0, sizeof nm0);          /* the name must already be this preset's */
             if (i % 64 == 0) printf("  turn %d -> name read back: %s\n", i, nm0);
-            for (double w = 0; w < gap; w += 2.9) { api->render_block(inst, blk, 128); struct timespec g = { 0, 2900000 }; nanosleep(&g, nullptr); }
+            for (double w = 0; w < gap; w += 2.9) {
+                api->render_block(inst, blk, 128);
+                api->get_param(inst, "is_loading", b, sizeof b);                /* the host holds the name back while this reads 1 */
+                loadTicks += b[0] == '1'; allTicks++;
+                if (b[0] == '1') { if (++run > longest) longest = run; } else run = 0;
+                struct timespec g = { 0, 2900000 }; nanosleep(&g, nullptr);
+            }
         }
+        printf("  during the spin is_loading read 1 for %.0f%% of the time, the longest stretch %.0f ms\n", 100.0 * loadTicks / (allTicks ? allTicks : 1), longest * 2.9);
         const double tspin = now_ms() - t0, tlast = now_ms();
         for (;;) {
             api->render_block(inst, blk, 128);
@@ -72,12 +80,14 @@ int main(int argc, char **argv)
     if (argc > 3 && !strcmp(argv[3], "contract")) {
         static char big[65536], prev[65536];
         static int16_t blk[256];
-        int changed = 0; size_t firstDiff = 0, lastLen = 0;
+        int changed = 0; size_t firstDiff = 0, lastLen = 0; double cmsSum = 0, cmsMax = 0;
         for (int i = 0; i < n; i++) {
             char idx[16]; snprintf(idx, sizeof idx, "%d", i);
             api->set_param(inst, "preset", idx);
             for (int k = 0; k < 400; k++) { api->render_block(inst, blk, 128); api->get_param(inst, "is_loading", b, sizeof b); if (b[0] == '0' && k > 2) break; struct timespec g = { 0, 1000000 }; nanosleep(&g, nullptr); }
+            const double c0 = now_ms();
             api->get_param(inst, "chain_params", big, sizeof big);
+            const double cms = now_ms() - c0; cmsSum += cms; if (cms > cmsMax) cmsMax = cms;
             if (i && strcmp(big, prev)) {
                 changed++;
                 size_t d = 0; while (big[d] && big[d] == prev[d]) d++;
@@ -86,6 +96,7 @@ int main(int argc, char **argv)
             memcpy(prev, big, sizeof prev); lastLen = strlen(big); (void) firstDiff;
         }
         printf("chain_params: %d of %d presets changed it from the one before (%zu bytes)\n", changed, n, lastLen);
+        printf("chain_params read: mean %.3f ms, max %.3f ms\n", cmsSum / n, cmsMax);
         api->destroy_instance(inst);
         return 0;
     }

@@ -7,6 +7,7 @@
  * never touches the filesystem, never logs.
  */
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -81,6 +82,8 @@ struct tablor_instance {
     std::atomic<int> pend_idx { -1 };
     std::atomic<long long> pend_due { 0 };
     int settle_ms = 150;                  /* TB_PRESET_SETTLE_MS overrides it; 0 applies at once (the test tools rely on that) */
+    bool diag = false;                    /* the host's debug_log_on flag file existed at create: log the big reads and every apply (see diag_log) */
+    std::atomic<unsigned> cp_hash { 0 };  /* of the last chain_params served, to see whether the contract moves while the host is browsing */
     /* The "pk" a restored state named (see preset_key), held until the worker has scanned the store and can find it. */
     std::shared_ptr<const std::string> want_pk;
 
@@ -1041,9 +1044,12 @@ static void tb_publish_selection(tablor_instance *inst)
         }
         hand += "]}";
         out += ",{\"key\":\"demo_list\",\"name\":\"Demo List\",\"type\":\"string\",\"access\":\"read\"}"
-               ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}"
-               ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
-               ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}";
+               ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}";
+        /* The Macros page cells read macro_names on every redraw, and the Tone and Grain pages read the shapes below: keys the Move reads belong
+         * inside the host's 256-key cache (a key past it makes the host parse this whole list again, ~20 ms, on every read: the Move UI ran at
+         * 5-10 fps while the Macros page was open, and a preset scroll hung for over a minute). */
+        hand += ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
+                ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}";
     }
 
     /* The shape digests are DECLARED here so they reach a browser at all:
@@ -1061,7 +1067,7 @@ static void tb_publish_selection(tablor_instance *inst)
      *
      * They remain on no ui_hierarchy page deliberately: they are a data
      * channel for the web panel, not a control. */
-    out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
+    hand += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt3_shape\",\"name\":\"WT3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}"
@@ -1434,12 +1440,35 @@ static long long steady_ms()
     return (long long) std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+/* Diagnostic lines in the host's debug.log, only when /data/UserData/schwung/debug_log_on existed when the slot loaded. */
+static long long steady_us()
+{
+    return (long long) std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+static void diag_log(const tablor_instance *inst, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void diag_log(const tablor_instance *inst, const char *fmt, ...)
+{
+    if (!inst->diag || !g_host || !g_host->log) return;
+    char msg[200];
+    int n = snprintf(msg, sizeof msg, TB_MODULE_ID ": ");
+    va_list ap; va_start(ap, fmt); vsnprintf(msg + n, sizeof msg - (size_t) n, fmt, ap); va_end(ap);
+    g_host->log(msg);
+}
+static unsigned fnv_hash(const char *s)
+{
+    unsigned h = 2166136261u;
+    for (; *s; s++) h = (h ^ (unsigned char) *s) * 16777619u;
+    return h;
+}
+
 static void apply_pending(tablor_instance *inst)
 {
     const int pi = inst->pend_idx.exchange(-1);
     if (pi < 0) return;
     auto ps = inst->storeList();
+    const long long t0 = inst->diag ? steady_us() : 0;
     if (pi < (int) ps->items.size()) apply_state_blob(inst, ps->items[(size_t) pi].blob.c_str());
+    if (inst->diag) diag_log(inst, "applied preset %d in %lld us (%lld ms after it was due)", pi, steady_us() - t0, steady_ms() - inst->pend_due.load());
 }
 
 static void choose_store_preset(tablor_instance *inst, int i)
@@ -1712,9 +1741,12 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
      * filesystem here jams the param bus. */
     if (!strcmp(key, "chain_params")) {
         auto snap = inst->selection();
-        return write_str(buf, buf_len,
-                         snap->chain_params.empty() ? tb_chain_params_json
-                                                    : snap->chain_params.c_str());
+        const char *cp = snap->chain_params.empty() ? tb_chain_params_json : snap->chain_params.c_str();
+        if (inst->diag) {
+            const unsigned h = fnv_hash(cp), was = inst->cp_hash.exchange(h);
+            diag_log(inst, "chain_params read: %d bytes, hash %08x%s%s", (int) strlen(cp), h, was && was != h ? " CHANGED" : "", snap->chain_params.empty() ? " (static, not yet published)" : "");
+        }
+        return write_str(buf, buf_len, cp);
     }
 
     /* Turnable wavetable selection. All three are answered from memory --
@@ -1774,8 +1806,10 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     /* Schwung 0.12+: the stock hierarchy editor (viz graphics, preset
      * browser, file browser, keyboard) IS Tablor's on-device UI. */
-    if (!strcmp(key, "ui_hierarchy"))
+    if (!strcmp(key, "ui_hierarchy")) {
+        diag_log(inst, "ui_hierarchy read: %d bytes", (int) strlen(tb_ui_hierarchy_json));
         return write_str(buf, buf_len, tb_ui_hierarchy_json);
+    }
 
     /* Shadow UI preset browser convention: preset_count / preset /
      * preset_name (the "No presets" screen reads exactly these). They are the .json presets in
@@ -1851,8 +1885,10 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
                          inst->ready.load(std::memory_order_relaxed) ? "1" : "0");
 
     if (!strcmp(key, "state")) {
+        const long long t0 = inst->diag ? steady_us() : 0;
         apply_pending(inst);                            /* what is saved is the sound that was chosen */
         build_state_blob(inst);
+        if (inst->diag) diag_log(inst, "state read: %d bytes in %lld us", (int) strlen(inst->state_buf), steady_us() - t0);
         return write_str(buf, buf_len, inst->state_buf);
     }
 
@@ -1932,6 +1968,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
     auto *inst = new (std::nothrow) tablor_instance();
     if (!inst) return nullptr;
     if (const char *e = getenv("TB_PRESET_SETTLE_MS")) inst->settle_ms = std::max(0, atoi(e));
+    { struct stat sb; inst->diag = stat("/data/UserData/schwung/debug_log_on", &sb) == 0; }
 
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);

@@ -316,8 +316,9 @@ def branch_of(nodes: list[dict]) -> dict[int, tuple[int, int]]:
     return out
 
 
-def eq_bands(nodes: list[dict], which: str | None = None) -> list[dict]:
-    """Every audible band of every master-signal rack-0 EQ, from Serum's stored values; with which = "mid" or "side", of the EQs in that branch of a SplitMS instead; "band": of the EQs in the Split branch the engine's band stage carries (tagged _bandeq)."""
+def eq_bands(nodes: list[dict], which: str | None = None, skip: frozenset = frozenset()) -> list[dict]:
+    """Every audible band of every master-signal rack-0 EQ, from Serum's stored values; with which = "mid" or "side", of the EQs in that branch of a SplitMS instead; "band": of the EQs in the Split branch the engine's band stage carries (tagged _bandeq).
+    skip: (node, band) pairs left out (the ones the engine carries as modulated bands: eq_mod_plan)."""
     out = []
     inside = branch_nodes(nodes)
     ms = ms_branches(nodes)
@@ -326,6 +327,8 @@ def eq_bands(nodes: list[dict], which: str | None = None) -> list[dict]:
             continue
         pp = plain(n)
         for b in (1, 2):
+            if (i, b) in skip:
+                continue
             d = EQ_DEFAULT[b]
             ty = int(round(pp.get(f"kParamType{b}", d["type"])))
             kind = BAND_KIND.get((b, ty))
@@ -345,6 +348,70 @@ def eq_bands(nodes: list[dict], which: str | None = None) -> list[dict]:
             elif abs(gain) < 0.25:
                 continue
             out.append({"kind": kind, "fc": fc, "gain": gain, "q": q})
+    return out
+
+
+EQ_MOD_PARAMS = ("kParamFreq1", "kParamGain1", "kParamFreq2", "kParamGain2")
+
+
+def eq_mod_plan(nodes: list[dict], mods: list, macros: list, rack: int) -> dict:
+    """The routes from an envelope or LFO to a master-rack EQ band's Freq or Gain that the engine carries, and where.
+    {"carried": the routes, "why": what was left out, "slots": {(node, band): engine EQ slot 1..4}, "dest": {(node, param): the engine destination's name}}.
+    Serum adds depth x source to the knob (Gain spans 48 dB, Freq is a log scale: the folded macro routes in fold_macro_knobs are the same law); the engine's EQ bands (fx.h setEqMod) take
+    the same offsets. A routed band is pinned to a slot of its own (the last ones) and the other bands are fitted into the slots that remain; only the main rack's EQs outside any Split
+    branch, and at most four routed bands."""
+    out = {"carried": [], "why": [], "slots": {}, "dest": {}}
+    if rack != 0:
+        return out
+    inside = branch_nodes(nodes)
+    want = {}
+    for m in mods:
+        if m.get("dest_type") != "FXEQ" or m.get("dest_param") not in EQ_MOD_PARAMS + ("kParamReso1", "kParamReso2") or foldable_source(m, macros):
+            continue
+        did, param, src = m.get("dest_id"), m["dest_param"], m.get("source")
+        if not isinstance(did, int) or did // 100 != rack:
+            continue
+        i = did % 100
+        n = nodes[i] if 0 <= i < len(nodes) else None
+        if n is None or kind_of(n) != "EQ" or not enabled(n):
+            continue
+        b = int(param[-1])
+        pp = plain(n)
+        d = EQ_DEFAULT[b]
+        kind = BAND_KIND.get((b, int(round(pp.get(f"kParamType{b}", d["type"])))))
+        if kind is None or (kind in ("hp", "lp") and param.startswith("kParamGain")):
+            continue                                            # an off band, or a cut's Gain: the route changes nothing
+        if param.startswith("kParamReso"):
+            out["why"].append("EQ Reso moved by an envelope/LFO (the band's width is not modulated)")
+        elif not isinstance(src, int) or not (6 <= src <= 15 or (2 <= src <= 5 and not m.get("bipolar"))):
+            out["why"].append("EQ band moved by a source the engine has no route for (the sweep is not carried)")
+        elif i in inside:
+            out["why"].append("EQ band moved by an envelope/LFO in a Split branch (the sweep is not carried)")
+        else:
+            want.setdefault((i, b), []).append(m)
+    pins = sorted(want)
+    if len(pins) > EQ_SLOTS:
+        out["why"].append(f"EQ: {len(pins)} bands moved by an envelope/LFO, the engine has four (the last {len(pins) - EQ_SLOTS} are not carried)")
+        pins = pins[:EQ_SLOTS]
+    first = EQ_SLOTS - len(pins) + 1
+    for k, key in enumerate(pins):
+        out["slots"][key] = first + k
+        for m in want[key]:
+            out["carried"].append(m)
+            out["dest"][(key[0], m["dest_param"])] = f"EQ{first + k} {'Freq' if m['dest_param'].startswith('kParamFreq') else 'Gain'}"
+    return out
+
+
+def eq_pinned_bands(nodes: list[dict], slots: dict) -> list[dict]:
+    """The stored bands (from the folded nodes) of the pinned (node, band) pairs, in slot order, audible or not: the engine moves them."""
+    out = []
+    for (i, b), _ in sorted(slots.items(), key=lambda kv: kv[1]):
+        pp = plain(nodes[i])
+        d = EQ_DEFAULT[b]
+        kind = BAND_KIND[(b, int(round(pp.get(f"kParamType{b}", d["type"]))))]
+        fc = float(pp.get(f"kParamFreq{b}", d["freq"]))
+        gain = 0.0 if kind in ("hp", "lp") else float(pp.get(f"kParamGain{b}", 0.0))
+        out.append({"kind": kind, "fc": fc, "gain": gain, "q": q_from_reso(kind, float(pp.get(f"kParamReso{b}", d["reso"])))})
     return out
 
 
@@ -1468,7 +1535,9 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
     P = {}
     for n in range(1, EQ_SLOTS + 1):
         P.update({f"eq{n}_type": EQ_OFF, f"eq{n}_freq": 64, f"eq{n}_gain": 64, f"eq{n}_q": 64})
-    bands = eq_bands(nodes)
+    c = ctx or {}
+    plan = eq_mod_plan(c.get("rack_nodes", nodes), c.get("mods", []), c.get("macros", []), c.get("rack", 0))
+    bands = eq_bands(nodes, skip=frozenset(plan["slots"]))
     handled: set = set()
     fbands, fwhy = filter_bands(nodes, ctx, handled)
     ubands, uwhy_f = utils_filter_bands(nodes, ctx, handled)
@@ -1510,17 +1579,25 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
             P[f"eq{tag}{n}_gain"] = pot_gain(b["gain"])
             P[f"eq{tag}{n}_q"] = int(round(min(max(reso_from_q(b["kind"], b["q"]) * 1.27, 0), 127)))
         notes.append(f"EQ: {len(sb)} band(s) in the SplitMS {side} branch carried in the mid/side domain" + (f" ({len(sb)} fitted to {len(sout)}, rms {serr:.1f} dB)" if len(sb) > len(sout) else ""))
-    if not bands:
+    notes += sorted(set(plan["why"]))
+    pinned = eq_pinned_bands(nodes, plan["slots"])
+    if pinned:
+        notes.append(f"EQ: {len(pinned)} band(s) moved by an envelope/LFO carried as engine EQ band(s) {', '.join(str(plan['slots'][k]) for k in sorted(plan['slots'], key=plan['slots'].get))} with their routes")
+    if not bands and not pinned:
         return P, notes, info
-    out, err = reduce_bands(bands)
-    info.update(eq_bands_out=len(out), eq_rms_db=round(err, 2))
-    for n, b in enumerate(out, 1):
+    free = EQ_SLOTS - len(pinned)
+    out, err = reduce_bands(bands, free) if bands else ([], 0.0)
+    if len(out) > free:                                  # cuts are kept past the room (reduce_bands): the routed bands come first
+        out = out[:free]
+    info.update(eq_bands_out=len(out) + len(pinned), eq_rms_db=round(err, 2), eq_pinned=len(pinned))
+    placed = list(enumerate(out, 1)) + [(plan["slots"][k], b) for k, b in zip(sorted(plan["slots"], key=plan["slots"].get), pinned)]          # the routed bands sit in the slots the routes name
+    for n, b in placed:
         P[f"eq{n}_type"] = KIND_ID[b["kind"]]
         P[f"eq{n}_freq"] = pot_freq(b["fc"])
         P[f"eq{n}_gain"] = pot_gain(b["gain"])
         P[f"eq{n}_q"] = int(round(min(max(reso_from_q(b["kind"], b["q"]) * 1.27, 0), 127)))
-    if len(bands) > len(out):
-        notes.append(f"EQ: {len(bands)} bands fitted to {len(out)} (rms {err:.1f} dB)")
+    if len(bands) > len(out) - len(pinned):
+        notes.append(f"EQ: {len(bands)} bands fitted to {len(out) - len(pinned)} (rms {err:.1f} dB)")
     return P, notes, info
 
 

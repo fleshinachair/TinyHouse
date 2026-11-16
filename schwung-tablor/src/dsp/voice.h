@@ -79,6 +79,7 @@ enum ModDst {
     MD_FXF_WET,                  /* the effects block's Filter FX Wet, as a fraction of its 0..100 % range: read by the engine from the newest voice (fxfWetMod) */
     MD_WT1_PITCH, MD_WT2_PITCH, MD_WT3_PITCH,     /* an oscillator's pitch in semitones, 48 per unit of the route (a pitch envelope: a kick's drop is 24 st, past the +-12 st of the Tune destinations) */
     MD_WT1_WARP, MD_WT2_WARP, MD_WT3_WARP,     /* an oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob 0..1, added to wtN_xa), moved by an LFO / envelope route */
+    MD_EQ1_FREQ, MD_EQ1_GAIN, MD_EQ2_FREQ, MD_EQ2_GAIN, MD_EQ3_FREQ, MD_EQ3_GAIN, MD_EQ4_FREQ, MD_EQ4_GAIN,     /* the master EQ's band Freq (a fraction of the log scale) and Gain (a fraction of 48 dB): read by the engine from the newest voice (eqMod) */
     MD_COUNT
 };
 
@@ -164,6 +165,7 @@ public:
     float distWetMod() const { return modOff[MD_DIST_WET]; }            /* LFO / spare-envelope routes to the Distortion's Wet */
     float compWetMod() const { return modOff[MD_COMP_WET]; }            /* LFO / spare-envelope routes to the Comp's Wet */
     float utilOutMod(int rack) const { return modOff[MD_UTIL_OUT + rack]; }   /* rack 0 main, 1 and 2 the buses: the Level Out knob's offset */
+    float eqMod(int i) const { return modOff[MD_EQ1_FREQ + i]; }          /* 0..7: band 1 Freq, band 1 Gain, band 2 Freq ... */
     float fxfWetMod() const { return modOff[MD_FXF_WET]; }              /* LFO / spare-envelope routes to the Filter FX's Wet */
     float fxfCutoffMod() const { return modOff[MD_FXF_FREQ]; }          /* LFO / spare-envelope routes to the Filter FX cutoff, as a fraction of the filter's width */
     float filterEnvelope() const { return filterADSR.getOutput(); }       /* the Filter FX in the effects block follows it */

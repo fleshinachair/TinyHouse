@@ -390,7 +390,9 @@ MOD_DST = ["None",
            # The Filter FX's Wet knob (a fraction of 0..100 %), moved by an LFO / envelope route.
            "FX Filter Wet", "WT1 Pitch", "WT2 Pitch", "WT3 Pitch",
            # An oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob, 0..1), moved by an LFO / envelope route.
-           "WT1 Warp", "WT2 Warp", "WT3 Warp"]
+           "WT1 Warp", "WT2 Warp", "WT3 Warp",
+           # The master EQ bands' Freq and Gain knobs, moved by an LFO / envelope route (fx.h setEqMod).
+           "EQ1 Freq", "EQ1 Gain", "EQ2 Freq", "EQ2 Gain", "EQ3 Freq", "EQ3 Gain", "EQ4 Freq", "EQ4 Gain"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,

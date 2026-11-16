@@ -296,6 +296,7 @@ private:
     float widthCur = 1.0f, monoSeen = -1.0f;
     float busWidthCur[2] = {1.0f, 1.0f};              /* a bus rack's own Utils width (the "bN.mwidth" key), smoothed */
     float utilOutCur[3] = {1.0f, 1.0f, 1.0f};        /* the gain a route on a rack's ending Utils Level Out has put on it (main, bus 1, bus 2), ramped across each block */
+    float eqModNow[8] = {};                          /* the master EQ's route offsets, read from the newest voice once per block (the last ones stay while no voice sounds) */
     float utilOutMod[3] = {0.0f, 0.0f, 0.0f};        /* the routes' offsets on that knob, read from the newest voice once per block */
     bool  monoActive = false;
 

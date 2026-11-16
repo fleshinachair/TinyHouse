@@ -499,6 +499,7 @@ public:
             }
         }
         bool eqAny = false;
+        for (float &x : eqModSeen) x = 1e9f;
         for (int b = 0; b < 4; b++) {
             eqOn[b] = s.band[b].type != EQ_OFF;
             if (eqOn[b]) {
@@ -526,6 +527,24 @@ public:
         baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.delay2Mix > 0.0f || s.revMix > 0.0f ||
                     wideCur > 0.0f || dly[0].wetCur > 0.0f || dly[1].wetCur > 0.0f || revWetCur > 0.0f || wideRan || dly[0].ran || dly[1].ran || revRan || mod.active() || hyper.active();
         anyActive = baseActive || xfOn;
+    }
+
+    /* Routes from an envelope or LFO to the master EQ's bands. Serum's Gain knob spans 48 dB and a route adds 48 dB x (depth x source) to it; the Freq knob is a log scale from
+     * 21.5 Hz to 20 kHz, so a route adds that fraction of the span (ln 928.8) to the log frequency (calibration/dev/probe_fx_macro.py eq: +10 % = +0.99 octave). m holds a
+     * frequency offset then a gain offset for each of the four bands (the knob fractions the voice's routes sum to). Coefficients are redone only for a band whose offsets moved. */
+    void setEqMod(const float *m)
+    {
+        for (int b = 0; b < 4; b++) {
+            if (!eqOn[b]) continue;
+            const float f = m[b * 2], g = m[b * 2 + 1];
+            if (f == eqModSeen[b * 2] && g == eqModSeen[b * 2 + 1]) continue;
+            eqModSeen[b * 2] = f; eqModSeen[b * 2 + 1] = g;
+            const auto &bd = st.band[b];
+            const bool cut = bd.type == EQ_HIPASS || bd.type == EQ_LOPASS;
+            const float hz = std::min(std::max(bd.hz * std::exp(f * 6.8342f), 10.0f), 20000.0f);
+            const float gain = cut ? 0.0f : std::min(std::max(bd.gainDb + g * 48.0f, -24.0f), 24.0f);
+            eq[b].c.set(bd.type, hz, gain, bd.q, sr);
+        }
     }
 
     /* The Filter FX: a filter after the distortion, its cutoff set by the engine each block (it follows the filter envelope).
@@ -1076,6 +1095,7 @@ private:
 
     StereoBiquad eq[4];
     bool eqOn[4] = { false, false, false, false };
+    float eqModSeen[8] = { 1e9f, 1e9f, 1e9f, 1e9f, 1e9f, 1e9f, 1e9f, 1e9f };         /* the offsets setEqMod last applied (1e9: the settings were just set, redo them) */
     StereoBiquad msEq[2][4];
     bool msOn[2][4] = {};
     bool msAny = false;

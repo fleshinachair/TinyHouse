@@ -599,7 +599,8 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
           "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
-          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45, "WT1 Warp": 46, "WT2 Warp": 47, "WT3 Warp": 48}
+          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45, "WT1 Warp": 46, "WT2 Warp": 47, "WT3 Warp": 48,
+          "EQ1 Freq": 49, "EQ1 Gain": 50, "EQ2 Freq": 51, "EQ2 Gain": 52, "EQ3 Freq": 53, "EQ3 Gain": 54, "EQ4 Freq": 55, "EQ4 Gain": 56}
 PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/dev/probe_macro_osc.py, probe_lfo_pitch.py)
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
@@ -1375,6 +1376,7 @@ def lfo_shape_pots(l: dict) -> list:
 
 def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list, gslot: dict | None = None, sslot: dict | None = None) -> list:
     """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried. gslot: Serum id of a carried Granular oscillator -> sample slot. sslot: Serum id of every carried Sample / Granular oscillator -> sample slot."""
+    eq_dest = fxmap.eq_mod_plan(ph.get("fx_nodes", []), ph["mods"], ph["macros"], 0)["dest"]
     def dest(key):
         slot = slot_of.get(key[2])
         if key[:2] in GRAN_ROUTE_KEYS and gslot and key[2] in gslot:        # a Granular oscillator's Density / Grain Length / Scan Rate: whole-knob depth (a route of a adds a to the knob; Scan 4a x 100 %, the engine's 400 x offset)
@@ -1387,6 +1389,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return "Dist Wet", 1.0
         if key[0] == "FXUtils" and key[1] == "kParamLevelOut":            # the Level Out knob of the Utils that ends a rack (fxmap.util_out_plan): the knob moves by 1.0 x the depth
             return ("Util Out", "Bus1 Out", "Bus2 Out")[key[2]], 1.0
+        if key[0] == "FXEQ" and (key[2], key[1]) in eq_dest:                # a master EQ band's Freq (a fraction of the log scale) or Gain (of 48 dB): the knob moves by 1.0 x the depth (fxmap.eq_mod_plan)
+            return eq_dest[(key[2], key[1])], 1.0
         if key[0] == "FXComp" and key[1] == "kParamWet":                  # the effects block's Comp Wet (fxmap.comp_dynamic): the parallel mix, 1.0 x the depth
             return "Comp Wet", 1.0
         if key[0] == "VoiceFilter" and key[1] == "kParamFreq":
@@ -1606,6 +1610,7 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
     fxf_dyn = fxmap.dynamic_filter(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     dyn_dist = fxmap.dist_dynamic(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"], "fxf_lfo": True})
     dyn_comp = fxmap.comp_dynamic(ph.get("fx_nodes", []), {"mods": ph["mods"], "macros": ph["macros"]})
+    eq_plan = fxmap.eq_mod_plan(ph.get("fx_nodes", []), ph["mods"], ph["macros"], 0)           # envelope / LFO routes into a master EQ band's Freq or Gain (the engine's EQ1..4 destinations)
     util_out_carried = []
     for rack, rnodes in enumerate([ph.get("fx_nodes", [])] + list(ph.get("bus_nodes", [[], []]))):
         util_out_carried += fxmap.util_out_plan(rnodes, ph["mods"], ph["macros"], rack)[0]
@@ -1632,6 +1637,13 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 routes.append((src - 2, ("FXFilter", "kParamWet", 0), a))
             else:
                 other.append((src, ("FXFilter", "kParamWet", 0), a, bool(m.get("bipolar"))))
+            continue
+        if m in eq_plan["carried"]:                 # an EQ band's Freq or Gain (fxmap.eq_mod_plan): an LFO route (map_lfos) or an envelope route (the spare envelopes)
+            ekey = ("FXEQ", m["dest_param"], m["dest_id"])
+            if src <= 5:
+                routes.append((src - 2, ekey, a))
+            else:
+                other.append((src, ekey, a, bool(m.get("bipolar"))))
             continue
         if m in util_out_carried:                  # the Level Out of a Utils that ends a rack (fxmap.util_out_plan): an LFO route (map_lfos) or an envelope route (the spare envelopes)
             ukey = ("FXUtils", "kParamLevelOut", m["dest_id"] // 100)
@@ -2197,6 +2209,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = "Comp Wet"
         elif key[0] == "FXUtils" and key[1] == "kParamLevelOut":
             dest = ("Util Out", "Bus1 Out", "Bus2 Out")[key[2]]
+        elif key[0] == "FXEQ":
+            dest = fxmap.eq_mod_plan(ph.get("fx_nodes", []), ph["mods"], ph["macros"], 0)["dest"].get((key[2], key[1]))
         elif key[:2] in GRAN_ROUTE_KEYS and key[2] in gslot:
             dest = f"Smp{gslot[key[2]]} {GRAN_ROUTE_NAME[key[1]]}"
         if dest:

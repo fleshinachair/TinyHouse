@@ -1034,6 +1034,10 @@ void Engine::renderBlock(int16_t *out, int frames)
                 uint32_t newestU = 0;
                 for (auto &v : voices)
                     if (v.isActive() && v.serialNumber() >= newestU) { newestU = v.serialNumber(); for (int r = 0; r < 3; r++) utilOutMod[r] = v.utilOutMod(r); }       /* with no voice sounding it keeps its last offsets: a bus tail stays at the pump's end level */
+                uint32_t newestE = 0;
+                for (auto &v : voices)
+                    if (v.isActive() && v.serialNumber() >= newestE) { newestE = v.serialNumber(); for (int i = 0; i < 8; i++) eqModNow[i] = v.eqMod(i); }
+                fx.setEqMod(eqModNow);                  /* the master EQ's bands moved by an envelope / LFO route (the newest voice's, kept while none sounds) */
             }
             /* The buses' racks have the same Filter FX (the "b1.fxf_*" / "b2.fxf_*" keys), moved by the same envelope: Lead - Other Side's bus 1 filters
              * its distortion and the EQs behind it boost the highs it takes away. */

@@ -315,6 +315,26 @@ static void testTuneRange()
         const auto plain = make(false), moved = make(true);
         CHECK(plain != moved, "a spare envelope into WT1 Warp lifts an FM warp from amount 0 (the render changes)");
     }
+    {   /* a spare envelope into an EQ band's Gain (+0.25 of the 48 dB knob = +12 dB) and Freq (+0.5 of the log scale opens a 200 Hz low-pass past a 2 kHz sine) */
+        auto level = [&](int type, int freqPot, int dst, int amt, int note_) {
+            auto e = std::make_unique<Engine>();
+            e->setTable(0, sine);
+            e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127;
+            e->pots[TB_P_FX_ON] = 1; e->pots[TB_P_EQ_ON] = 1;
+            e->pots[TB_P_EQ1_TYPE] = type; e->pots[TB_P_EQ1_FREQ] = freqPot; e->pots[TB_P_EQ1_GAIN] = 64; e->pots[TB_P_EQ1_Q] = 64;
+            if (dst) {
+                e->pots[TB_P_ME1_DST] = dst; e->pots[TB_P_ME1_AMT] = amt;
+                e->pots[TB_P_ME1_A] = 0; e->pots[TB_P_ME1_S] = 127;
+            }
+            note(*e, note_);
+            render(*e, 400);
+            return 20.0 * std::log10(rms(render(*e, 400)) + 1e-9);
+        };
+        const double g0 = level(EQ_BELL, 31, 0, 0, 45), g1 = level(EQ_BELL, 31, MD_EQ1_GAIN, 64 + 16, 45);
+        CHECK(g1 - g0 > 9.0 && g1 - g0 < 15.0, "a spare envelope into EQ 1 Gain adds 12 dB at 25 %% (%.1f dB)", g1 - g0);
+        const double f0 = level(EQ_LOPASS, 31, 0, 0, 81), f1 = level(EQ_LOPASS, 31, MD_EQ1_FREQ, 64 + 32, 81);
+        CHECK(f1 - f0 > 15.0, "a spare envelope into EQ 1 Freq opens a low-pass (%.1f dB)", f1 - f0);
+    }
 }
 
 static void testSoftClipper()

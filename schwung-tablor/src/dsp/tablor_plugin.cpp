@@ -801,7 +801,7 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
     if (osc >= TB_WT_SLOTS) {               /* a sample set (the first, or the second): read on the worker, then swapped in like a wavetable */
         const std::string p = path;
         const int which = osc - TB_WT_SLOTS;
-        inst->loader.post([inst, p, which] {
+        inst->loader.postKeyed(100 + which, [inst, p, which] {      /* latest wins per slot: the sets of presets passed in a spin are not read */
             if (which == 3) {                                            /* the convolution reverb's IR: read, then transformed into a plan here, off the audio thread */
                 if (p.empty()) { inst->engine.setConv(nullptr); return; }
                 tb::SampleSet ir;
@@ -1220,10 +1220,10 @@ static void republish_macro_names(tablor_instance *inst)
     if (*std::atomic_load(&inst->macn_pub) == inst->macn_str) return;
     std::atomic_store(&inst->macn_pub, std::make_shared<const std::string>(inst->macn_str));
     inst->pub_pending.fetch_add(1);
-    inst->loader.post([inst] {
+    if (inst->loader.postKeyed(200, [inst] {                  /* one republish serves every preset passed in a spin: it reads the state when it runs */
         if (!inst->loader.stopping()) tb_publish_selection(inst);
         inst->pub_pending.fetch_sub(1);
-    });
+    })) inst->pub_pending.fetch_sub(1);                        /* it dropped an older one that would have taken its count back */
 }
 
 static void reset_to_defaults(tablor_instance *inst)

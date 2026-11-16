@@ -55,8 +55,27 @@ public:
         {
             std::lock_guard<std::mutex> lk(m);
             jobs.push_back(std::move(job));
+            jobKeys.push_back(-1);
         }
         cv.notify_all();
+    }
+
+    /* Latest-wins work: a job queued under the same key and not yet started is dropped for this one. A preset change posts its sample
+     * loads and its republish this way, so a quick spin through a bank leaves one load per slot to do, not one per preset passed (the
+     * queue used to run every stale one, and the host held the preset name back for as long as it took: 21 s after a spin through 384).
+     * Returns true when it dropped an older job: whoever counted that job as owed must take the count back. */
+    bool postKeyed(int key, std::function<void()> job)
+    {
+        bool replaced = false;
+        {
+            std::lock_guard<std::mutex> lk(m);
+            for (size_t i = 0; i < jobs.size(); i++)
+                if (jobKeys[i] == key) { jobs.erase(jobs.begin() + (long) i); jobKeys.erase(jobKeys.begin() + (long) i); replaced = true; break; }
+            jobs.push_back(std::move(job));
+            jobKeys.push_back(key);
+        }
+        cv.notify_all();
+        return replaced;
     }
 
     /* Stop and JOIN the worker. Idempotent. destroy_instance must call this
@@ -135,6 +154,7 @@ private:
                 if (!jobs.empty()) {            /* plain jobs first (init) */
                     job = std::move(jobs.front());
                     jobs.erase(jobs.begin());
+                    jobKeys.erase(jobKeys.begin());
                 }
                 /* No settle delay: a table change loads the instant the pot
                  * moves. Deferring it to coalesce a fast spin was tried and
@@ -315,6 +335,7 @@ private:
     bool started = false;
     WtEntry pending[kOscs];
     std::vector<std::function<void()>> jobs;
+    std::vector<int> jobKeys;               /* one per job: -1 = plain, else the key postKeyed replaces by */
     bool hasPending[kOscs] = {};
     bool working = false;
     bool quit = false;

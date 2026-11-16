@@ -823,7 +823,8 @@ def chain_param(p):
 # exactly like the wavetable enums. A static entry would duplicate the key.
 # The LFO shapes, rates, modes and routes are hidden and only ever set by the converter or a preset load, so the host has
 # no use for them in chain_params (they would double its size); they stay in the param table, the state blob and set_param.
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|smp\d?_(kind|g[a-z]+)$)")
+# The sample slots' Kind and grain keys are NOT hidden: the remote UI draws its Sample tab from chain_params, and a key missing here is a knob that never appears.
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$)")
 chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"])]
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"

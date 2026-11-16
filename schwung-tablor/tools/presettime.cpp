@@ -37,6 +37,25 @@ int main(int argc, char **argv)
     const int n = atoi(pc);
     printf("bank %s: %d presets\n", bn, n);
     struct R { double ms; double setms; int reload; double reloadAt; std::string name; };
+    /* "scroll <ms>": turn the knob through the whole bank, one preset every <ms> milliseconds, and report how long is_loading stays at 1 after the last turn */
+    if (argc > 3 && !strcmp(argv[3], "scroll")) {
+        const double gap = argc > 4 ? atof(argv[4]) : 40;
+        const double t0 = now_ms();
+        for (int i = 0; i < n; i++) {
+            char idx[16]; snprintf(idx, sizeof idx, "%d", i);
+            api->set_param(inst, "preset", idx);
+            struct timespec g = { 0, (long) (gap * 1e6) }; nanosleep(&g, nullptr);
+        }
+        const double tspin = now_ms() - t0, tlast = now_ms();
+        for (;;) {
+            api->get_param(inst, "is_loading", b, sizeof b);
+            if (b[0] == '0' || now_ms() - tlast > 120000) break;
+            nanosleep(&ts, nullptr);
+        }
+        printf("spun %d presets in %.0f ms (%.0f ms apart); is_loading stayed 1 for %.0f ms after the last turn\n", n, tspin, gap, now_ms() - tlast);
+        api->destroy_instance(inst);
+        return 0;
+    }
     std::vector<R> rs;
     for (int i = 0; i < n; i++) {
         char idx[16]; snprintf(idx, sizeof idx, "%d", i);

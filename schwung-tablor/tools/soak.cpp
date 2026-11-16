@@ -34,6 +34,7 @@ static std::string slurp(const std::string &p)
 
 int main(int argc, char **argv)
 {
+    setenv("TB_PRESET_SETTLE_MS", "0", 0);        /* a preset set here is applied at once, as these tools expect */
     const char *so = argc > 1 ? argv[1] : "./dsp.so";
     const std::string dir = argc > 2 ? argv[2] : "/data/UserData/schwung/presets/tinyhouse/Factory";
     const int rounds = argc > 3 ? atoi(argv[3]) : 6;

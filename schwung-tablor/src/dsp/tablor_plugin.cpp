@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 
 #include "../host/plugin_api_v1.h"
 #include "params.h"
@@ -75,6 +76,11 @@ struct tablor_instance {
     std::shared_ptr<const PresetList> store { std::make_shared<PresetList>() };
     std::atomic<int> store_index { 0 };   /* GLOBAL index into store->items */
     std::atomic<int> bank_index { 0 };    /* which bank the preset page lists */
+    /* A sound the browser chose and the engine has not taken yet. The NAME follows the knob at once (store_index); the sound is applied once the
+     * knob has rested for settle_ms (a spin through 384 presets applies the one it lands on, not 384), or when something reads what it set. */
+    std::atomic<int> pend_idx { -1 };
+    std::atomic<long long> pend_due { 0 };
+    int settle_ms = 150;                  /* TB_PRESET_SETTLE_MS overrides it; 0 applies at once (the test tools rely on that) */
     /* The "pk" a restored state named (see preset_key), held until the worker has scanned the store and can find it. */
     std::shared_ptr<const std::string> want_pk;
 
@@ -743,10 +749,21 @@ static void load_presets(tablor_instance *inst)
 
 static int param_index(const char *key)
 {
-    for (int i = 0; i < TB_PARAM_COUNT; i++)
-        if (!strcmp(tb_params[i].key, key))
-            return i;
-    return -1;
+    /* A binary search, not a walk of 521 names: a preset change looks up every key its state names, on the audio callback. The order is built once
+     * into a plain array (no object with a destructor: a static map's destructor ran from exit() after the module had been unloaded and crashed the
+     * process). Equal keys sort in index order, so the first of two wins, as the walk did. */
+    static int order[TB_PARAM_COUNT];
+    static std::once_flag once;
+    std::call_once(once, [] {
+        for (int i = 0; i < TB_PARAM_COUNT; i++) order[i] = i;
+        std::stable_sort(order, order + TB_PARAM_COUNT, [](int a, int b) { return strcmp(tb_params[a].key, tb_params[b].key) < 0; });
+    });
+    int lo = 0, hi = TB_PARAM_COUNT;
+    while (lo < hi) {
+        const int mid = (lo + hi) / 2;
+        if (strcmp(tb_params[order[mid]].key, key) < 0) lo = mid + 1; else hi = mid;
+    }
+    return lo < TB_PARAM_COUNT && !strcmp(tb_params[order[lo]].key, key) ? order[lo] : -1;
 }
 
 /* Which wavetable slot a param drives: wt1_table -> 0 ... wt3_table -> 2. */
@@ -782,6 +799,12 @@ static void sync_table_index(tablor_instance *inst, int osc)
     inst->params()[kTableParam[osc]] = (float) idx;
 }
 
+/* Free on the worker what a preset change took out of the engine: the last reference to a big table or sample set must not drop on the audio callback. */
+template <class T> static void retire(tablor_instance *inst, std::shared_ptr<T> old)
+{
+    if (old && old.use_count() == 1) inst->loader.post([o = std::move(old)]() mutable { o.reset(); });
+}
+
 static void set_table_path(tablor_instance *inst, int osc, const char *path, bool mute = false)
 {
     if (!strcmp(path, "Init")) path = "";
@@ -791,11 +814,9 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
      * preset's levels, so a note struck just after a preset change could come out loud and wrong. Switching a table by hand mid-note keeps
      * the old one sounding until the new one is ready (the sound stays continuous), so that path does not mute. */
     if (mute) {
-        if (osc == TB_WT_SLOTS) inst->engine.setSample(nullptr);
-        else if (osc == TB_WT_SLOTS + 1) inst->engine.setSample2(nullptr);
-        else if (osc == TB_WT_SLOTS + 2) inst->engine.setSample3(nullptr);
-        else if (osc == TB_WT_SLOTS + 3) inst->engine.setConv(nullptr);
-        else if (osc >= 0 && osc < TB_WT_SLOTS) inst->engine.setTable(osc, nullptr);
+        if (osc >= TB_WT_SLOTS && osc <= TB_WT_SLOTS + 2) retire(inst, inst->engine.takeSample(osc - TB_WT_SLOTS));
+        else if (osc == TB_WT_SLOTS + 3) retire(inst, inst->engine.takeConv());
+        else if (osc >= 0 && osc < TB_WT_SLOTS) retire(inst, inst->engine.takeTable(osc));
     }
 
     if (osc >= TB_WT_SLOTS) {               /* a sample set (the first, or the second): read on the worker, then swapped in like a wavetable */
@@ -1357,6 +1378,33 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
     }
 }
 
+/* The browser chose store item `i`: the name shows at once, the sound follows when the knob has rested (see pend_idx). */
+static long long steady_ms()
+{
+    return (long long) std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static void apply_pending(tablor_instance *inst)
+{
+    const int pi = inst->pend_idx.exchange(-1);
+    if (pi < 0) return;
+    auto ps = inst->storeList();
+    if (pi < (int) ps->items.size()) apply_state_blob(inst, ps->items[(size_t) pi].blob.c_str());
+}
+
+static void choose_store_preset(tablor_instance *inst, int i)
+{
+    inst->store_index = i;
+    if (inst->settle_ms <= 0) {
+        inst->pend_idx = -1;
+        auto ps = inst->storeList();
+        if (i >= 0 && i < (int) ps->items.size()) apply_state_blob(inst, ps->items[(size_t) i].blob.c_str());
+        return;
+    }
+    inst->pend_due = steady_ms() + inst->settle_ms;
+    inst->pend_idx = i;
+}
+
 /* ------------------------------------------------------------------ */
 /* User macros: u{i} pots write through to their selected target;      */
 /* picking a new target back-syncs the pot so nothing jumps.           */
@@ -1461,6 +1509,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
     if (colon) k = colon + 1;
 
     if (!strcmp(k, "state")) {
+        inst->pend_idx = -1;                            /* a restored state is the sound now: a chosen one still waiting must not land on top of it */
         apply_state_blob(inst, val, true);
         return;
     }
@@ -1473,8 +1522,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         const int n = b >= 0 ? ps->bank_n[(size_t) b] : 0;        /* the page lists the current bank */
         if (n > 0) {
             const int i = ps->bank_first[(size_t) b] + std::min(std::max(atoi(val), 0), n - 1);
-            inst->store_index = i;
-            apply_state_blob(inst, ps->items[(size_t) i].blob.c_str());
+            choose_store_preset(inst, i);
         } else {
             inst->pending_preset = std::max(atoi(val), 0);      /* the list is still being scanned: remember it */
         }
@@ -1526,8 +1574,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         if (b == inst->bank_index.load()) return;
         inst->bank_index = b;
         if (ps->bank_n[(size_t) b] > 0) {
-            inst->store_index = ps->bank_first[(size_t) b];
-            apply_state_blob(inst, ps->items[(size_t) ps->bank_first[(size_t) b]].blob.c_str());
+            choose_store_preset(inst, ps->bank_first[(size_t) b]);
         }
         return;
     }
@@ -1742,12 +1789,14 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
                          inst->ready.load(std::memory_order_relaxed) ? "1" : "0");
 
     if (!strcmp(key, "state")) {
+        apply_pending(inst);                            /* what is saved is the sound that was chosen */
         build_state_blob(inst);
         return write_str(buf, buf_len, inst->state_buf);
     }
 
     int idx = param_index(key);
     if (idx < 0) return -1;
+    apply_pending(inst);                                /* a read of a setting is a read of the chosen sound */
     const tb_param_t *p = &tb_params[idx];
 
     if (p->type == TB_PATH)
@@ -1799,6 +1848,8 @@ static void tb_render_block(void *instance, int16_t *out_lr, int frames)
         memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
         return;
     }
+    if (inst->pend_idx.load(std::memory_order_relaxed) >= 0 && steady_ms() >= inst->pend_due.load(std::memory_order_relaxed))
+        apply_pending(inst);                            /* the knob has rested */
     FlushToZero ftz;
     if (g_host && g_host->get_bpm)
         inst->engine.setHostBpm(g_host->get_bpm());
@@ -1818,6 +1869,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
     (void) json_defaults;
     auto *inst = new (std::nothrow) tablor_instance();
     if (!inst) return nullptr;
+    if (const char *e = getenv("TB_PRESET_SETTLE_MS")) inst->settle_ms = std::max(0, atoi(e));
 
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);

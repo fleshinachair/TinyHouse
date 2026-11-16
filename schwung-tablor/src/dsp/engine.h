@@ -168,6 +168,19 @@ public:
         if (osc >= 0 && osc < kOscs) std::atomic_store(&table[osc], std::move(t));
     }
 
+    /* The same swap, handing the old one back: a preset change clears a slot on the audio callback, and dropping the last reference there frees
+     * the table or the samples (tens of MB) on that thread. The caller passes what it gets to the worker to free. */
+    std::shared_ptr<Wavetable> takeTable(int osc)
+    {
+        if (osc < 0 || osc >= kOscs) return nullptr;
+        return std::atomic_exchange(&table[osc], std::shared_ptr<Wavetable>());
+    }
+    std::shared_ptr<SampleSet> takeSample(int which)
+    {
+        return std::atomic_exchange(which == 2 ? &sampleSet3 : which == 1 ? &sampleSet2 : &sampleSet, std::shared_ptr<SampleSet>());
+    }
+    std::shared_ptr<ConvPlan> takeConv() { return std::atomic_exchange(&convPlan, std::shared_ptr<ConvPlan>()); }
+
     /* The sample oscillator's set; null clears it. Swapped in from the loader thread like a wavetable. */
     void setSample(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet, std::move(s)); }
     void setSample2(std::shared_ptr<SampleSet> s) { std::atomic_store(&sampleSet2, std::move(s)); }

@@ -48,6 +48,7 @@ static long renderBlocks(int blocks)
 
 int main(int argc, char **argv)
 {
+    setenv("TB_PRESET_SETTLE_MS", "0", 0);        /* a preset set here is applied at once, as these tools expect */
     const char *so_path = (argc > 1) ? argv[1] : "./dsp.so";
     int iters = (argc > 2) ? atoi(argv[2]) : 200;
     if (argc > 3) rngState = (uint32_t) strtoul(argv[3], nullptr, 0);

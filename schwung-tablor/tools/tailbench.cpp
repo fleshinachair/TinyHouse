@@ -26,6 +26,7 @@ static double now_ms()
 
 int main(int argc, char **argv)
 {
+    setenv("TB_PRESET_SETTLE_MS", "0", 0);        /* a preset set here is applied at once, as these tools expect */
     const char *so = argc > 1 ? argv[1] : "./dsp.so";
     void *dl = dlopen(so, RTLD_NOW | RTLD_LOCAL);
     if (!dl) { printf("dlopen: %s\n", dlerror()); return 1; }

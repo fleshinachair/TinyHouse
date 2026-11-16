@@ -19,6 +19,8 @@ int main(int argc, char **argv)
 {
     const char *so = argc > 1 ? argv[1] : "./dsp.so";
     const char *bank = argc > 2 ? argv[2] : "0";
+    const bool scrollMode = argc > 3 && !strcmp(argv[3], "scroll");
+    if (!scrollMode) setenv("TB_PRESET_SETTLE_MS", "0", 0);       /* the one-by-one walk times the apply itself; the scroll runs as the Move does */
     void *dl = dlopen(so, RTLD_NOW | RTLD_LOCAL);
     if (!dl) { printf("dlopen: %s\n", dlerror()); return 1; }
     auto init = (move_plugin_init_v2_fn) dlsym(dl, MOVE_PLUGIN_INIT_V2_SYMBOL);
@@ -40,19 +42,29 @@ int main(int argc, char **argv)
     /* "scroll <ms>": turn the knob through the whole bank, one preset every <ms> milliseconds, and report how long is_loading stays at 1 after the last turn */
     if (argc > 3 && !strcmp(argv[3], "scroll")) {
         const double gap = argc > 4 ? atof(argv[4]) : 40;
+        static int16_t blk[256];
         const double t0 = now_ms();
         for (int i = 0; i < n; i++) {
             char idx[16]; snprintf(idx, sizeof idx, "%d", i);
             api->set_param(inst, "preset", idx);
-            struct timespec g = { 0, (long) (gap * 1e6) }; nanosleep(&g, nullptr);
+            char nm0[128] = {};
+            api->get_param(inst, "preset_name", nm0, sizeof nm0);          /* the name must already be this preset's */
+            if (i % 64 == 0) printf("  turn %d -> name read back: %s\n", i, nm0);
+            for (double w = 0; w < gap; w += 2.9) { api->render_block(inst, blk, 128); struct timespec g = { 0, 2900000 }; nanosleep(&g, nullptr); }
         }
         const double tspin = now_ms() - t0, tlast = now_ms();
         for (;;) {
+            api->render_block(inst, blk, 128);
             api->get_param(inst, "is_loading", b, sizeof b);
             if (b[0] == '0' || now_ms() - tlast > 120000) break;
-            nanosleep(&ts, nullptr);
+            struct timespec g = { 0, 2900000 }; nanosleep(&g, nullptr);
         }
         printf("spun %d presets in %.0f ms (%.0f ms apart); is_loading stayed 1 for %.0f ms after the last turn\n", n, tspin, gap, now_ms() - tlast);
+        static char st[16384], nmEnd[128];
+        api->get_param(inst, "preset_name", nmEnd, sizeof nmEnd);
+        api->get_param(inst, "state", st, sizeof st);
+        const char *pk = strstr(st, "pk=");
+        printf("  last name %s ; state names %.60s\n", nmEnd, pk ? pk : "(no pk)");
         api->destroy_instance(inst);
         return 0;
     }

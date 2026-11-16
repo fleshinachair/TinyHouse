@@ -97,6 +97,9 @@ struct GrainParams {
     float uniDet = 0.0f, uniSpread = 0.0f;
     /* DensityMode BPM: grains are born at this many per second (the grid does not depend on the grain length); 0: the Density knob sets the overlap, as in the free mode. */
     float birthsPerSec = 0.0f;
+    /* A live limit on N, the grains sounding at once (0 = none): the Unison Cap's way to take load off a dense cloud. A cloud denser than this is thinned to it, and each grain is
+     * made louder by the ratio of the two total levels (N x kGrainGain[M]) so the cloud keeps its level. It is not part of the sound: the preset does not store it. */
+    float nCap = 0.0f;
 };
 
 struct GrainCloud {
@@ -130,12 +133,18 @@ struct GrainCloud {
         if (!on || !r || n <= 0) return;
         buildWindow(gp);
         const double T = std::max(0.0, (double) gp.lenSeconds);
-        const float N = gp.birthsPerSec > 0.0f ? (float) (gp.birthsPerSec * T) : grainDensityN(gp.kd);        /* the overlap: births per second x the grain length */
+        float N = gp.birthsPerSec > 0.0f ? (float) (gp.birthsPerSec * T) : grainDensityN(gp.kd);        /* the overlap: births per second x the grain length */
+        float capComp = 1.0f;
+        if (gp.nCap > 0.0f && N > gp.nCap) {
+            auto total = [](float x) { return x * kGrainGain[std::clamp((int) std::floor(x) + 1, 1, 31)]; };
+            capComp = total(N) / total(gp.nCap);
+            N = gp.nCap;
+        }
         const double lenSamp = T * sr;
         const double fileSec = (double) r->frames / (double) r->rate;
         const double step = std::pow(2.0, (double) (semis + r->tuneCents / 100.0f) / 12.0) * (double) r->rate / (double) sr;
         const int M = std::clamp((int) std::floor(N) + 1, 1, 31);
-        const float amp = r->gain * (1.0f / 32768.0f) * kGrainGain[M];
+        const float amp = r->gain * (1.0f / 32768.0f) * kGrainGain[M] * capComp;
         const int U = std::clamp(gp.uni, 1, 8);
         float uMul[8], uGl[8], uGr[8];
         for (int v = 0; v < U; v++) {
@@ -223,6 +232,50 @@ struct GrainCloud {
             double pos = g.pos; int age = g.age;
             const float ga = g.amp * gain;                          /* the birth factor times the slot level of this block */
             int i = g.off;
+            /* The middle of a grain needs none of the end checks: run it unchecked for as many samples as are certain to stay inside the grain's length and the file (one whole
+             * step of margin, so rounding cannot matter), then the checked loop below finishes the grain's edge. The arithmetic is the same, so the output is identical. */
+            if (i < n && pos >= 0.0 && pos < (double) (fr - 1)) {
+                double mm = (double) std::min(n - i, g.lenSamp - age);
+                if (g.step > 0.0) mm = std::min(mm, std::floor(((double) (fr - 1) - pos) / g.step) - 1.0);
+                else if (g.step < 0.0) mm = std::min(mm, std::floor(pos / -g.step) - 1.0);
+                int m = mm > 0.0 ? (int) mm : 0;
+                const double stp = g.step; const float gl = g.gl, gr = g.gr, iL = g.invLen, stf = (float) g.step;
+                float *__restrict L = l, *__restrict R = rt; const float *__restrict W = win;
+                /* Two passes over up to 128 samples. The first only does arithmetic, in floats from the block's start (a read position is its integer base plus k steps, so the
+                 * rounding does not grow with k): the compiler turns it into vector code. The second does the reads from the file and the window table and adds into the block. */
+                while (m > 0) {
+                    const int c = std::min(m, 128);
+                    const int base = (int) pos;
+                    const float frac0 = (float) (pos - (double) base);
+                    int ii[128], wi[128]; float ff[128], wf[128];
+                    for (int k = 0; k < c; k++) {
+                        const float fp = frac0 + (float) k * stf, fl = std::floor(fp);
+                        ii[k] = (int) fl; ff[k] = fp - fl;
+                        const float fx = (float) (age + k) * iL * (float) kWinN;
+                        const int w0 = std::min((int) fx, kWinN - 1);
+                        wi[k] = w0; wf[k] = fx - (float) w0;
+                    }
+                    if (ch == 1) {
+                        for (int k = 0; k < c; k++) {
+                            const int i0 = std::clamp(base + ii[k], 0, fr - 2);
+                            const float x0 = pcm[i0], x1 = pcm[i0 + 1];
+                            const float w = W[wi[k]] + (W[wi[k] + 1] - W[wi[k]]) * wf[k];
+                            const float v = (x0 + (x1 - x0) * ff[k]) * (ga * w);
+                            L[i + k] += v * gl; R[i + k] += v * gr;
+                        }
+                    } else {
+                        for (int k = 0; k < c; k++) {
+                            const int i0 = std::clamp(base + ii[k], 0, fr - 2);
+                            const int16_t *q = pcm + (size_t) i0 * 2;
+                            const float l0 = q[0], r0 = q[1], l1 = q[2], r1 = q[3];
+                            const float w = W[wi[k]] + (W[wi[k] + 1] - W[wi[k]]) * wf[k];
+                            const float kk = ga * w;
+                            L[i + k] += (l0 + (l1 - l0) * ff[k]) * kk * gl; R[i + k] += (r0 + (r1 - r0) * ff[k]) * kk * gr;
+                        }
+                    }
+                    pos += stp * (double) c; age += c; i += c; m -= c;
+                }
+            }
             for (; i < n; i++) {
                 if (age >= g.lenSamp || pos >= (double) fr || pos < 0.0) { g.alive = false; break; }
                 const float fx = (float) age * g.invLen * (float) kWinN;

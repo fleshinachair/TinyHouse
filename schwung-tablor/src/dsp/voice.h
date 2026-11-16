@@ -495,6 +495,7 @@ public:
                 gp.birthsPerSec = std::pow(2.0f, (float) m) * hostBpm / 120.0f;
             }
             gp.uni = std::min((int) P[uniP], (int) P[TB_P_UNI_CAP]);
+            if ((int) P[TB_P_UNI_CAP] < 16) gp.nCap = 2.0f * (float) P[TB_P_UNI_CAP];          /* Unison Cap below 16 also thins a dense cloud: at most 2 grains at once per step of the cap */
             if (gp.uni > 1) { gp.uniDet = 4.0f * std::pow(pot01(P[detP]), 1.25f); gp.uniSpread = pot01(P[spreadP]); }          /* the granular detune: 4 d^1.25 semitones across the stack */
             gp.start = P[startP] * 0.01f;
             gp.winShape = (int) P[winP]; gp.winParam = P[winpP]; gp.winSkew = P[skewP];

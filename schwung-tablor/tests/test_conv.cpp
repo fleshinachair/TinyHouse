@@ -51,7 +51,8 @@ static void trial(int len, int ch, float gainDb)
         }
     }
     const double db = 10.0 * std::log10((err + 1e-30) / (ref + 1e-30));
-    CHECK(db < -80.0, "%d taps, %d ch, gain %+.0f dB: error %.1f dB re the output", len, ch, gainDb, db);
+    /* the head is float (error near -130 dB); the tail spectra are half precision, a rounding error of about -75 dB re the output */
+    CHECK(db < (len > 4096 ? -70.0 : -80.0), "%d taps, %d ch, gain %+.0f dB: error %.1f dB re the output", len, ch, gainDb, db);
 }
 
 int main()

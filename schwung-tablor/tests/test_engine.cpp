@@ -1274,8 +1274,38 @@ static void testMacros()
     CHECK(std::fabs(e.pots[TB_P_FLT_FREQ] - 45.0f) < 1e-3f, "no routes: nothing moves");
 }
 
+/* A rack on silence goes to sleep (gatedFx in engine.cpp) and wakes cleanly: a note after 12 s of silence sounds like the first one, and the silence in between is exactly 0. */
+static void testFxSleep()
+{
+    Engine e;
+    e.setTable(0, sineTable());
+    e.pots[TB_P_FX_ON] = 1.0f; e.pots[TB_P_REV_MIX] = 90.0f; e.pots[TB_P_DLY_MIX] = 80.0f;
+    auto playNote = [&](int blocks, int holdBlocks) {
+        note(e, 60);
+        std::vector<int16_t> a = render(e, holdBlocks);
+        const uint8_t off[] = { 0x80, 60, 0 }; e.onMidi(off, 3);
+        std::vector<int16_t> b = render(e, blocks - holdBlocks);
+        a.insert(a.end(), b.begin(), b.end());
+        return a;
+    };
+    const std::vector<int16_t> first = playNote(400, 200);
+    render(e, 12 * 44100 / 128);                                               /* the tails die, then 12 s of nothing */
+    const std::vector<int16_t> quiet = render(e, 100);
+    bool zero = true;
+    for (int16_t v : quiet) zero = zero && v == 0;
+    CHECK(zero, "after the tails and 12 s of silence the output is digital silence");
+    const std::vector<int16_t> second = playNote(400, 200);
+    double pa = 0.0, pb = 0.0;
+    for (size_t i = 0; i < first.size(); i++) { pa = std::max(pa, (double) std::abs(first[i])); pb = std::max(pb, (double) std::abs(second[i])); }
+    double ra = 0.0, rb = 0.0;
+    for (size_t i = 0; i < first.size(); i++) { ra += (double) first[i] * first[i]; rb += (double) second[i] * second[i]; }
+    CHECK(pa > 1000.0 && pb > 0.8 * pa && pb < 1.25 * pa, "the note after the sleep is as loud as the first (peaks %.0f / %.0f)", pa, pb);
+    CHECK(rb > 0.7 * ra && rb < 1.4 * ra, "and has the same energy with its reverb and delay tails (%.3g / %.3g)", ra, rb);
+}
+
 int main()
 {
+    testFxSleep();
     testMacros();
     testThirdOscillator();
     testSampleVoicePlaysThrough();

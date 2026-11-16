@@ -18,6 +18,7 @@ DEST="/data/UserData/schwung/modules/sound_generators/tinyhouse"
 [ -f "$SRC/build/dsp.so" ] || { echo "no build/dsp.so — run ./scripts/build.sh first" >&2; exit 1; }
 
 echo "==> $HOST:$DEST"
+"$(dirname "$0")/move_check_owner.sh" "$HOST"    # refuse to copy onto a Move whose / or /data ownership is already wrong
 ssh "$HOST" "mkdir -p $DEST/wavetables"
 
 ssh "$HOST" "mkdir -p $DEST/presets"

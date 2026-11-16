@@ -44,31 +44,30 @@ template <class DataType>
 void processFilterStereo(FilterState<DataType>& sa, FilterState<DataType>& sb, const FilterParams<DataType>& params,
                          DataType* outA, DataType* outB, const DataType* inA, const DataType* inB, int numSamples)
 {
-    /* The state and the coefficients in locals for the loop: written through the references, every sample stored and reloaded them (the output might alias
-     * them as far as the compiler knows), a memory round trip inside the filter's recursion. The same operations in the same order (output-identical). */
-    const DataType f = params.f, r = params.r, g = params.g, h = params.h, b = params.b, l = params.l, fr = params.f + params.r;
+    /* The same filter as processFilter with the bp and lp lines folded into the state update: z1' = z1 + 2 f hp, z2' = z2 + 2 f z1 + 2 f^2 hp, and the output
+     * h hp + b bp + l lp = ch hp + c1 z1 + c2 z2 (ch = h + b f + l f^2, c1 = b + l f, c2 = l). From one sample's state to the next the chain is three dependent
+     * fused multiply-adds (hp, then the two updates), where the textbook form chains five or six through hp, bp and lp, and the filter is bound by that chain.
+     * The output no longer sits on it. Mathematically the same; rounding at the 1e-7 level (measured against a double precision run, as accurate as the textbook
+     * form: tests/test_dsp.cpp). The state and the coefficients live in locals (a memory round trip per sample otherwise). */
+    const DataType f = params.f, g = params.g, h = params.h, b = params.b, l = params.l;
+    const DataType k1 = -g * (params.f + params.r), k2 = -g;                          /* hp = g x + k1 z1 + k2 z2 */
+    const DataType f2 = 2 * f, ff2 = 2 * f * f;
+    const DataType ch = h + b * f + l * f * f, c1 = b + l * f, c2 = l;
     DataType az1 = sa.z1, az2 = sa.z2, bz1 = sb.z1, bz2 = sb.z2;
     for (auto i = 0; i < numSamples; ++i)
     {
         const auto xa = inA[i], xb = inB[i];
-
-        const auto hpa = (xa - fr*az1 - az2) * g;
-        const auto hpb = (xb - fr*bz1 - bz2) * g;
-        const auto bpa = az1 + f*hpa;
-        const auto bpb = bz1 + f*hpb;
-        const auto lpa = az2 + f*bpa;
-        const auto lpb = bz2 + f*bpb;
-
-        az1 = 2 * bpa - az1;
-        bz1 = 2 * bpb - bz1;
-        az2 = 2 * lpa - az2;
-        bz2 = 2 * lpb - bz2;
-
-        outA[i] = h * hpa + b * bpa + l * lpa;
-        outB[i] = h * hpb + b * bpb + l * lpb;
+        const auto hpa = (g * xa + k1 * az1) + k2 * az2;
+        const auto hpb = (g * xb + k1 * bz1) + k2 * bz2;
+        outA[i] = ch * hpa + c1 * az1 + c2 * az2;
+        outB[i] = ch * hpb + c1 * bz1 + c2 * bz2;
+        const auto na2 = (az2 + f2 * az1) + ff2 * hpa;
+        const auto nb2 = (bz2 + f2 * bz1) + ff2 * hpb;
+        az1 = az1 + f2 * hpa;
+        bz1 = bz1 + f2 * hpb;
+        az2 = na2; bz2 = nb2;
     }
     sa.z1 = az1; sa.z2 = az2; sb.z1 = bz1; sb.z2 = bz2;
-    (void) r;
 
     if (params.useCompensation)
     {

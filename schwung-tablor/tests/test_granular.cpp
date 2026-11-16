@@ -320,6 +320,36 @@ static void testScanRangeAndLoops()
     }
 }
 
+/* The Unison Cap's grain limit: a dense cloud thinned to nCap grains at once keeps about its level and costs fewer live grains. */
+static void testNCap()
+{
+    printf("== nCap: a dense cloud thinned to a cap ==\n");
+    std::vector<float> st(8 * 44100);
+    uint32_t s = 7;
+    for (auto &v : st) { s = s * 1664525u + 1013904223u; v = 0.4f * ((float) (s >> 8) / 8388608.0f - 1.0f); }      /* noise: grains add incoherently, as most sounds do */
+    auto set = makeSet(st, 1);
+    auto run = [&](float cap, int &live) {
+        GrainParams gp; gp.kd = 0.9457f; gp.lenSeconds = 1.0f; gp.scanPct = 100.0f; gp.nCap = cap;
+        GrainCloud c; c.start(set, 60);
+        std::vector<float> l(128), r(128);
+        double sum = 0.0; long cnt = 0;
+        for (int b = 0; b < (int) (3.0f * SR / 128.0f); b++) {
+            std::fill(l.begin(), l.end(), 0.0f); std::fill(r.begin(), r.end(), 0.0f);
+            c.processAdding(gp, 0.0f, 1.0f, SR, l.data(), r.data(), 128);
+            if (b > (int) (1.5f * SR / 128.0f)) for (int i = 0; i < 128; i++) { sum += (double) l[i] * l[i]; cnt++; }
+        }
+        live = c.liveGrains();
+        return std::sqrt(sum / (double) cnt);
+    };
+    int liveFull = 0, liveCap = 0;
+    const double full = run(0.0f, liveFull), capped = run(8.0f, liveCap);
+    const double db = 20.0 * std::log10(capped / full);
+    CHECK(liveCap * 2 < liveFull, "cap 8 keeps far fewer grains alive (%d of %d)", liveCap, liveFull);
+    CHECK(std::fabs(db) < 3.0, "cap 8 keeps the cloud's level within 3 dB (%.2f dB)", db);
+    int l2 = 0; const double none = run(40.0f, l2);
+    CHECK(none == full && l2 == liveFull, "a cap above N changes nothing (same output, %d grains)", l2);
+}
+
 int main()
 {
     testGrid();
@@ -327,6 +357,7 @@ int main()
     testWindows();
     testModulated();
     testScanRangeAndLoops();
+    testNCap();
     benchmark();
     printf(g_fail ? "\n%d FAILED\n" : "\nall passed\n", g_fail);
     return g_fail ? 1 : 0;

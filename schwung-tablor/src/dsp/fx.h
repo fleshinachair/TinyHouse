@@ -178,6 +178,35 @@ struct FxSettings {
 };
 
 namespace fxdetail {
+/* sin(2 pi x) for x in cycles, any range: fold to a quarter wave and a 9th order polynomial (error 3e-9, under the float rounding). The library's sinf costs about
+ * twenty times as much, and the chorus, flanger, phaser and widener call it per sample. */
+/* log2 and exp2 for the compressors' per-sample dB maths (a log10 and a pow per band per sample): errors 2e-6 in log2 (6e-6 dB) and 1.2e-7 relative in exp2. */
+inline float fastLog2(float x)                                          /* x a positive normal float */
+{
+    uint32_t u; std::memcpy(&u, &x, 4);
+    int e = (int) ((u >> 23) & 255u) - 127;
+    u = (u & 0x7fffffu) | 0x3f800000u;
+    float m; std::memcpy(&m, &u, 4);
+    if (m > 1.41421356f) { m *= 0.5f; e += 1; }
+    const float t = m - 1.0f;
+    return (float) e + t * (1.4427135f + t * (-0.7211319f + t * (0.47934815f + t * (-0.3674897f + t * (0.32215387f + t * -0.20659233f)))));
+}
+inline float fastExp2(float x)
+{
+    x = std::min(std::max(x, -126.0f), 126.0f);
+    const float fl = std::floor(x), f = x - fl;
+    const float p = f * (0.69315247f + f * (0.24015282f + f * (0.055835898f + f * (0.0089734188f + f * 0.0018852789f))));
+    const uint32_t u = (uint32_t) ((int) fl + 127) << 23;
+    float sc; std::memcpy(&sc, &u, 4);
+    return sc * (1.0f + p);
+}
+inline float sinCyc(float x)
+{
+    const float r = x - std::floor(x + 0.5f);                          /* [-0.5, 0.5) */
+    const float a = r > 0.25f ? 0.5f - r : (r < -0.25f ? -0.5f - r : r);
+    const float t = 4.0f * a, t2 = t * t;
+    return t * (1.5707963f + t2 * (-0.64596336f + t2 * (0.07968848f + t2 * (-0.0046722279f + t2 * 0.00015082053f))));
+}
 /* Reverb line lengths in samples at 44.1 kHz (mutually prime, 25..59 ms) and the input
  * diffusers. The output level kRevOut was measured against Serum's reverb. */
 inline constexpr int kLineLen[8] = { 1087, 1283, 1481, 1699, 1907, 2131, 2347, 2593 };
@@ -264,8 +293,8 @@ private:
             for (int c = 0; c < 2; c++) {
                 const float x = *io[c];
                 chBuf[c][(size_t) chWp] = x + fb * chFb[c];
-                const float t0 = tap(chBuf[c], chWp, d1 + swing * std::sin(fxdetail::kTwoPi * (chPh + off[c][0])));
-                const float t1 = tap(chBuf[c], chWp, d2 + swing * std::sin(fxdetail::kTwoPi * (chPh + off[c][1])));
+                const float t0 = tap(chBuf[c], chWp, d1 + swing * fxdetail::sinCyc(chPh + off[c][0]));
+                const float t1 = tap(chBuf[c], chWp, d2 + swing * fxdetail::sinCyc(chPh + off[c][1]));
                 const float wet = voice * (t0 + t1);
                 chLp[c] = sanitize(chLp[c] + a * (wet - chLp[c]));
                 chLp2[c] = sanitize(chLp2[c] + a * (chLp[c] - chLp2[c]));
@@ -291,7 +320,7 @@ private:
             float *io[2] = { &L[i], &R[i] };
             for (int c = 0; c < 2; c++) {
                 const float x = *io[c];
-                const float lfo = 0.5f + 0.5f * std::sin(fxdetail::kTwoPi * (flPh + (c ? st.flanPhase : 0.0f)));
+                const float lfo = 0.5f + 0.5f * fxdetail::sinCyc(flPh + (c ? st.flanPhase : 0.0f));
                 flBuf[c][(size_t) flWp] = x + fb * flFb[c];
                 const float d = tap(flBuf[c], flWp, base + span * st.flanDepth * lfo);
                 flFb[c] = sanitize(d);
@@ -315,7 +344,7 @@ private:
         for (int i = 0; i < n; i++) {
             if ((i & (kStep - 1)) == 0) {
                 for (int c = 0; c < 2; c++) {
-                    const float lfo = std::sin(fxdetail::kTwoPi * (phPh + (c ? st.phasPhase : 0.0f)));
+                    const float lfo = fxdetail::sinCyc(phPh + (c ? st.phasPhase : 0.0f));
                     const float f = st.phasFreqHz * std::exp2(2.5f * st.phasDepth * lfo);
                     for (int k = 0; k < poles; k++) {
                         const float fk = std::min(std::max(f * std::exp2(((float) k - 0.5f * (float) (poles - 1)) * st.phasDepth2 * 0.35f), 20.0f), 0.45f * sr);
@@ -735,13 +764,13 @@ private:
             float out[2] = { 0, 0 };
             for (int b = 0; b < 3; b++) {
                 mbMs[b] += (0.5f * (band[b][0] * band[b][0] + band[b][1] * band[b][1]) - mbMs[b]) * compDet;
-                const float xdb = 10.0f * std::log10(mbMs[b] + 1e-18f), T = st.compThreshBandDb[b];
+                const float xdb = 3.0102999566f * fxdetail::fastLog2(mbMs[b] + 1e-18f), T = st.compThreshBandDb[b];
                 /* The upward part has no end in a silent tail: a band at -180 dB asked for +135 dB, and the next note arrived into that gain
                  * (Serum's own stays level across repeated notes). It is capped, so the boost a quiet tail earns stays one a note can recover from. */
                 const float up = std::min(sb * kneeCurve((T - 11.0f) - xdb, 1.0f, knee), kMaxBoostDb);
                 const float target = up - kneeCurve(xdb - T, slope, knee);   /* dB: + boosts, - reduces */
                 mbGain[b] = target + (target < mbGain[b] ? compAtt : compRel) * (mbGain[b] - target);
-                const float g = std::pow(10.0f, (mbGain[b] + st.compBandGainDb[b]) / 20.0f);
+                const float g = fxdetail::fastExp2((mbGain[b] + st.compBandGainDb[b]) * 0.16609640474f);          /* 10^(dB / 20) */
                 out[0] += band[b][0] * g;
                 out[1] += band[b][1] * g;
             }
@@ -761,7 +790,7 @@ private:
         for (int i = 0; i < n; i++) {
             compCur += dw;
             compMs += (0.5f * (L[i] * L[i] + R[i] * R[i]) - compMs) * compDet;
-            const float xdb = 10.0f * std::log10(compMs + 1e-18f) + 4.77f;      /* the rms and a saw's crest: the level the curves were fitted at */
+            const float xdb = 3.0102999566f * fxdetail::fastLog2(compMs + 1e-18f) + 4.77f;      /* the rms and a saw's crest: the level the curves were fitted at */
             const float over = xdb - T;
             float targetGr;                              /* gain reduction wanted, dB (>= 0) */
             if (over <= -0.5f * knee) targetGr = 0.0f;
@@ -769,7 +798,7 @@ private:
             else { const float k = over + 0.5f * knee; targetGr = slope * k * k / (2.0f * knee); }
             const float c = targetGr > compGrDb ? compAtt : compRel;
             compGrDb = targetGr + c * (compGrDb - targetGr);
-            const float g = std::pow(10.0f, -compGrDb / 20.0f) * compMk;
+            const float g = fxdetail::fastExp2(-compGrDb * 0.16609640474f) * compMk;
             const float w = compCur;
             L[i] += w * (L[i] * g - L[i]);
             R[i] += w * (R[i] * g - R[i]);
@@ -900,12 +929,14 @@ private:
         for (int i = 0; i < n; i++) {
             const float m = 0.5f * (L[i] + R[i]);
             chorusBuf[(size_t) chorusPos] = m;
+            /* the four sweeps are sin(p), sin(p + pi/2) and their negatives (a half cycle apart): one sine and one cosine of the phase */
+            const float cyc = chorusPhase * (1.0f / fxdetail::kTwoPi), sn = fxdetail::sinCyc(cyc), cn = fxdetail::sinCyc(cyc + 0.25f);
+            const float sweep[2][2] = { { sn, cn }, { -sn, -cn } };
             float w[2];
             for (int side = 0; side < 2; side++) {
                 float acc = 0.0f;
                 for (int tap = 0; tap < 2; tap++) {
-                    const float ph = chorusPhase + side * 3.14159265f + tap * 1.5707963f;
-                    const float d = baseD + (tap ? 0.0007f * sr : 0.0f) + depthD * std::sin(ph);
+                    const float d = baseD + (tap ? 0.0007f * sr : 0.0f) + depthD * sweep[side][tap];
                     const float rp = (float) chorusPos - d + (float) kChorusMax;
                     const int i0 = (int) rp;
                     const float fr = rp - (float) i0;
@@ -1019,7 +1050,7 @@ private:
                 const int len = (int) a.buf.size();
                 const float y = -fxdetail::kApGain * x + a.buf[(size_t) a.pos];
                 a.buf[(size_t) a.pos] = sanitize(x + fxdetail::kApGain * y);
-                a.pos = (a.pos + 1) % len;
+                if (++a.pos >= len) a.pos = 0;                    /* (a compare, not the integer division a modulo by a variable length costs per sample) */
                 x = y;
             }
             float o[kLines];
@@ -1035,7 +1066,7 @@ private:
             for (int k = 0; k < kLines; k++) {
                 Line &l = lines[k];
                 l.buf[(size_t) l.pos] = sanitize(o[k] - mix + x * (0.35f * norm));
-                l.pos = (l.pos + 1) % l.len;
+                if (++l.pos >= l.len) l.pos = 0;
                 wl += sl[k] * o[k];
                 wr += sr_[k] * o[k];
             }

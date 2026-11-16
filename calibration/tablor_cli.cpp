@@ -50,6 +50,18 @@ int main(int argc, char **argv)
 
     std::ifstream in(argv[2]);
     std::string blob((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (blob.rfind("TBLR2;", 0) != 0) {                          /* a preset .json: its "state" string is the blob */
+        const size_t b0 = blob.find("TBLR2;");
+        if (b0 != std::string::npos) {
+            std::string o;
+            for (size_t i = b0; i < blob.size(); i++) {
+                if (blob[i] == '\\' && i + 1 < blob.size()) { i++; o += blob[i] == 'n' ? '\n' : blob[i]; continue; }
+                if (blob[i] == '"') break;
+                o += blob[i];
+            }
+            blob = o;
+        }
+    }
     if (blob.rfind("TBLR2;", 0) != 0) { fprintf(stderr, "bad blob\n"); return 2; }
 
     Engine e;

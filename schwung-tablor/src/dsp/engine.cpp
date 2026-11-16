@@ -958,6 +958,23 @@ void Engine::refreshStereo()
     }
 }
 
+/* An effects rack asleep. A rack on digital silence still costs its full price (the convolver's FFTs, the reverb's lines, the chorus, the multiband compressor: about
+ * 180 us of the 2667 us frame per idle slot on the Move), and a slot nobody is playing is silent most of the time. So once both what goes into the rack and what comes
+ * out of it have stayed under -120 dBFS (a sixteenth of a 16-bit step) for longer than any effect's memory here (a delay's 3 s, the convolver's impulse response: `hold` is 3.5 s, or the IR's length and one second when the rack has one), nothing is
+ * left inside it that could still be heard, and it is skipped until its input is above that again. The rack's state is silence by then, so waking it is seamless. */
+static void gatedFx(Fx &f, long &silent, long hold, float *L, float *R, int n)
+{
+#ifdef TB_NO_FX_GATE                                  /* the comparison builds (null tests) run the rack always */
+    f.process(L, R, n); (void) silent; return;
+#endif
+    constexpr float kSilence = 1e-6f;
+    auto peak = [n](const float *a, const float *b) { float m = 0.0f; for (int i = 0; i < n; i++) m = std::max(m, std::max(std::fabs(a[i]), std::fabs(b[i]))); return m; };
+    const float pin = peak(L, R);
+    if (silent >= hold && pin < kSilence) return;
+    f.process(L, R, n);
+    silent = (pin < kSilence && peak(L, R) < kSilence) ? std::min(silent + (long) n, hold) : 0;
+}
+
 void Engine::renderBlock(int16_t *out, int frames)
 {
     Tables t = loadTables();
@@ -1058,7 +1075,7 @@ void Engine::renderBlock(int16_t *out, int frames)
             }
             refreshBus(b);
             if (fxBus[b].active())
-                fxBus[b].process(busBuf[2 * b], busBuf[2 * b + 1], n);
+                gatedFx(fxBus[b], fxSilent[1 + b], 7 * 44100 / 2, busBuf[2 * b], busBuf[2 * b + 1], n);
             /* The rack's Utils width: the side signal of what the bus returns, scaled (Serum's Utils node sits inside the rack; Lead - Rollin's bus 1 narrows to 23 %). */
             const float bwT = busPots[b][TB_P_MWIDTH] / 64.0f;
             if (bwT != 1.0f || busWidthCur[b] != 1.0f) {
@@ -1075,7 +1092,11 @@ void Engine::renderBlock(int16_t *out, int frames)
         }
         fx.setConvPlan(std::atomic_load(&convPlan));
         if (fx.active())
-            fx.process(L, R, n);
+        {
+            const auto cp = std::atomic_load(&convPlan);
+            const long irSamples = cp ? (long) convdetail::kHeadTaps + (long) cp->tailParts * convdetail::kD : 0;
+            gatedFx(fx, fxSilent[0], std::max(7L * 44100 / 2, irSamples + 44100), L, R, n);
+        }
         applyUtilOut(0, L, R, n);
         for (int i = 0; i < n; i++) { L[i] += dryBuf[0][i]; R[i] += dryBuf[1][i]; }          /* Out: past the effects */
 

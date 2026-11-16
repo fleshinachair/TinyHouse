@@ -321,6 +321,7 @@ private:
     AnalogTables analog { 44100.0 };
     Fx fx { 44100.0f };
     Fx fxBus[2] { Fx(44100.0f), Fx(44100.0f) };
+    long fxSilent[3] = { 0, 0, 0 };            /* samples both the input and the output of the main rack / bus racks have been silent (see gatedFx in engine.cpp) */
     float busSeen[2][TB_PARAM_COUNT] = {};
     bool  busSeenValid[2] = {};
     float busBuf[4][kBlock] = {};

@@ -3192,9 +3192,19 @@ var EXTRA = {
   },
   preset_now: function (v) {
     var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
-    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); macReload(); }
+    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); macReload(); wtPathsSoon(); }
   }
 };
+/* the list of wavetable files can change with a preset (a preset names a pack of its own), and the manager's state push no longer carries it:
+ * read it once when the browsing has rested, not on every detent */
+var wtPathsTimer = null;
+function wtPathsSoon() {
+  if (wtPathsTimer) clearTimeout(wtPathsTimer);
+  wtPathsTimer = setTimeout(function () {
+    wtPathsTimer = null;
+    schwungRemote.getParam(KP + "wt_paths").then(function (v) { if (v) EXTRA.wt_paths(v); }).catch(function () {});
+  }, 700);
+}
 [1, 2, 3].forEach(function (n) {
   EXTRA["wt" + n + "_table"] = function (p) { if (p) loadShapeFromFile(n, p); };
 });

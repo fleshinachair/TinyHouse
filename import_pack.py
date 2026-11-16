@@ -10,7 +10,7 @@ For every .SerumPreset under SRC_DIR:
   3. play it through Serum (full chain, notes chosen by test_render_calibration.sounding_notes) and set the preset's volume so its
      loudness matches, with the output limiter kept out of the sound (the same two steps as fit_level.py and post_level.py);
   4. write OUT/<bank>/<name>.json (Schwung's preset format) and the wavetables it needs under out/move/data/UserData/UserLibrary/Wavetables/<bank>/.
-The plugin goes silent after about 1200 s of audio per process, so the plugin is reloaded before that. The Serum renders are cached
+The plugin goes silent after about 1200 s of audio per process, so it is reloaded before that. The Serum renders are cached
 in calibration/refs/ like the rest, so a second run is fast. Copy OUT/<bank> to the Move with BANK="<bank>" deploy_presets.sh.
 """
 import argparse

@@ -392,7 +392,21 @@ int main(int argc, char **argv)
     /* ---- state round-trip ---- */
     api->set_param(inst, "vca_r", "77");
     n = api->get_param(inst, "state", big, sizeof big);
-    CHECK(n > 6 && !strncmp(big, "TBLR2;", 6), "state is version-tagged (%d bytes)", n);
+    CHECK(n > 6 && (!strncmp(big, "TBLR2;", 6) || !strncmp(big, "{\"tblr\":\"TBLR2;", 15)), "state is version-tagged (%d bytes)", n);
+    /* The state is a JSON object for a reader whose buffer holds it: the blob plus every parameter's value, so the remote UI's manager reads a slot in one call
+     * (it read 434 keys one at a time on every preset change, which stalled the Move's own screen). A small buffer gets the plain blob. */
+    CHECK(big[0] == '{' && big[n - 1] == '}' && strstr(big, ",\"vca_r\":77,") != nullptr && strstr(big, "\"flt_type\":\"") != nullptr && strstr(big, "\"macro_names\":\"") != nullptr && strstr(big, "\"wt1_select\":\"") != nullptr,
+          "the state is a JSON object with every value (numbers bare, names quoted)");
+    {
+        char small[4096] = {};
+        const int sn = api->get_param(inst, "state", small, sizeof small);
+        CHECK(sn > 6 && !strncmp(small, "TBLR2;", 6), "a small buffer gets the plain blob (%d bytes)", sn);
+        api->set_param(inst, "vca_r", "12");
+        api->set_param(inst, "state", big);                      /* the JSON form restores the sound too */
+        api->get_param(inst, "vca_r", buf, sizeof buf);
+        CHECK(!strcmp(buf, "77"), "restoring the JSON state sets the values (vca_r=\"%s\")", buf);
+        api->set_param(inst, "vca_r", "77");
+    }
 
     /* prefixed spelling */
     api->get_param(inst, "vca_r", buf, sizeof buf);
@@ -1088,7 +1102,33 @@ int main(int argc, char **argv)
                 CHECK(pageAfterRestore(s1, rbank, ridx, rname) && !strcmp(rbank, bn) && atoi(ridx) == 1 && !strcmp(rname, nb),
                       "a restored state puts the preset page back on its preset (%s / %s \"%s\", wanted %s / 1 \"%s\")", rbank, ridx, rname, bn, nb);
             }
-            CHECK(strcmp(s0, s1) != 0 && !strncmp(s0, "TBLR2;", 6), "choosing a preset loads its sound (preset 0 and 1 differ)");
+            CHECK(strcmp(s0, s1) != 0 && (!strncmp(s0, "TBLR2;", 6) || !strncmp(s0, "{\"tblr\":\"TBLR2;", 15)), "choosing a preset loads its sound (preset 0 and 1 differ)");
+            {   /* A chosen preset that is still waiting for the knob to rest answers every read with what it will hold once it lands, and no read applies it early */
+                setenv("TB_PRESET_SETTLE_MS", "400", 1);
+                void *iw = api->create_instance(".", nullptr);
+                setenv("TB_PRESET_SETTLE_MS", "0", 1);
+                api->set_param(iw, "state", "TBLR2;");
+                for (int w = 0; w < 1500; w++) { char rb[8] = {}; api->get_param(iw, "ready", rb, sizeof rb); if (rb[0] == '1') break; struct timespec t10 = { 0, 10 * 1000000 }; nanosleep(&t10, nullptr); }
+                api->set_param(iw, "bank", "0");
+                api->set_param(iw, "preset", "0");
+                int16_t blk[256];
+                for (int w = 0; w < 400; w++) { api->render_block(iw, blk, 128); struct timespec t3 = { 0, 3 * 1000000 }; nanosleep(&t3, nullptr); }
+                static char wj[65536], lj[65536], w1[64], w2[64], w3[64];
+                api->set_param(iw, "preset", "1");
+                api->get_param(iw, "state", wj, sizeof wj);                       /* while it waits */
+                api->get_param(iw, "flt_freq", w1, sizeof w1);
+                api->get_param(iw, "wt1_level", w2, sizeof w2);
+                api->get_param(iw, "state", w3, sizeof w3);
+                for (int w = 0; w < 400; w++) { api->render_block(iw, blk, 128); struct timespec t3 = { 0, 3 * 1000000 }; nanosleep(&t3, nullptr); }   /* the rest passes: it lands */
+                api->get_param(iw, "state", lj, sizeof lj);
+                char l1[64] = {}, l2[64] = {};
+                api->get_param(iw, "flt_freq", l1, sizeof l1);
+                api->get_param(iw, "wt1_level", l2, sizeof l2);
+                const char *wa = strstr(wj, "\",\""), *la = strstr(lj, "\",\"");
+                CHECK(wj[0] == '{' && wa && la && !strcmp(wa, la), "a waiting preset's state holds the same values as the preset once it has landed (%d and %d bytes)", (int) strlen(wj), (int) strlen(lj));
+                CHECK(!strcmp(w1, l1) && !strcmp(w2, l2), "a read of a setting while it waits gives what it will hold (flt_freq %s / %s, wt1_level %s / %s)", w1, l1, w2, l2);
+                api->destroy_instance(iw);
+            }
             {   /* a preset is a whole sound: a setting it does not name is at its default, not where the last sound left it (granular settings leaked into every later preset) */
                 char d0[64] = {}, d1[64] = {}, d2[64] = {};
                 api->set_param(inst, "preset", "0");

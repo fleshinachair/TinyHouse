@@ -109,6 +109,11 @@ struct tablor_instance {
 
     /* state blob scratch */
     char  state_buf[16 * 1024];
+    /* The JSON state of the chosen preset that still waits for the knob to rest, kept while the same one waits: a scroll reads it several times per detent (state
+     * reads come from the host's single callback thread, so no lock). Valid for the same waiting index, store list and table list, bank, wavetable pack and demo. */
+    std::string wc_json;
+    const void *wc_ps = nullptr, *wc_snap = nullptr;
+    int wc_pi = -1, wc_n = 0, wc_k[5] = { 0, 0, 0, 0, 0 };
     char  arp_str[4096] = {};                 /* the preset's arpeggiator, likewise */
     char  clip_str[4096] = {};                /* the preset's note pattern as the state carried it (kept to write it back out) */
     char  mac_str[3072] = {};                 /* the preset's macro routes ("macro:key:travel,..."), kept to write back out */
@@ -493,6 +498,27 @@ static void scan_user_presets(tablor_instance *inst)
     std::atomic_store(&inst->presets, std::shared_ptr<const tablor_instance::PresetList>(next));
 }
 
+/* The state the host reads is a JSON object (see build_state_json): {"tblr":"TBLR2;...", "<key>": value, ...}. The remote UI's manager reads every value of a slot
+ * in ONE call when the state is a JSON object, instead of one call per declared key (434 of them, on every preset change, a few of them running at once, on the
+ * channel the Move's own screen uses). The "tblr" field is the blob that restores the sound; a plain blob (older saved sets and presets) is its own. */
+static std::string state_blob(const char *s)
+{
+    if (s[0] != '{') return std::string(s);
+    const char *k = strstr(s, "\"tblr\":\"");
+    if (!k) return std::string();
+    std::string out;
+    for (const char *p = k + 8; *p && *p != '"'; p++) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            if (*p == 'u' && p[1] && p[2] && p[3] && p[4]) { out += (char) strtol(std::string(p + 1, 4).c_str(), nullptr, 16); p += 4; continue; }
+            if (*p == 'n') { out += '\n'; continue; }
+            if (*p == 't') { out += '\t'; continue; }
+        }
+        out += *p;
+    }
+    return out;
+}
+
 /* The state blob out of one of Schwung's preset files: {"name":..,"module":..,"version":1,"state":".."}.
  * Our blobs hold no quotes, so the value ends at the first unescaped quote; \ and \" are undone. */
 static bool read_store_state(const char *path, std::string &blob)
@@ -520,6 +546,7 @@ static bool read_store_state(const char *path, std::string &blob)
         if (raw[i] == '"') break;
         blob += raw[i];
     }
+    if (!blob.empty() && blob[0] == '{') blob = state_blob(blob.c_str());       /* a preset saved from the slot holds the JSON state: keep the blob */
     return !strncmp(blob.c_str(), "TBLR1;", 6) || !strncmp(blob.c_str(), "TBLR2;", 6);
 }
 
@@ -1239,6 +1266,56 @@ static void apply_macro_routes(tablor_instance *inst, const char *text)
 }
 
 /* Serialize the current sound into inst->state_buf (TBLR1 blob). */
+/* "%g" for a float, without snprintf for the usual range (a state read formats 521 of them inside the SPI callback). Same text as "%g" (six significant digits,
+ * no exponent between 1e-4 and 1e6, no trailing zeros); anything else goes through snprintf. */
+static int fmt_g(char *o, float f)
+{
+    const double v = f, a = fabs(v);
+    if (a >= 1e6 || (a < 1e-4 && a != 0) || std::signbit(v) && a == 0 || !(a == a)) return snprintf(o, 32, "%g", v);
+    char *w = o;
+    if (v < 0) *w++ = '-';
+    if (a == 0) { *w++ = '0'; *w = 0; return (int) (w - o); }
+    static const double p10[] = { 1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10 };
+    int e = (int) floor(log10(a));
+    if (e < 0 ? a * p10[-e] >= 10 : a >= p10[e + 1]) e++;
+    else if (e < 0 ? a * p10[-e] < 1 : a < p10[e]) e--;
+    if (e < -4 || e > 5) return snprintf(o, 32, "%g", v);
+    const double x = a * p10[5 - e];
+    long long r = (long long) x;
+    const double frac = x - (double) r;
+    if (frac > 0.5 || (frac == 0.5 && (r & 1))) r++;                  /* an exact tie goes to the even digit, as printf does */
+    if (r >= 1000000) { r /= 10; e++; }
+    if (e >= 6) return snprintf(o, 32, "%g", v);
+    char d[7];
+    for (int i = 5; i >= 0; i--) { d[i] = (char) ('0' + r % 10); r /= 10; }
+    int sig = 6;
+    while (sig > 1 && d[sig - 1] == '0') sig--;
+    if (e >= 0) {
+        for (int i = 0; i <= e; i++) *w++ = i < sig ? d[i] : '0';
+        if (sig > e + 1) { *w++ = '.'; for (int i = e + 1; i < sig; i++) *w++ = d[i]; }
+    } else {
+        *w++ = '0'; *w++ = '.';
+        for (int i = 0; i < -e - 1; i++) *w++ = '0';
+        for (int i = 0; i < sig; i++) *w++ = d[i];
+    }
+    *w = 0;
+    return (int) (w - o);
+}
+
+/* "key=value;" into out (room left: cap); returns the length written. */
+static int append_kv(char *out, size_t cap, const char *key, float v)
+{
+    const size_t kl = strlen(key);
+    if (cap < kl + 40) return 0;
+    memcpy(out, key, kl);
+    out[kl] = '=';
+    char *w = out + kl + 1;
+    w += fmt_g(w, v);
+    *w++ = ';';
+    *w = 0;
+    return (int) (w - out);
+}
+
 static void build_state_blob(tablor_instance *inst)
 {
     /* TBLR2, not TBLR1: v1.0.5 reordered the LFO shape options (the host
@@ -1279,8 +1356,7 @@ static void build_state_blob(tablor_instance *inst)
         }
         float v = inst->params()[i];
         if (v == tb_params[i].def) continue;            /* defaults are implicit */
-        o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o,
-                      "%s=%g;", tb_params[i].key, (double) v);
+        o += append_kv(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, tb_params[i].key, v);
         if (o >= (int) sizeof inst->state_buf - 64) break;
     }
     /* the FX buses' racks: the same keys behind "b1." and "b2." */
@@ -1289,7 +1365,7 @@ static void build_state_blob(tablor_instance *inst)
             if (tb_params[i].type == TB_PATH) continue;
             const float v = inst->engine.busPots[b][i];
             if (v == tb_params[i].def || o >= (int) sizeof inst->state_buf - 64) continue;
-            o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "b%d.%s=%g;", b + 1, tb_params[i].key, (double) v);
+            { char k2[96]; snprintf(k2, sizeof k2, "b%d.%s", b + 1, tb_params[i].key); o += append_kv(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, k2, v); }
         }
 }
 
@@ -1340,6 +1416,11 @@ static void reset_to_defaults(tablor_instance *inst)
  * it (the ER-99 total-silence lesson). */
 static void apply_state_blob(tablor_instance *inst, const char *val, bool host_restore = false)
 {
+    if (val[0] == '{') {                                  /* the JSON state: its blob restores the sound */
+        const std::string b = state_blob(val);
+        if (!b.empty()) apply_state_blob(inst, b.c_str(), host_restore);
+        return;
+    }
     bool v1 = strncmp(val, "TBLR1;", 6) == 0;
     if (!v1 && strncmp(val, "TBLR2;", 6) != 0) return;
     inst->state_seen = true;
@@ -1741,6 +1822,135 @@ static int write_str(char *buf, int buf_len, const char *s)
     return n;
 }
 
+static int tb_get_param(void *instance, const char *key, char *buf, int buf_len);
+
+/* The settings a stored blob ("TBLR2;a=1;b=2;") names, parsed once: where each parameter's text starts (null when the blob does not name it), and the macro strings. */
+struct WaitVals {
+    std::vector<const char *> at;
+    std::vector<int> len;
+    std::string macn, mac;
+    explicit WaitVals(const std::string &bl) : at(TB_PARAM_COUNT, nullptr), len(TB_PARAM_COUNT, 0)
+    {
+        const char *p = strchr(bl.c_str(), ';');
+        if (!p) return;
+        for (p++; *p;) {
+            const char *eq = strchr(p, '=');
+            if (!eq) break;
+            const char *end = strchr(eq, ';');
+            if (!end) end = eq + strlen(eq);
+            const size_t kl = (size_t) (eq - p);
+            if (kl < 64) {
+                char k[64];
+                memcpy(k, p, kl);
+                k[kl] = 0;
+                if (!strcmp(k, "macn")) macn.assign(eq + 1, (size_t) (end - eq - 1));
+                else if (!strcmp(k, "mac")) mac.assign(eq + 1, (size_t) (end - eq - 1));
+                else { const int i = param_index(k); if (i >= 0) { at[(size_t) i] = eq + 1; len[(size_t) i] = (int) (end - eq - 1); } }
+            }
+            p = *end ? end + 1 : end;
+        }
+    }
+};
+
+/* The state a chosen preset that still waits for the knob to rest will have once it lands: its own stored blob (what a read of the state answers meanwhile). */
+static bool waiting_state(tablor_instance *inst, std::string &st)
+{
+    const int pi = inst->pend_idx.load();
+    if (pi < 0) return false;
+    auto ps = inst->storeList();
+    if (pi >= (int) ps->items.size()) return false;
+    const std::string &bl = ps->items[(size_t) pi].blob;
+    st = "TBLR2;pk=" + preset_key(ps->items[(size_t) pi]) + ";" + bl.substr(bl.compare(0, 6, "TBLR2;") == 0 ? 6 : 0);
+    return true;
+}
+
+/* What a read of parameter `idx` answers, as a view: the live value, or (with a waiting preset's settings) the value that preset will hold (a setting it does
+ * not name is at its default). Unison Cap is the player's live limit, never part of a preset. `s`/`n` point at `tmp` (a number), an option's name, the instance's
+ * path or the blob itself; quoted says the text is a name or a path. */
+struct ParamView { const char *s; size_t n; bool quoted; };
+static ParamView param_view(tablor_instance *inst, int idx, const WaitVals *w, char *tmp)
+{
+    static const int capIdx = param_index("uni_cap");
+    const tb_param_t *p = &tb_params[idx];
+    if (idx == capIdx) w = nullptr;
+    const char *at = w ? w->at[(size_t) idx] : nullptr;
+    if (p->type == TB_PATH) {
+        if (!w) { const char *s = inst->wt_path[tb_path_slot(idx)]; return { s, strlen(s), true }; }
+        return { at ? at : "", at ? (size_t) w->len[(size_t) idx] : 0, true };
+    }
+    float v;
+    if (!w) v = inst->params()[idx];
+    else if (!at) v = p->def;
+    else {
+        char num[40];
+        const size_t l = std::min((size_t) w->len[(size_t) idx], sizeof num - 1);
+        memcpy(num, at, l);
+        num[l] = 0;
+        v = clamp_param(p, strtof(num, nullptr));
+    }
+    if (p->type == TB_ENUM) {
+        const char *name = p->options[(int) v];
+        if (!name) name = "?";
+        return { name, strlen(name), true };
+    }
+    return { tmp, (size_t) fmt_g(tmp, v), false };
+}
+
+static void json_str(std::string &o, const std::string &s)
+{
+    o += '"';
+    for (const unsigned char c : s) {
+        if (c == '"' || c == '\\') { o += '\\'; o += (char) c; }
+        else if (c < 0x20) { char t[8]; snprintf(t, sizeof t, "\\u%04x", c); o += t; }
+        else o += (char) c;
+    }
+    o += '"';
+}
+
+/* The state as a JSON object: the blob (what restores the sound) and the value of every parameter and of the small keys a page shows beside them, so one read
+ * serves the remote UI's manager, which otherwise reads each declared key one at a time. The big lists (preset_list, wt_paths, the table and sample shapes)
+ * are left out: they do not change with a preset, and the panel reads them itself. `waiting` is a chosen preset's blob when one has not landed yet. */
+static std::string build_state_json(tablor_instance *inst, const std::string &blob, const WaitVals *waiting)
+{
+    std::string o;
+    o.reserve(24 * 1024);
+    o += "{\"tblr\":";
+    json_str(o, blob);
+    char num[48];
+    for (int i = 0; i < TB_PARAM_COUNT; i++) {
+        const ParamView t = param_view(inst, i, waiting, num);
+        o += ",\"";
+        o += tb_params[i].key;
+        o += "\":";
+        if (t.quoted) json_str(o, std::string(t.s, t.n)); else o.append(t.s, t.n);
+    }
+    auto put = [&o](const char *k, const std::string &v) { o += ",\""; o += k; o += "\":"; json_str(o, v); };
+    char tmp[64];
+    static const char *const live[] = { "bank", "preset", "preset_now", "wt_pack", "demo_on", "demo_pack", "demo_part", "demo_now" };
+    for (const char *k : live) { tmp[0] = 0; tb_get_param(inst, k, tmp, sizeof tmp); put(k, tmp); }
+    if (waiting) {
+        put("macro_names", waiting->macn);
+        put("macro_routes", waiting->mac);
+    } else {
+        put("macro_names", inst->macn_str);
+        put("macro_routes", inst->mac_str);
+    }
+    static const int lvl[3] = { TB_P_WT1_LEVEL, TB_P_WT2_LEVEL, TB_P_WT3_LEVEL }, tab[3] = { TB_P_WT1_TABLE, TB_P_WT2_TABLE, TB_P_WT3_TABLE };
+    auto lvlOn = [&](int i) { char t2[48]; const ParamView v = param_view(inst, i, waiting, t2); return strtof(std::string(v.s, v.n).c_str(), nullptr) > 0 ? 1 : 0; };
+    snprintf(tmp, sizeof tmp, "%d,%d,%d", lvlOn(lvl[0]), lvlOn(lvl[1]), lvlOn(lvl[2]));
+    put("wt_on", tmp);
+    auto snap = inst->selection();
+    for (int s = 0; s < 3; s++) {
+        char t2[48];
+        const ParamView pv = param_view(inst, tab[s], waiting, t2);
+        snprintf(tmp, sizeof tmp, "%d", tb_select_index(*snap, std::string(pv.s, pv.n).c_str()));
+        const std::string k = "wt" + std::to_string(s + 1) + "_select";
+        put(k.c_str(), tmp);
+    }
+    o += '}';
+    return o;
+}
+
 static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 {
     auto *inst = (tablor_instance *) instance;
@@ -1899,64 +2109,51 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         /* The host's preset browser reads the state after EVERY detent (and the slot's autosave reads it too). A sound still waiting for the knob to rest is
          * answered from its own stored blob, which is what the state will be once it lands, instead of applying it: applying here defeated the rest
          * (each landing in a scroll was forced by this read, 140 ms early). */
-        const int pi = inst->pend_idx.load();
-        if (pi >= 0) {
+        std::string wst;
+        const bool waiting = waiting_state(inst, wst);
+        std::string plain;
+        if (waiting) plain = wst;
+        else { build_state_blob(inst); plain = inst->state_buf; }
+        /* The JSON form (blob + every value) when the reader's buffer holds it; a small buffer gets the plain blob, which restores the same sound. */
+        if (buf_len < 16 * 1024)                         /* too small for the JSON form (about 8-14 KB): the plain blob restores the same sound */
+            return write_str(buf, buf_len, plain.c_str());
+        std::string js;
+        bool cached = false;
+        if (waiting) {
             auto ps = inst->storeList();
-            if (pi < (int) ps->items.size()) {
-                std::string st = "TBLR2;pk=" + preset_key(ps->items[(size_t) pi]) + ";";
-                const std::string &bl = ps->items[(size_t) pi].blob;
-                size_t at = bl.compare(0, 6, "TBLR2;") == 0 ? 6 : 0;
-                st += bl.substr(at);
-                if (inst->diag) diag_log(inst, "state read of waiting preset %d: %d bytes in %lld us", pi, (int) st.size(), steady_us() - t0);
-                return write_str(buf, buf_len, st.c_str());
+            auto snap = inst->selection();
+            const int k[5] = { inst->bank_index.load(), inst->wt_pack.load(), inst->demo_pack.load(), inst->demo_part.load(), inst->demo_on.load() ? 1 : 0 };
+            if (inst->wc_pi == inst->pend_idx.load() && inst->wc_ps == ps.get() && inst->wc_snap == snap.get() && inst->wc_n == (int) ps->items.size() && !memcmp(inst->wc_k, k, sizeof k)) {
+                js = inst->wc_json;
+                cached = true;
+            } else {
+                std::unique_ptr<WaitVals> wv(new WaitVals(wst));
+                js = build_state_json(inst, plain, wv.get());
+                inst->wc_json = js; inst->wc_pi = inst->pend_idx.load(); inst->wc_ps = ps.get(); inst->wc_snap = snap.get(); inst->wc_n = (int) ps->items.size();
+                memcpy(inst->wc_k, k, sizeof k);
             }
+        } else {
+            js = build_state_json(inst, plain, nullptr);
         }
-        build_state_blob(inst);
-        if (inst->diag) diag_log(inst, "state read: %d bytes in %lld us", (int) strlen(inst->state_buf), steady_us() - t0);
-        return write_str(buf, buf_len, inst->state_buf);
+        const bool asJson = (int) js.size() < buf_len;
+        if (inst->diag) diag_log(inst, "state read%s: %d bytes (%s) in %lld us", waiting ? (cached ? " of a waiting preset (kept)" : " of a waiting preset") : "", (int) (asJson ? js.size() : plain.size()), asJson ? "json" : "plain, the buffer is small", steady_us() - t0);
+        return write_str(buf, buf_len, asJson ? js.c_str() : plain.c_str());
     }
 
     int idx = param_index(key);
     if (idx < 0) return -1;
-    const tb_param_t *p = &tb_params[idx];
-    {   /* A preset is waiting for the knob to rest. The Move reads a page of knob values after every detent; applying the preset for each read would
-         * defeat the rest. The answer is what the waiting preset will hold once it lands, read from its stored blob (a setting it does not name is at its default). */
-        const int pi = inst->pend_idx.load();
-        if (pi >= 0 && idx != param_index("uni_cap")) {   /* Unison Cap is the player's live limit, never part of a preset */
-            auto ps = inst->storeList();
-            if (pi < (int) ps->items.size()) {
-                const std::string &bl = ps->items[(size_t) pi].blob;
-                std::string needle = std::string(";") + p->key + "=";
-                size_t at = bl.find(needle);
-                std::string val;
-                if (at != std::string::npos) {
-                    at += needle.size();
-                    size_t end = bl.find(';', at);
-                    val = bl.substr(at, end == std::string::npos ? std::string::npos : end - at);
-                }
-                if (p->type == TB_PATH) return write_str(buf, buf_len, val.c_str());
-                const float v = at != std::string::npos ? clamp_param(p, strtof(val.c_str(), nullptr)) : p->def;
-                if (p->type == TB_ENUM) {
-                    const char *name = p->options[(int) v];
-                    return write_str(buf, buf_len, name ? name : "?");
-                }
-                char tmp2[32];
-                snprintf(tmp2, sizeof tmp2, "%g", (double) v);
-                return write_str(buf, buf_len, tmp2);
-            }
-        }
-    }
-
-    if (p->type == TB_PATH)
-        return write_str(buf, buf_len, inst->wt_path[tb_path_slot(idx)]);
-
-    if (p->type == TB_ENUM) {
-        const char *name = p->options[(int) inst->params()[idx]];
-        return write_str(buf, buf_len, name ? name : "?");
-    }
-    char tmp[32];
-    snprintf(tmp, sizeof tmp, "%g", (double) inst->params()[idx]);
-    return write_str(buf, buf_len, tmp);
+    /* A preset is waiting for the knob to rest. The Move reads a page of knob values after every detent; applying the preset for each read would
+     * defeat the rest. The answer is what the waiting preset will hold once it lands, read from its stored blob. */
+    std::string wst;
+    const bool waiting = waiting_state(inst, wst);
+    std::unique_ptr<WaitVals> wv;
+    if (waiting) wv.reset(new WaitVals(wst));
+    char num[48];
+    const ParamView pv = param_view(inst, idx, wv.get(), num);
+    const size_t m = std::min(pv.n, (size_t) buf_len - 1);
+    memcpy(buf, pv.s, m);
+    buf[m] = 0;
+    return (int) m;
 }
 
 static int tb_get_error(void *, char *, int) { return 0; }

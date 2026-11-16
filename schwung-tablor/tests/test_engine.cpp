@@ -871,6 +871,20 @@ static void testArp()
         auto h = steps(*e, 5);
         CHECK(near(h[3], 523.3) && near(h[4], 659.3), "a transpose range repeats the keys an octave up (%.0f %.0f Hz)", h[3], h[4]);
     }
+    {   /* Serum's Transpose Shape (probed with a sine: ARP - Sine Heaven is DownUp, range 3): the passes go top to bottom and back, or up and back, keys going up inside each. The state carries it as shape + 8 * trShape. */
+        auto e = make("24,24,100,2,12,0,0,12,0,127,0");                                       /* DownUp, range 2: passes +24, +12, 0, +12, +24 */
+        auto h = steps(*e, 13);
+        CHECK(near(h[0], 1046.5) && near(h[3], 523.3) && near(h[6], 261.6) && near(h[9], 523.3) && near(h[12], 1046.5),
+              "Transpose Shape DownUp plays the passes +24 +12 0 +12 +24 (%.0f %.0f %.0f %.0f %.0f Hz)", h[0], h[3], h[6], h[9], h[12]);
+        auto u = make("16,24,100,2,12,0,0,12,0,127,0");                                       /* UpDown: 0, +12, +24, +12, 0 */
+        auto g = steps(*u, 13);
+        CHECK(near(g[0], 261.6) && near(g[3], 523.3) && near(g[6], 1046.5) && near(g[9], 523.3) && near(g[12], 261.6),
+              "Transpose Shape UpDown plays the passes 0 +12 +24 +12 0 (%.0f %.0f %.0f %.0f %.0f Hz)", g[0], g[3], g[6], g[9], g[12]);
+        auto d = make("8,24,100,2,12,0,0,12,0,127,0");                                        /* Down: +24, +12, 0, +24 */
+        auto w = steps(*d, 10);
+        CHECK(near(w[0], 1046.5) && near(w[3], 523.3) && near(w[6], 261.6) && near(w[9], 1046.5),
+              "Transpose Shape Down plays the passes +24 +12 0 +24 (%.0f %.0f %.0f %.0f Hz)", w[0], w[3], w[6], w[9]);
+    }
     {
         auto e = make("4,24,100,0,0,0,0,12,0,127,96|0,24,2,100|24,24,0,100|48,24,4,100");     /* indexes 2, 0, 4 of three keys: G3, C3, E3 (wrap range 0) */
         auto h = steps(*e, 4);

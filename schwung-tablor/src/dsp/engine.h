@@ -54,6 +54,7 @@ struct Arp {
     int step = 24;                  /* one step, ticks */
     int gate = 100;                 /* note length, % of the step (of the pattern note) */
     int trRange = 0, trShift = 0;   /* the held notes repeat trRange more times, each trShift semitones above the one before */
+    int trShape = 0;                /* the order of those passes (Serum's Transpose Shape, probed: Up 0,1..R; Down R..0; UpDown 0..R..1; DownUp R..0..1): 0 Up, 1 Down, 2 UpDown, 3 DownUp. In the state it rides in the shape field as shape + 8 * trShape */
     int transpose = 0;              /* everything, semitones */
     int wrapRange = 0, wrapSemis = 12;   /* a pattern index past the held keys wraps round them, up to wrapRange times, wrapSemis higher each time */
     int zoneMin = 0, zoneMax = 127; /* keys outside play as they are */
@@ -73,7 +74,7 @@ inline std::shared_ptr<Arp> parseArp(const char *s)
         s = e;
         if (i < 10) { if (*s != ',') return nullptr; ++s; }
     }
-    a->shape = (int) std::clamp(h[0], 0L, 6L); a->step = (int) std::clamp(h[1], 1L, 4096L); a->gate = (int) std::clamp(h[2], 1L, 400L);
+    a->shape = (int) std::clamp(h[0] & 7L, 0L, 6L); a->trShape = (int) std::clamp(h[0] >> 3, 0L, 3L); a->step = (int) std::clamp(h[1], 1L, 4096L); a->gate = (int) std::clamp(h[2], 1L, 400L);
     a->trRange = (int) std::clamp(h[3], 0L, 8L); a->trShift = (int) std::clamp(h[4], -48L, 48L); a->transpose = (int) std::clamp(h[5], -48L, 48L);
     a->wrapRange = (int) std::clamp(h[6], 0L, 24L); a->wrapSemis = (int) std::clamp(h[7], -48L, 48L);
     a->zoneMin = (int) std::clamp(h[8], 0L, 127L); a->zoneMax = (int) std::clamp(h[9], 0L, 127L); a->len = (int) std::clamp(h[10], 0L, 1000000L);

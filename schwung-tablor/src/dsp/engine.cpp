@@ -603,7 +603,16 @@ void Engine::arpStepNote(long s, const Arp &a)
     case 2: { const int period = std::max(1, 2 * total - 2); const int p = (int) (s % period); i = p < total ? p : period - p; break; }
     case 5: i = rnd() % total; break;
     case 6: i = rnd() % total; if (total > 1 && i == arpLastPick) i = (i + 1 + rnd() % (total - 1)) % total; arpLastPick = i; break;
-    default: i = (int) (s % total); break;
+    default:
+        if (a.shape == 0 && a.trShape && a.trRange > 0) {          /* the passes follow Serum's Transpose Shape; the keys inside one pass go up */
+            const int R = a.trRange;
+            const long k = s / m;
+            int pass;
+            if (a.trShape == 1) pass = R - (int) (k % (R + 1));
+            else { const int q = (int) (k % (2 * R)); const int u = q <= R ? q : 2 * R - q; pass = a.trShape == 2 ? u : R - u; }
+            i = pass * m + (int) (s % m);
+        } else i = (int) (s % total);
+        break;
     }
     const double st = (double) s * a.step;
     arpPlay(base[i % m] + (i / m) * a.trShift + a.transpose, vel[i % m], st + std::max(1.0, a.step * a.gate / 100.0));

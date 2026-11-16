@@ -197,6 +197,7 @@ def clip_from_tree(tree: dict):
 # of the one below, with 1/16 at 0.4425..0.5575 (1/16 when unset). A Pattern clip has its own, narrower bands (0.07 wide) and its 1/16 cells are stretched to the step.
 ARP_UP_EDGES = [(0.0, 4.0), (0.0975, 2.0), (0.2125, 1.0), (0.3275, 0.5), (0.4425, 0.25), (0.5575, 0.125), (0.6725, 0.0625), (0.7875, 0.03125), (0.9025, 0.015625)]
 ARP_PATTERN_EDGES = [(0.0, 4.0), (0.275, 2.0), (0.35, 1.0), (0.42, 0.5), (0.49, 0.25), (0.56, 0.125), (0.635, 0.0625), (0.705, 0.03125), (0.775, 0.015625)]
+ARP_TRANSPOSE_SHAPES = {"Up": 0, "Down": 1, "UpDown": 2, "DownUp": 3}
 ARP_SHAPES = {"Up": 0, "Down": 1, "UpDown": 2, "Played": 3, "Pattern": 4, "RandOnce": 5, "RandDrift": 5, "RandNoDup": 6}
 
 
@@ -229,6 +230,8 @@ def arp_from_tree(tree: dict):
     gate = int(round(p.get("kParamGate", 100.0)))
     head = [sh, int(round(beats * 96)), gate, int(p.get("kParamTransposeRange", 0)), int(round(p.get("kParamTransposeShift", 0.0))), int(round(p.get("kParamTranspose", 0.0))),
             int(p.get("kParamWrapRange", 0)), int(round(p.get("kParamWrapTranspose", 12.0))), int(a.get("kParamKeyZoneMin", 0)), int(a.get("kParamKeyZoneMax", 127)), 0]
+    if head[3] and head[4] and sh == 0:
+        head[0] += 8 * ARP_TRANSPOSE_SHAPES.get(p.get("kParamTransposeShape", "Up"), 0)          # the order of the transposed passes (probed): only with the Up note order, the other combinations play as Up
     if not head[4]:
         head[3] = 0                               # the repeats of the held keys are shifted by the Transpose Shift (default 0): without a shift they are the same notes (measured: no repeat is heard)
     if sh == 4:

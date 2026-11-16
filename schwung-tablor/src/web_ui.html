@@ -57,6 +57,7 @@ body{
 .smpslot:not(.sel){display:none}
 .smpslot .badge{margin-left:8px; padding:1px 7px; border-radius:9px; font-size:10px; border:1px solid var(--line2); color:var(--faint)}
 .smpslot .badge.gran{color:var(--g); border-color:var(--g)}
+.grainview{display:block; width:100%; height:168px; background:#0c0e0f; border:1px solid var(--line); border-radius:4px; margin:2px 0 10px; cursor:ew-resize; touch-action:none}
 .smpslot .smpfile{color:var(--faint); font-size:11px; margin:2px 0 6px; word-break:break-all}
 @media (max-width:1100px){
   :root{--kw:48px; --ks:32px}
@@ -1333,6 +1334,152 @@ function smpNoteUpdate() {
   n.dataset.has = parts.length ? "1" : "";
   SMPUI.noteShow && SMPUI.noteShow();
 }
+/* ------------------------------------------------------- the granulator picture
+ * What a granular slot is doing, drawn from its settings: the sample's shape (the DSP's smpN_shape digest), the part of it the scan covers (Start .. End, or the loop
+ * when one is on), a scan head that moves at the Scan rate, and a lane of grains under it: as many alive at once as Density says (30 x the knob), each as wide as
+ * Length says (10 s x the knob^4, against a file drawn as 4 s) and shaped by the Window, Param and Skew (the same formulas as the engine). It is an illustration
+ * of the settings, not the audio: the real read positions are not sent to the page. Drag on it to set Start. */
+var SMPSHAPE = {};
+var GRAINVIEWS = [];
+var GRAIN_Q = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+var GRAIN_FILE_S = 4;
+function parseSmpDigest(v) {
+  if (typeof v !== "string" || v.indexOf(",") < 0) return null;
+  var txt = v.slice(v.indexOf(",") + 1), d = [];
+  for (var i = 0; i < txt.length; i++) d.push(Math.max(0, GRAIN_Q.indexOf(txt.charAt(i))) / 63);
+  return d.length ? d : null;
+}
+/* the engine's grainWindow (granular.h): shape 0 Tukey, 1 ExpDec, 2 Triangle, 3 BlackmanHarris, 4 Gaussian; x = age / length in 0..1 */
+function grainWin(shape, param, skew, x) {
+  var a = Math.max(0, Math.min(100, param)) * 0.01;
+  if (shape !== 1) {
+    var c = 0.5 + Math.max(-100, Math.min(100, skew)) / 200;
+    if (c <= 0) x = 0.5 + 0.5 * x; else if (c >= 1) x = 0.5 * x; else x = x < c ? 0.5 * x / c : 0.5 + 0.5 * (x - c) / (1 - c);
+  }
+  var pi = Math.PI;
+  switch (shape) {
+    case 1: { var k = param * 0.1; return Math.exp(-k * k * x); }
+    case 2: return (1 - a) + a * (1 - Math.abs(2 * x - 1));
+    case 3: { var bh = 0.35875 - 0.48829 * Math.cos(2 * pi * x) + 0.14128 * Math.cos(4 * pi * x) - 0.01168 * Math.cos(6 * pi * x); return (1 - a) + a * bh; }
+    case 4: { if (param <= 0) return 1; var d = x - 0.5; return Math.exp(-d * d / (2 * (0.05 / param))); }
+    default: {
+      if (a <= 0) return 1;
+      var h = a * 0.5;
+      if (x < h) return 0.5 * (1 - Math.cos(pi * x / h));
+      if (x > 1 - h) return 0.5 * (1 - Math.cos(pi * (1 - x) / h));
+      return 1;
+    }
+  }
+}
+function grainRand(k) { var x = Math.sin(k * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); }
+
+function grainDraw(c, p) {
+  var w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;                                                          /* on a hidden tab or slot */
+  var dpr = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  var g = c.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  var t = performance.now() / 1000;
+  var kd = val(p + "_gdens") / 127, kl = val(p + "_glen") / 127, scan = val(p + "_gscan");
+  var st = val(p + "_gstart") / 100, en = val(p + "_gend") / 100;
+  if (en <= st) en = Math.min(1, st + 0.01);
+  var loopOn = val(p + "_gloop") >= 1, ls = val(p + "_gloops") / 100, le = val(p + "_gloope") / 100;
+  if (le <= ls) le = Math.min(1, ls + 0.01);
+  var man = val(p + "_gman") >= 1, mpos = val(p + "_gpos") / 100;
+  var shape = val(p + "_gwin"), wparam = val(p + "_gwinp"), wskew = val(p + "_gskew");
+  var rOff = val(p + "_groff") / 100, rGain = val(p + "_grgain") / 100;
+  var N = 30 * kd, lenSec = 10 * Math.pow(kl, 4);
+  var wavH = Math.round(h * 0.52), laneTop = wavH + 14, laneH = h - laneTop - 16, mid = wavH / 2;
+  var lo = loopOn ? ls : st, hi = loopOn ? le : en;                              /* the stretch the head travels */
+  var rate = scan / 100 / GRAIN_FILE_S;                                            /* fractions of the file per second */
+  function headAt(tt) {
+    if (man) return mpos;
+    var span = hi - lo, f = ((tt * rate) % span + span) % span;
+    return rate >= 0 ? lo + f : hi - (span - f) % span;
+  }
+
+  /* the sample */
+  var d = SMPSHAPE[p];
+  g.fillStyle = "rgba(" + GREEN + ",.28)";
+  if (d) {
+    var n = d.length;
+    for (var x = 0; x < w; x++) {
+      var i0 = Math.floor(x * n / w), i1 = Math.max(i0 + 1, Math.floor((x + 1) * n / w)), m = 0;
+      for (var i = i0; i < i1 && i < n; i++) if (d[i] > m) m = d[i];
+      var r = Math.max(0.5, m * (wavH / 2 - 2));
+      g.fillRect(x, mid - r, 1, r * 2);
+    }
+  } else {
+    g.fillStyle = "rgba(255,255,255,.07)"; g.fillRect(0, mid, w, 1);
+    label(g, "no sample loaded in this slot", w / 2, mid - 4, "center");
+  }
+  /* outside the scan stretch: dimmed; the stretch's edges, and the loop's when it differs */
+  g.fillStyle = "rgba(10,11,12,.62)";
+  g.fillRect(0, 0, st * w, wavH); g.fillRect(en * w, 0, w - en * w, wavH);
+  g.fillStyle = "rgba(" + GREEN + ",.9)";
+  g.fillRect(Math.round(st * w), 0, 1, wavH); g.fillRect(Math.round(en * w) - 1, 0, 1, wavH);
+  label(g, "START", Math.min(w - 30, st * w + 3), 9);
+  if (en < 0.995) label(g, "END", Math.max(24, en * w - 3), 9, "right");
+  if (loopOn) {
+    g.strokeStyle = "rgba(255,200,90,.85)"; g.lineWidth = 1;
+    g.strokeRect(Math.round(ls * w) + .5, wavH - 6.5, Math.max(2, Math.round((le - ls) * w)), 6);
+    label(g, "LOOP", ls * w + 3, wavH - 9);
+  }
+  /* the scan head */
+  var head = headAt(t), hx = Math.round(head * w);
+  g.fillStyle = "rgb(" + GREEN + ")"; g.fillRect(hx, 0, 1.5, wavH + 6);
+  g.beginPath(); g.moveTo(hx - 4, 0); g.lineTo(hx + 5, 0); g.lineTo(hx + .5, 6); g.closePath(); g.fill();
+
+  /* the grain lane */
+  g.fillStyle = "rgba(255,255,255,.035)"; g.fillRect(0, laneTop, w, laneH);
+  var alive = 0, widthPx = Math.max(2, Math.min(w * 0.7, lenSec / GRAIN_FILE_S * w));
+  if (kd > 0 && kl > 0) {
+    var born = N / Math.max(lenSec, 0.001);                                       /* births per second: N alive at a time */
+    var kNow = Math.floor(t * born), kFirst = Math.max(0, kNow - Math.ceil(N) - 1);
+    for (var k = kNow; k >= kFirst && alive < 48; k--) {
+      var age = (t - k / born) / Math.max(lenSec, 0.001);
+      if (age < 0 || age >= 1) continue;
+      var pos = headAt(k / born) + (grainRand(k) - 0.5) * 2 * rOff * 0.5;          /* Random Offset scatters the read position */
+      var amp = 1 - rGain * grainRand(k + 7919) * 0.9;                              /* Random Gain thins some of them */
+      var gx = pos * w, ww = widthPx, ctop = laneTop + laneH;
+      g.beginPath(); g.moveTo(gx, ctop);
+      for (var q = 0; q <= 20; q++) g.lineTo(gx + ww * q / 20, ctop - laneH * 0.92 * amp * grainWin(shape, wparam, wskew, q / 20));
+      g.lineTo(gx + ww, ctop); g.closePath();
+      g.fillStyle = "rgba(" + GREEN + "," + (0.10 + 0.30 * (1 - age)).toFixed(3) + ")"; g.fill();
+      g.strokeStyle = "rgba(" + GREEN + ",.35)"; g.lineWidth = 1; g.stroke();
+      var dx = gx + ww * age, dy = ctop - laneH * 0.92 * amp * grainWin(shape, wparam, wskew, age);
+      g.fillStyle = "rgba(217,255,228,.95)"; g.fillRect(dx - 1, dy - 1, 3, 3);          /* where this grain is in its own window now */
+      alive++;
+    }
+  }
+  /* the numbers behind it */
+  var ms = lenSec * 1000;
+  label(g, alive + " grains alive  ·  " + N.toFixed(1) + " overlap  ·  length " + (ms < 1000 ? ms.toFixed(ms < 10 ? 1 : 0) + " ms" : (ms / 1000).toFixed(2) + " s") + "  ·  scan " + (scan > 0 ? "+" : "") + scan + " %" + (man ? "  ·  manual position" : ""), 6, h - 5);
+  label(g, "an illustration of the settings, not the audio · drag to set Start", w - 6, h - 5, "right");
+}
+
+function grainView(into, p) {
+  var c = el("canvas", "grainview", into);
+  c.title = "Drag to set Start. The picture follows Density, Length, Scan rate, Window, Start, End, Loop and the Random settings.";
+  var live = false;
+  var setStart = function (e) {
+    var r = c.getBoundingClientRect(), f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    setVal(p + "_gstart", Math.round(f * 100), true);
+  };
+  c.addEventListener("pointerdown", function (e) { live = true; try { c.setPointerCapture(e.pointerId); } catch (_) {} setStart(e); e.preventDefault(); });
+  c.addEventListener("pointermove", function (e) { if (live) setStart(e); });
+  var up = function () { live = false; };
+  c.addEventListener("pointerup", up); c.addEventListener("pointercancel", up);
+  GRAINVIEWS.push({ c: c, p: p });
+  if (GRAINVIEWS.length === 1) {                                                     /* one loop for all three slots; a hidden one costs a width check */
+    var loop = function () { requestAnimationFrame(loop); GRAINVIEWS.forEach(function (v) { grainDraw(v.c, v.p); }); };
+    requestAnimationFrame(loop);
+  }
+  return c;
+}
+
 function buildSample(page) {
   var sel = el("div", "seg", page), slots = [];
   sel.style.margin = "0 0 10px";
@@ -1364,6 +1511,7 @@ function buildSample(page) {
     row([[p + "_post", "Route"], [p + "_bus1", "Bus 1"], [p + "_bus2", "Bus 2"]], pn.body);
     pn.body.appendChild(gran);
     sub(gran, "Grains");
+    grainView(gran, p);
     row([[p + "_gdens", "Density"], [p + "_glen", "Length"], [p + "_gscan", "Scan rate"], [p + "_gstart", "Start"], [p + "_gend", "End"]], gran);
     row([[p + "_gdenm", "Density mode"], [p + "_glenm", "Length mode"]], gran);
     sub(gran, "Window");
@@ -1375,6 +1523,7 @@ function buildSample(page) {
     sub(gran, "Random");
     row([[p + "_grdir", "Direction"], [p + "_grgain", "Gain"], [p + "_grpitch", "Pitch"], [p + "_groff", "Offset"], [p + "_grlen", "Length"], [p + "_grpan", "Pan"]], gran);
     on(p + "_kind", upd); on(p + "_level", upd); upd();
+    EXTRA[p + "_shape"] = function (v) { SMPSHAPE[p] = parseSmpDigest(v); };
     EXTRA[p + "_set"] = function (v) { file.textContent = v ? "File: " + String(v).split("/").pop().replace(/\.tbs$/, "") : "No sample loaded in this slot."; };
   });
   el("div", "note", page, "Which sample plays is part of the preset: a Serum preset brings its own, and the importer makes a set from it. Kind switches a slot between a plain sample and the granular oscillator; the grain controls show for Granular.");

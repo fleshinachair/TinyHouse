@@ -722,6 +722,10 @@ BANKS = [
     # Every key is in the table already (an earlier bank), so no number moves.
     ("Grain", False, [row(G["dens"], G["len"], G["scan"], G["start"], G["kind"], S["level"], G["win"], G["winp"])
                       for G, S in ((GRAN1, SAMPLE), (GRAN2, SAMPLE2), (GRAN3, SAMPLE3))]),
+    # The Effects and Mod FX pages as the device shows them now: the switches together on the first line (they draw as a strip of boxes) and the knobs for them under.
+    # The older Effects and Mod FX rows above stay as they were (they fix the parameters' numbers); these only reorder keys that are in the table already.
+    ("Effects Page", False, [row(FX["eqon"], FX["wideon"], FX["dlyon"], FX["revon"], FX["compon"], FX["fxon"], FX["dtime"], FX["rdec"])]),
+    ("Mod FX Page", False, [row(MODFX["con"], MODFX["fon"], MODFX["pon"], MODFX["crate"], MODFX["cmix"], MODFX["fmix"], MODFX["pmix"], MODFX["cdep"])]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -806,6 +810,12 @@ if MACRO_WIDGETS:
     # The Effects page's first line: the four stages of the chain as one strip of boxes, filled when the stage is on.
     for _k in ("eq_on", "wide_on", "dly_on", "rev_on"):
         VIZ[_k] = {"kind": "custom:tinyhouse_fxchain", "group": "fxchain", "role": _k}
+    # The same strip for the compressor and the master switch (second line of the Effects page, no line between them) and for the three modulation effects (the Mod FX
+    # page's first line, their mixes under them).
+    for _k in ("comp_on", "fx_on"):
+        VIZ[_k] = {"kind": "custom:tinyhouse_fxchain", "group": "fxmaster", "role": _k}
+    for _k in ("chor_on", "flan_on", "phas_on"):
+        VIZ[_k] = {"kind": "custom:tinyhouse_fxchain", "group": "modfx", "role": _k}
     # The Grain pages (one per sample slot): the sample's shape across the first line with the start point and the scan direction marked, the four main grain
     # knobs under it. Kind and level are read as extra keys (they are on the second line, outside the picture).
     for _p in ("smp", "smp2", "smp3"):
@@ -853,8 +863,8 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The roo
     ("Main",    0, "Main"),
     ("Tone",    1, "Tone"),
     ("Macros",  0, "Macros"),
-    ("Effects", 0, "Effects"),
-    ("Mod FX",  0, "Mod FX"),
+    ("Effects Page", 0, "Effects"),
+    ("Mod FX Page",  0, "Mod FX"),
     ("Global",  0, "Voice"),
     ("Grain",   0, "Grain 1"),
     ("Grain",   1, "Grain 2"),

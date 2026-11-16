@@ -9,7 +9,8 @@
  *
  * custom:tinyhouse_waves: the Tone page's three wavetable positions as ONE picture across their three cells: each oscillator's wave at its position,
  *   from the shape digests the DSP publishes (wt1_shape .. wt3_shape, extra keys); an oscillator that is off (wt_on) is drawn as a dash.
- * custom:tinyhouse_fxchain: the Effects page's first line (EQ, width, delay, reverb) as a strip of boxes, filled when the stage is on.
+ * custom:tinyhouse_fxchain: a row of effect switches as a strip of boxes, filled when the stage is on: the Effects page's EQ / width / delay / reverb, its compressor
+ *   and master switch, and the Mod FX page's chorus / flanger / phaser.
  * custom:tinyhouse_grain: a Grain page's first line: the sample's shape (smpN_shape) with the start point and the scan direction marked.
  * custom:tinyhouse_pos1 .. 3: the single-cell position dial (no page uses it now; kept for the tests and for a layout that wants it).
  *
@@ -236,18 +237,23 @@
         }
     }
 
-    /* The Effects page: EQ, width, delay, reverb as boxes with a line between them; a stage that is on is a filled box. */
-    const CHAIN = [["eq_on", "EQ"], ["wide_on", "WID"], ["dly_on", "DLY"], ["rev_on", "REV"]];
+    /* The switches of the effect pages as boxes in a row (the group's keys, in order), a stage that is on is a filled box. The EQ / width / delay / reverb chain and
+     * the three modulation effects have a line between the boxes (one stage feeds the next); the compressor and the master switch (group "fxmaster") do not. */
+    const SWITCH_LABELS = { eq_on: "EQ", wide_on: "WID", dly_on: "DLY", rev_on: "REV", comp_on: "CMP", fx_on: "FX", chor_on: "CHO", flan_on: "FLA", phas_on: "PHA" };
+    const CHAIN_DEFAULT = ["eq_on", "wide_on", "dly_on", "rev_on"];
     function drawFxChain(ctx, payload) {
         const values = (payload && payload.values) || {};
-        const W = ctx.width, H = ctx.height, n = CHAIN.length, gap = 3;
+        const grp = payload && payload.group;
+        const keys = grp && Array.isArray(grp.keys) && grp.keys.length ? grp.keys : CHAIN_DEFAULT;
+        const lines = !(grp && grp.group === "fxmaster");
+        const W = ctx.width, H = ctx.height, n = keys.length, gap = 3;
         const bw = Math.floor((W - gap * (n - 1)) / n), bh = Math.min(H, 13), by = (H - bh) >> 1;
         for (let i = 0; i < n; i++) {
-            const x = i * (bw + gap), v = values[CHAIN[i][0]], on = v === undefined || v === null ? true : isOn(v);
-            if (i) ctx.fillRect(x - gap, by + (bh >> 1), gap, 1, 1);                      /* the line from the stage before */
+            const x = i * (bw + gap), v = values[keys[i]], on = v === undefined || v === null ? true : isOn(v);
+            if (i && lines) ctx.fillRect(x - gap, by + (bh >> 1), gap, 1, 1);             /* the line from the stage before */
             if (on) ctx.fillRect(x, by, bw, bh, 1);
             else { ctx.fillRect(x, by, bw, 1, 1); ctx.fillRect(x, by + bh - 1, bw, 1, 1); ctx.fillRect(x, by, 1, bh, 1); ctx.fillRect(x + bw - 1, by, 1, bh, 1); }
-            const label = CHAIN[i][1], tw = ctx.textWidth(label);
+            const label = SWITCH_LABELS[keys[i]] || String(keys[i]).slice(0, 3).toUpperCase(), tw = ctx.textWidth(label);
             ctx.print(x + Math.max(1, (bw - tw) >> 1), by + Math.max(0, (bh - 7) >> 1), label, on ? 0 : 1);
         }
     }

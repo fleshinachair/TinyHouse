@@ -157,6 +157,22 @@ const saw = waveDigest(24, 64, (p, x) => 2 * x - 1);
     kd("fxchain").draw(ctxOf(128, 15), undefined);
 }
 
+// the same strip for the compressor + master switch (no line between) and for chorus / flanger / phaser
+{
+    const draw = (keys, group, v, w) => { const c = ctxOf(w, 15); kd("fxchain").draw(c, { values: v, group: { keys, group } }); return c; };
+    const m = draw(["comp_on", "fx_on"], "fxmaster", { comp_on: "On", fx_on: "Off" }, 64);
+    show(m, "comp + master: CMP on, FX off");
+    check(m.texts.map((t) => t[2]).join(",") === "CMP,FX" && m.texts[0][3] === 0 && m.texts[1][3] === 1, "two boxes, CMP and FX, the first on and the second off");
+    const gapRow = (c, x) => c.px[7 * c.width + x];
+    check(gapRow(m, 31) === 0 || gapRow(m, 32) === 0, "no line between the compressor and the master switch");
+    const mod = draw(["chor_on", "flan_on", "phas_on"], "modfx", { chor_on: 1, flan_on: 0, phas_on: "On" }, 96);
+    show(mod, "mod fx: CHO on, FLA off, PHA on");
+    check(mod.texts.map((t) => t[2]).join(",") === "CHO,FLA,PHA" && mod.texts.map((t) => t[3]).join("") === "010", "three boxes, CHO FLA PHA, filled when on");
+    check(mod.outOfBounds === 0 && m.outOfBounds === 0, "both strips stay inside the frame");
+    const lined = draw(["comp_on", "fx_on"], "fxchain", { comp_on: "On", fx_on: "On" }, 64);
+    check(lined.px.reduce((a, v) => a + v, 0) > m.px.reduce((a, v) => a + v, 0), "a group that is not the master gets the connecting line");
+}
+
 // a Grain page's first line
 {
     const cols = 96; let t = cols + ","; for (let i = 0; i < cols; i++) t += Qs[Math.round(63 * Math.exp(-i / 30) * (0.6 + 0.4 * Math.abs(Math.sin(i))))];

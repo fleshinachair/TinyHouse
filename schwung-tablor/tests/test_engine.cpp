@@ -298,6 +298,23 @@ static void testTuneRange()
         const double hz = heardHz(render(e, 2000));
         CHECK(hz > 425.0 && hz < 455.0, "a spare envelope into WT1 Pitch moves it 24 st (%.1f Hz for 440)", hz);
     }
+    {   /* a spare envelope into WT1 Warp: an FM warp from the Noise at amount 0 is the plain sine until the route lifts the amount, then it is not */
+        auto make = [&](bool routed) {
+            auto e = std::make_unique<Engine>();
+            e->setTable(0, sine);
+            e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127;
+            e->pots[TB_P_WT1_XW] = 3; e->pots[TB_P_WT1_XS] = 4; e->pots[TB_P_WT1_XA] = 0;
+            if (routed) {
+                e->pots[TB_P_ME1_DST] = MD_WT1_WARP; e->pots[TB_P_ME1_AMT] = 127;
+                e->pots[TB_P_ME1_A] = 0; e->pots[TB_P_ME1_S] = 127;
+            }
+            note(*e, 45);
+            render(*e, 200);
+            return render(*e, 400);
+        };
+        const auto plain = make(false), moved = make(true);
+        CHECK(plain != moved, "a spare envelope into WT1 Warp lifts an FM warp from amount 0 (the render changes)");
+    }
 }
 
 static void testSoftClipper()

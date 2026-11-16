@@ -388,7 +388,9 @@ MOD_DST = ["None",
            # A sample slot's Level knob (a Sample / Granular oscillator whose volume comes from an LFO or envelope).
            "Smp1 Level", "Smp2 Level", "Smp3 Level",
            # The Filter FX's Wet knob (a fraction of 0..100 %), moved by an LFO / envelope route.
-           "FX Filter Wet", "WT1 Pitch", "WT2 Pitch", "WT3 Pitch"]
+           "FX Filter Wet", "WT1 Pitch", "WT2 Pitch", "WT3 Pitch",
+           # An oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob, 0..1), moved by an LFO / envelope route.
+           "WT1 Warp", "WT2 Warp", "WT3 Warp"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,

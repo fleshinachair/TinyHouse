@@ -78,6 +78,7 @@ enum ModDst {
     MD_SMP1_LEVEL, MD_SMP2_LEVEL, MD_SMP3_LEVEL,
     MD_FXF_WET,                  /* the effects block's Filter FX Wet, as a fraction of its 0..100 % range: read by the engine from the newest voice (fxfWetMod) */
     MD_WT1_PITCH, MD_WT2_PITCH, MD_WT3_PITCH,     /* an oscillator's pitch in semitones, 48 per unit of the route (a pitch envelope: a kick's drop is 24 st, past the +-12 st of the Tune destinations) */
+    MD_WT1_WARP, MD_WT2_WARP, MD_WT3_WARP,     /* an oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob 0..1, added to wtN_xa), moved by an LFO / envelope route */
     MD_COUNT
 };
 
@@ -725,20 +726,20 @@ private:
          * so it stands in for a destination the oscillator does not have. */
         static const struct OscKeys {
             int pos, level, tune, uni, det, spread, pan, sync, bend, form;
-            int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync, dPit;
+            int dPos, dLvl, dTun, dBnd, dFrm, dPan, dSync, dPit, dXa;
             int shape, sgain, sout, xw, xa, xs, xw2, xa2, xs2;
         } kOsc[kOscs] = {
             { TB_P_WT1_POS, TB_P_WT1_LEVEL, TB_P_WT1_TUNE, TB_P_WT1_UNI, TB_P_WT1_DETUNE,
               TB_P_WT1_SPREAD, TB_P_WT1_PAN, TB_P_WT1_SYNC, TB_P_WT1_BEND, TB_P_WT1_FORMANT,
               MD_WT1_POS, MD_WT1_LEVEL, MD_WT1_TUNE, MD_WT1_BEND, MD_WT1_FORMANT, MD_WT1_PAN,
-              MD_WT1_SYNC, MD_WT1_PITCH, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA, TB_P_WT1_XS, TB_P_WT1_XW2, TB_P_WT1_XA2, TB_P_WT1_XS2 },
+              MD_WT1_SYNC, MD_WT1_PITCH, MD_WT1_WARP, TB_P_WT1_WSHAPE, TB_P_WT1_SGAIN, TB_P_WT1_SOUT, TB_P_WT1_XW, TB_P_WT1_XA, TB_P_WT1_XS, TB_P_WT1_XW2, TB_P_WT1_XA2, TB_P_WT1_XS2 },
             { TB_P_WT2_POS, TB_P_WT2_LEVEL, TB_P_WT2_TUNE, TB_P_WT2_UNI, TB_P_WT2_DETUNE,
               TB_P_WT2_SPREAD, TB_P_WT2_PAN, TB_P_WT2_SYNC, TB_P_WT2_BEND, TB_P_WT2_FORMANT,
               MD_WT2_POS, MD_WT2_LEVEL, MD_WT2_TUNE, MD_WT2_BEND, MD_WT2_FORMANT, MD_WT2_PAN,
-              MD_WT2_SYNC, MD_WT2_PITCH, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA, TB_P_WT2_XS, TB_P_WT2_XW2, TB_P_WT2_XA2, TB_P_WT2_XS2 },
+              MD_WT2_SYNC, MD_WT2_PITCH, MD_WT2_WARP, TB_P_WT2_WSHAPE, TB_P_WT2_SGAIN, TB_P_WT2_SOUT, TB_P_WT2_XW, TB_P_WT2_XA, TB_P_WT2_XS, TB_P_WT2_XW2, TB_P_WT2_XA2, TB_P_WT2_XS2 },
             { TB_P_WT3_POS, TB_P_WT3_LEVEL, TB_P_WT3_TUNE, TB_P_WT3_UNI, TB_P_WT3_DETUNE,
               TB_P_WT3_SPREAD, TB_P_WT3_PAN, TB_P_WT3_SYNC, -1, -1,
-              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, MD_WT3_PITCH, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA, TB_P_WT3_XS, TB_P_WT3_XW2, TB_P_WT3_XA2, TB_P_WT3_XS2 },
+              MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, MD_WT3_PITCH, MD_WT3_WARP, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA, TB_P_WT3_XS, TB_P_WT3_XW2, TB_P_WT3_XA2, TB_P_WT3_XS2 },
         };
 
         int unison[kOscs];
@@ -772,7 +773,7 @@ private:
             v.curveMode = std::clamp((int) P[k.sgain], 0, 63);
             v.curveAmt = std::clamp(P[k.sout] / 127.0f, 0.0f, 1.0f);
             v.xwarp = std::clamp((int) P[k.xw], 0, 7);                   /* Serum's filter / FM / PD / RM / AM warps (wt_oscillator.h), the amount in thousandths */
-            v.xamount = std::clamp(P[k.xa] * 0.001f, 0.0f, 1.0f);
+            v.xamount = std::clamp(P[k.xa] * 0.001f + modOff[k.dXa], 0.0f, 1.0f);
             v.xsrc = std::clamp((int) P[k.xs], 0, 4);
             v.xwarp2 = std::clamp((int) P[k.xw2], 0, 7);
             v.xamount2 = std::clamp(P[k.xa2] * 0.001f, 0.0f, 1.0f);

@@ -599,7 +599,7 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "Filter Freq": 13, "Sub Level": 15, "Noise Level": 16,
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
           "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
-          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45}
+          "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45, "WT1 Warp": 46, "WT2 Warp": 47, "WT3 Warp": 48}
 PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/probe_macro_osc.py, probe_lfo_pitch.py)
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
@@ -1393,6 +1393,8 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return ("Filter 2 Freq" if key[2] == 1 else "Filter Freq"), CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "WTOsc" and key[1] == "kParamTablePos" and slot:
             return f"WT{slot} Pos", 1.0
+        if key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and P.get(f"wt{slot}_xw"):          # an FM / PD / RM / AM / filter warp's amount: the warp knob moves by 1.0 x the depth
+            return f"WT{slot} Warp", 1.0
         if key[0] == "Oscillator" and key[1] == "kParamVolume" and sslot and key[2] in sslot:        # a Sample / Granular oscillator's volume: the sample slot's level knob, moved by 1.0 x the depth like a wavetable's
             return f"Smp{sslot[key[2]]} Level", 1.0
         if key[0] == "Oscillator" and key[1] == "kParamVolume":
@@ -1786,6 +1788,9 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         flip_rev = None                   # the Flip warp at 0.5: the table is read backwards (reverse_table, once the table's path is known)
         eo_bake = None                    # the Even/Odd warp: baked into a copy of the table (evenodd_table)
         curves = WARP_CURVES()
+        # An LFO / envelope route into a warp's amount (the engine's "WTn Warp" destination moves the FM / PD / RM / AM / filter warps' amount): its base amount stays even when it is 0
+        w_moved = {m["dest_param"] for m in ph["mods"] if m["dest_type"] == "WTOsc" and m["dest_id"] == o["id"] and m["dest_param"] in ("kParamWarp", "kParamWarp2")
+                   and 2 <= m["source"] <= 15 and abs(m["amount_pct"]) >= 5.0}
         for wi, w in enumerate(o["warp"]):
             if w["mode"] in BIPOLAR_WARPS:
                 w = {**w, "mode": BIPOLAR_WARPS[w["mode"]][0 if w["amount"] < 0.5 else 1], "amount": abs(1.0 - 2.0 * w["amount"])}
@@ -1797,7 +1802,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if w["mode"] in curves["modes"]:
                 if curves["noop_below"].get(w["mode"]) is not None and w["amount"] <= curves["noop_below"][w["mode"]]:
                     continue              # the measured curve is the identity there
-            elif w["mode"] != "kEvenOdd" and w["amount"] < WARP_NOISE_FLOOR:
+            elif (w["mode"] != "kEvenOdd" and w["amount"] < WARP_NOISE_FLOOR
+                  and not (w.get("slot", wi) == 0 and "kParamWarp" in w_moved and (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES or w["mode"] in XWARP_NOISE_MODES))):
                 continue                  # (the measured waveshapers and Even/Odd act at amount 0 too: Rectify is a full-wave rectifier there, Even/Odd keeps only the odd harmonics)
             if w["mode"] == "kFlip" and abs(w["amount"] - 0.5) <= FLIP_TOLERANCE and not any(
                     v["amount"] >= WARP_NOISE_FLOOR for v in o["warp"][:wi]):       # only as the first warp: a warp after it reads the reversed table, as it does in Serum
@@ -2175,6 +2181,8 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = f"WT{slot} Pos"
         elif key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and key[2] in synced:
             dest = f"WT{slot} Sync"
+        elif key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and P.get(f"wt{slot}_xw"):
+            dest = f"WT{slot} Warp"
         elif key[0] == "Oscillator" and key[1] == "kParamVolume" and key[2] in sslot:
             dest = f"Smp{sslot[key[2]]} Level"
         elif key[0] == "Oscillator" and key[1] == "kParamVolume":

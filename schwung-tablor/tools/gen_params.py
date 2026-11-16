@@ -718,6 +718,10 @@ BANKS = [
     ("Granular 3", False, [row(*G.values()) for G in (GRANC1, GRANC2, GRANC3)]),
     # After Granular 3, for the same reason: a sample slot's Pan. Set by the converter; no page on the device.
     ("Granular 4", False, [row(GRAND1["pan"], GRAND2["pan"], GRAND3["pan"])]),
+    # The Grain pages of the device (PAGE_MAP): the four main grain knobs of a slot on the first line (under the sample's picture), then its Kind and Level and the window.
+    # Every key is in the table already (an earlier bank), so no number moves.
+    ("Grain", False, [row(G["dens"], G["len"], G["scan"], G["start"], G["kind"], S["level"], G["win"], G["winp"])
+                      for G, S in ((GRAN1, SAMPLE), (GRAN2, SAMPLE2), (GRAN3, SAMPLE3))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -794,9 +798,20 @@ MACRO_WIDGETS = True
 if MACRO_WIDGETS:
     for _i in range(1, 9):
         VIZ[f"mac{_i}"] = {"kind": f"custom:tinyhouse_mac{_i}", "group": f"mac{_i}", "role": "a", "extra_keys": ["macro_names"]}
-    # The Tone page's three wavetable positions: the same dial, drawn as an empty slot when the oscillator is off (its level is 0).
+    # The Tone page's three wavetable positions are ONE picture across their three cells: each oscillator's wave at its position (the loaded table's shape
+    # digests, and wt_on for the oscillators that are sounding). The positions stay three knobs under it.
     for _i in range(1, 4):
-        VIZ[f"wt{_i}_pos"] = {"kind": f"custom:tinyhouse_pos{_i}", "group": f"pos{_i}", "role": "a", "extra_keys": [f"wt{_i}_level"]}
+        VIZ[f"wt{_i}_pos"] = {"kind": "custom:tinyhouse_waves", "group": "waves", "role": f"p{_i}",
+                              "extra_keys": ["wt1_shape", "wt2_shape", "wt3_shape", "wt_on"]}
+    # The Effects page's first line: the four stages of the chain as one strip of boxes, filled when the stage is on.
+    for _k in ("eq_on", "wide_on", "dly_on", "rev_on"):
+        VIZ[_k] = {"kind": "custom:tinyhouse_fxchain", "group": "fxchain", "role": _k}
+    # The Grain pages (one per sample slot): the sample's shape across the first line with the start point and the scan direction marked, the four main grain
+    # knobs under it. Kind and level are read as extra keys (they are on the second line, outside the picture).
+    for _p in ("smp", "smp2", "smp3"):
+        for _k in ("gdens", "glen", "gscan", "gstart"):
+            VIZ[f"{_p}_{_k}"] = {"kind": "custom:tinyhouse_grain", "group": f"grain_{_p}", "role": _k,
+                                 "extra_keys": [f"{_p}_shape", f"{_p}_kind", f"{_p}_level"]}
 def chain_param(p):
     if p["type"] == "file":
         d = {"key": p["key"], "name": p["full"], "type": "filepath",
@@ -841,6 +856,9 @@ PAGE_MAP = [  # (bank name, row index, page title). Section = bank name. The roo
     ("Effects", 0, "Effects"),
     ("Mod FX",  0, "Mod FX"),
     ("Global",  0, "Voice"),
+    ("Grain",   0, "Grain 1"),
+    ("Grain",   1, "Grain 2"),
+    ("Grain",   2, "Grain 3"),
 ]
 
 # THE HOST CACHES ONLY THE FIRST 256 DECLARED KEYS (MAX_CHAIN_PARAMS in Schwung's chain host). A set of a key past that is a cache miss, and a miss

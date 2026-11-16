@@ -522,8 +522,8 @@ int main(int argc, char **argv)
             if (!strncmp(c, "\"level\":", 8)) levels++;
             if (!strncmp(c, "\"key\":", 6)) keys++;
         }
-        CHECK(levels == 7 && keys == 0 && end && !strncmp(end, "\"knobs\":[]", 10),
-              "and holds the seven pages (Main, Tone, Macros, Effects, Mod FX, Voice, Demo) as levels, with no knobs of its own (%d levels, %d params)", levels, keys);
+        CHECK(levels == 10 && keys == 0 && end && !strncmp(end, "\"knobs\":[]", 10),
+              "and holds the ten pages (Main, Tone, Macros, Effects, Mod FX, Voice, Grain 1-3, Demo) as levels, with no knobs of its own (%d levels, %d params)", levels, keys);
     }
     n = api->get_param(inst, "chain_params", big, sizeof big);
     CHECK(strstr(big, "\"viz\"") && strstr(big, "\"group\":\"amp\"") &&
@@ -562,6 +562,29 @@ int main(int argc, char **argv)
     api->get_param(inst, "is_loading", buf, sizeof buf);
     CHECK((buf[0] == '0' || buf[0] == '1') && buf[1] == 0,
           "is_loading answers \"%s\" (must be exactly 1 or 0)", buf);
+
+    /* The keys the Move's pictures read: which oscillators sound, and the look of a sample slot's sample. */
+    api->get_param(inst, "wt_on", buf, sizeof buf);
+    CHECK(strlen(buf) == 5 && (buf[0] == '0' || buf[0] == '1') && buf[1] == ',' && buf[3] == ',', "wt_on reads like \"1,0,1\" -> \"%s\"", buf);
+    api->get_param(inst, "chain_params", big, sizeof big);
+    CHECK(strstr(big, "\"key\":\"wt_on\"") && strstr(big, "\"key\":\"smp_shape\"") && strstr(big, "\"key\":\"smp3_shape\"") && strstr(big, "\"key\":\"smp_gdens\"") && strstr(big, "\"key\":\"smp_kind\""),
+          "chain_params declares wt_on, the sample shapes and the grain keys");
+    {
+        char sp[512] = {};
+        if (FILE *pf = popen("find /data/UserData/UserLibrary/Samples -name '*.tbs' 2>/dev/null | head -n 1", "r")) { if (fgets(sp, sizeof sp, pf)) sp[strcspn(sp, "\r\n")] = 0; pclose(pf); }
+        if (sp[0]) {
+            api->get_param(inst, "smp_shape", buf, sizeof buf);
+            std::string st = std::string("TBLR2;smp_set=") + sp + ";smp_level=100;";
+            api->set_param(inst, "state", st.c_str());
+            settle(api, inst);
+            for (int i = 0; i < 400; i++) { api->get_param(inst, "smp_shape", buf, sizeof buf); if (buf[0]) break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); }
+            CHECK(!strncmp(buf, "96,", 3) && strlen(buf) == 3 + 96, "smp_shape of a loaded sample is \"96,\" and 96 characters (%zu bytes) for %s", strlen(buf), sp);
+            api->set_param(inst, "state", "TBLR2;smp_set=;");
+            settle(api, inst);
+            for (int i = 0; i < 400; i++) { api->get_param(inst, "smp_shape", buf, sizeof buf); if (!buf[0]) break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); }
+            CHECK(buf[0] == 0, "smp_shape is empty again once the slot has no sample");
+        } else printf("  (no .tbs sample on this machine: the smp_shape check is skipped)\n");
+    }
 
     /* a pot turn on wt1_select must actually change the loaded table */
     api->set_param(inst, "wt1_select", "0");

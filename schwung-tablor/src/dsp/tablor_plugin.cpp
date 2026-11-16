@@ -157,6 +157,8 @@ struct tablor_instance {
     std::shared_ptr<const std::string> wt_shape[TB_WT_SLOTS];
     std::shared_ptr<const std::string> shape(int osc) const
     { return std::atomic_load(&wt_shape[osc]); }
+    /* The same for each sample slot: the loudness of the sample the slot plays, in 96 columns ("96,<chars>"), for the Move's grain page and the remote UI. */
+    std::shared_ptr<const std::string> smp_shape[3];
 
     float *params() { return engine.pots; }
 };
@@ -801,6 +803,8 @@ static void sync_table_index(tablor_instance *inst, int osc)
     inst->params()[kTableParam[osc]] = (float) idx;
 }
 
+static std::string tb_smp_digest(const tb::SampleSet &set);          /* below, with the wavetable digest */
+
 /* Free on the worker what a preset change took out of the engine: the last reference to a big table or sample set must not drop on the audio callback. */
 template <class T> static void retire(tablor_instance *inst, std::shared_ptr<T> old)
 {
@@ -831,7 +835,10 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
                 inst->engine.setConv(tb::sampleLoad(p.c_str(), ir) ? tb::convBuild(ir, 44100.0f) : nullptr);
                 return;
             }
-            auto put = [&](std::shared_ptr<tb::SampleSet> s) { if (which == 2) inst->engine.setSample3(std::move(s)); else if (which == 1) inst->engine.setSample2(std::move(s)); else inst->engine.setSample(std::move(s)); };
+            auto put = [&](std::shared_ptr<tb::SampleSet> s) {
+                std::atomic_store(&inst->smp_shape[which], std::make_shared<const std::string>(s ? tb_smp_digest(*s) : std::string()));
+                if (which == 2) inst->engine.setSample3(std::move(s)); else if (which == 1) inst->engine.setSample2(std::move(s)); else inst->engine.setSample(std::move(s));
+            };
             if (p.empty()) { put(nullptr); return; }
             auto set = std::make_shared<tb::SampleSet>();
             if (tb::sampleLoad(p.c_str(), *set)) put(set);
@@ -1057,7 +1064,11 @@ static void tb_publish_selection(tablor_instance *inst)
     out += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt3_shape\",\"name\":\"WT3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}";
+           ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"smp_shape\",\"name\":\"Sample 1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"smp2_shape\",\"name\":\"Sample 2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"smp3_shape\",\"name\":\"Sample 3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
+           ",{\"key\":\"wt_on\",\"name\":\"WT On\",\"type\":\"string\",\"access\":\"read\"}";
     /* The web panel's preset browser: the store's banks and preset names (read-only, built when the store is scanned), the
      * current bank and index, and the index to load. `bank` is declared above; `preset` is the index within the current bank. */
     /* ORDER MATTERS. The manager's initial value fetch sends in batches of 8 and flushes the last partial batch only when the LAST declared key
@@ -1152,6 +1163,39 @@ static std::string tb_wt_digest(const tb::Wavetable &wt)
             if (q > 63) q = 63;
             out += kQ[q];
         }
+    }
+    return out;
+}
+
+/* The look of a sample: "96,<chars>", one character per column, the loudest sample of that stretch of the region a note at middle C plays (the
+ * one the grain cloud reads), over 64 levels of the region's own peak (so a quiet recording still fills the picture). WORKER THREAD ONLY. */
+static std::string tb_smp_digest(const tb::SampleSet &set)
+{
+    constexpr int COLS = 96;
+    const tb::SampleRegion *r = set.pick(60, 100);
+    if (!r && !set.regions.empty()) r = &set.regions[0];
+    if (!r || r->frames < 1 || r->channels < 1 || r->pcm.empty()) return std::string();
+    const int ch = r->channels;
+    const long frames = std::min((long) r->frames, (long) (r->pcm.size() / (size_t) ch));
+    if (frames < 1) return std::string();
+    float peak[COLS] = {};
+    float top = 1.0f;
+    for (int c = 0; c < COLS; c++) {
+        const long a = frames * c / COLS, b = std::max(a + 1, frames * (c + 1) / COLS);
+        int m = 0;
+        for (long i = a; i < b; i++)
+            for (int k = 0; k < ch; k++) {
+                const int v = std::abs((int) r->pcm[(size_t) (i * ch + k)]);
+                if (v > m) m = v;
+            }
+        peak[c] = (float) m;
+        if (peak[c] > top) top = peak[c];
+    }
+    std::string out = "96,";
+    out.reserve(COLS + 4);
+    for (int c = 0; c < COLS; c++) {
+        int q = (int) (peak[c] / top * 63.0f + 0.5f);
+        out += kQ[q < 0 ? 0 : q > 63 ? 63 : q];
     }
     return out;
 }
@@ -1704,6 +1748,18 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (tb_is_wt_key(key, "_shape")) {
         auto sp = inst->shape(tb_key_slot(key));
         return write_str(buf, buf_len, sp ? sp->c_str() : "");
+    }
+
+    /* The sample slots' look (the grain page and the remote UI draw it), and which oscillators are sounding ("1,0,1" for WT1..WT3, read from the levels as they
+     * are now, so a page dims an oscillator that is off). */
+    if (!strcmp(key, "smp_shape") || !strcmp(key, "smp2_shape") || !strcmp(key, "smp3_shape")) {
+        auto sp = std::atomic_load(&inst->smp_shape[key[3] == '_' ? 0 : key[3] - '1']);
+        return write_str(buf, buf_len, sp ? sp->c_str() : "");
+    }
+    if (!strcmp(key, "wt_on")) {
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%d,%d,%d", inst->params()[TB_P_WT1_LEVEL] > 0 ? 1 : 0, inst->params()[TB_P_WT2_LEVEL] > 0 ? 1 : 0, inst->params()[TB_P_WT3_LEVEL] > 0 ? 1 : 0);
+        return write_str(buf, buf_len, tmp);
     }
 
     /* Triggers read as their idle option, so the host learns the NAME wire

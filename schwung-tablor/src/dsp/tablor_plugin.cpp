@@ -1471,14 +1471,14 @@ static unsigned fnv_hash(const char *s)
     return h;
 }
 
-static void apply_pending(tablor_instance *inst)
+static void apply_pending(tablor_instance *inst, const char *why = "?")
 {
     const int pi = inst->pend_idx.exchange(-1);
     if (pi < 0) return;
     auto ps = inst->storeList();
     const long long t0 = inst->diag ? steady_us() : 0;
     if (pi < (int) ps->items.size()) apply_state_blob(inst, ps->items[(size_t) pi].blob.c_str());
-    if (inst->diag) diag_log(inst, "applied preset %d in %lld us (%lld ms after it was due)", pi, steady_us() - t0, steady_ms() - inst->pend_due.load());
+    if (inst->diag) diag_log(inst, "applied preset %d in %lld us (%lld ms after it was due) by %s", pi, steady_us() - t0, steady_ms() - inst->pend_due.load(), why);
 }
 
 static void choose_store_preset(tablor_instance *inst, int i)
@@ -1896,7 +1896,21 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (!strcmp(key, "state")) {
         const long long t0 = inst->diag ? steady_us() : 0;
-        apply_pending(inst);                            /* what is saved is the sound that was chosen */
+        /* The host's preset browser reads the state after EVERY detent (and the slot's autosave reads it too). A sound still waiting for the knob to rest is
+         * answered from its own stored blob, which is what the state will be once it lands, instead of applying it: applying here defeated the rest
+         * (each landing in a scroll was forced by this read, 140 ms early). */
+        const int pi = inst->pend_idx.load();
+        if (pi >= 0) {
+            auto ps = inst->storeList();
+            if (pi < (int) ps->items.size()) {
+                std::string st = "TBLR2;pk=" + preset_key(ps->items[(size_t) pi]) + ";";
+                const std::string &bl = ps->items[(size_t) pi].blob;
+                size_t at = bl.compare(0, 6, "TBLR2;") == 0 ? 6 : 0;
+                st += bl.substr(at);
+                if (inst->diag) diag_log(inst, "state read of waiting preset %d: %d bytes in %lld us", pi, (int) st.size(), steady_us() - t0);
+                return write_str(buf, buf_len, st.c_str());
+            }
+        }
         build_state_blob(inst);
         if (inst->diag) diag_log(inst, "state read: %d bytes in %lld us", (int) strlen(inst->state_buf), steady_us() - t0);
         return write_str(buf, buf_len, inst->state_buf);
@@ -1904,7 +1918,7 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     int idx = param_index(key);
     if (idx < 0) return -1;
-    apply_pending(inst);                                /* a read of a setting is a read of the chosen sound */
+    apply_pending(inst, "a read of a setting");           /* a read of a setting is a read of the chosen sound */
     const tb_param_t *p = &tb_params[idx];
 
     if (p->type == TB_PATH)
@@ -1957,7 +1971,7 @@ static void tb_render_block(void *instance, int16_t *out_lr, int frames)
         return;
     }
     if (inst->pend_idx.load(std::memory_order_relaxed) >= 0 && steady_ms() >= inst->pend_due.load(std::memory_order_relaxed))
-        apply_pending(inst);                            /* the knob has rested */
+        apply_pending(inst, "the rest");                    /* the knob has rested */
     FlushToZero ftz;
     if (g_host && g_host->get_bpm)
         inst->engine.setHostBpm(g_host->get_bpm());

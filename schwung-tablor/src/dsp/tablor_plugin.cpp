@@ -1918,8 +1918,34 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     int idx = param_index(key);
     if (idx < 0) return -1;
-    apply_pending(inst, "a read of a setting");           /* a read of a setting is a read of the chosen sound */
     const tb_param_t *p = &tb_params[idx];
+    {   /* A preset is waiting for the knob to rest. The Move reads a page of knob values after every detent; applying the preset for each read would
+         * defeat the rest. The answer is what the waiting preset will hold once it lands, read from its stored blob (a setting it does not name is at its default). */
+        const int pi = inst->pend_idx.load();
+        if (pi >= 0 && idx != param_index("uni_cap")) {   /* Unison Cap is the player's live limit, never part of a preset */
+            auto ps = inst->storeList();
+            if (pi < (int) ps->items.size()) {
+                const std::string &bl = ps->items[(size_t) pi].blob;
+                std::string needle = std::string(";") + p->key + "=";
+                size_t at = bl.find(needle);
+                std::string val;
+                if (at != std::string::npos) {
+                    at += needle.size();
+                    size_t end = bl.find(';', at);
+                    val = bl.substr(at, end == std::string::npos ? std::string::npos : end - at);
+                }
+                if (p->type == TB_PATH) return write_str(buf, buf_len, val.c_str());
+                const float v = at != std::string::npos ? clamp_param(p, strtof(val.c_str(), nullptr)) : p->def;
+                if (p->type == TB_ENUM) {
+                    const char *name = p->options[(int) v];
+                    return write_str(buf, buf_len, name ? name : "?");
+                }
+                char tmp2[32];
+                snprintf(tmp2, sizeof tmp2, "%g", (double) v);
+                return write_str(buf, buf_len, tmp2);
+            }
+        }
+    }
 
     if (p->type == TB_PATH)
         return write_str(buf, buf_len, inst->wt_path[tb_path_slot(idx)]);

@@ -2291,6 +2291,11 @@ def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
         fx_p["conv_set"] = f"{MOVE_SAMPLE_ROOT}/{subdir}/{cdest.name}"
     fx_p_extra = {k: fx_p.pop(k) for k in ("comp_thresh2_out_db", "comp_thresh3_out_db") if k in fx_p}
     P.update(fx_p)
+    if fx_info.get("eq_pins_dropped"):                     # the EQ bands moved by routes stayed static (fxmap.map_eq): take the routes to them off the matrix
+        for pre in ("me", "lr"):
+            for n in range(1, 9):
+                if P.get(f"{pre}{n}_dst", 0) in range(ME_DST["EQ1 Freq"], ME_DST["EQ4 Gain"] + 1):
+                    P[f"{pre}{n}_dst"], P[f"{pre}{n}_amt"] = 0, 64
     if fx_info.get("conv_level_db") and CAL["master_db0"] is not None:
         # a short Convolution IR carried as EQ bands (its shape, mean removed) also changes the level (IpTrim and the IR's gain): take it off the closed-form master
         P["volume"] = pot_volume(20 * math.log10((P["volume"] / 127) ** 2 * MASTER_MAX + 1e-9) - fx_info["conv_level_db"])

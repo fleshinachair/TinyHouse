@@ -351,6 +351,7 @@ def eq_bands(nodes: list[dict], which: str | None = None, skip: frozenset = froz
     return out
 
 
+EQ_PIN_MAX_LOSS_DB = 1.0              # a routed band may cost the other bands at most this much rms error (dB) in the slots it leaves
 EQ_MOD_PARAMS = ("kParamFreq1", "kParamGain1", "kParamFreq2", "kParamGain2")
 
 
@@ -1546,7 +1547,8 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
     fbands, fwhy = fbands + dbands, fwhy + dwhy
     conv_handled: set = set()
     cbands, cnotes, cwhy, clevel = conv_bands(nodes, conv_handled)
-    bands = bands + fbands + cbands
+    rest = fbands + cbands                               # the Filter FX, Utils-filter, Distortion-filter and Conv stand-ins that share the four slots
+    bands = bands + rest
     notes, info = [], {"eq_bands_in": len(bands), "filter_fx_bands": len(fbands), "filter_fx_handled": sorted(handled)}
     if conv_handled:
         info.update(conv_handled=sorted(conv_handled), conv_level_db=round(clevel, 2))
@@ -1581,23 +1583,31 @@ def map_eq(nodes: list[dict], ctx: dict | None = None) -> tuple[dict, list[str],
         notes.append(f"EQ: {len(sb)} band(s) in the SplitMS {side} branch carried in the mid/side domain" + (f" ({len(sb)} fitted to {len(sout)}, rms {serr:.1f} dB)" if len(sb) > len(sout) else ""))
     notes += sorted(set(plan["why"]))
     pinned = eq_pinned_bands(nodes, plan["slots"])
-    if pinned:
-        notes.append(f"EQ: {len(pinned)} band(s) moved by an envelope/LFO carried as engine EQ band(s) {', '.join(str(plan['slots'][k]) for k in sorted(plan['slots'], key=plan['slots'].get))} with their routes")
     if not bands and not pinned:
         return P, notes, info
     free = EQ_SLOTS - len(pinned)
     out, err = reduce_bands(bands, free) if bands else ([], 0.0)
-    if len(out) > free:                                  # cuts are kept past the room (reduce_bands): the routed bands come first
-        out = out[:free]
+    if pinned:
+        # The routed bands take slots from the others. If the rest then fit worse than all of them would have in four slots (ZAGEN: five bands, a low shelf merged into a bell, 0.2 -> 2.3 dB
+        # rms and 9 dB gone from the lows), the sweep is not worth it: every band stays static and the routes are left out (info eq_pins_dropped: the converter takes them off the matrix).
+        full, ferr = reduce_bands(eq_bands(nodes) + rest, EQ_SLOTS)
+        if len(out) > free or err > ferr + EQ_PIN_MAX_LOSS_DB:
+            info["eq_pins_dropped"] = len(pinned)
+            notes.append(f"EQ: {len(pinned)} band(s) moved by an envelope/LFO kept static (the other bands would fit {err:.1f} dB rms in the slots left, against {ferr:.1f} with all four)")
+            bands, pinned, free = eq_bands(nodes) + rest, [], EQ_SLOTS
+            plan = dict(plan, slots={})
+            out, err = reduce_bands(bands, EQ_SLOTS)
     info.update(eq_bands_out=len(out) + len(pinned), eq_rms_db=round(err, 2), eq_pinned=len(pinned))
+    if pinned:
+        notes.append(f"EQ: {len(pinned)} band(s) moved by an envelope/LFO carried as engine EQ band(s) {', '.join(str(plan['slots'][k]) for k in sorted(plan['slots'], key=plan['slots'].get))} with their routes")
     placed = list(enumerate(out, 1)) + [(plan["slots"][k], b) for k, b in zip(sorted(plan["slots"], key=plan["slots"].get), pinned)]          # the routed bands sit in the slots the routes name
     for n, b in placed:
         P[f"eq{n}_type"] = KIND_ID[b["kind"]]
         P[f"eq{n}_freq"] = pot_freq(b["fc"])
         P[f"eq{n}_gain"] = pot_gain(b["gain"])
         P[f"eq{n}_q"] = int(round(min(max(reso_from_q(b["kind"], b["q"]) * 1.27, 0), 127)))
-    if len(bands) > len(out) - len(pinned):
-        notes.append(f"EQ: {len(bands)} bands fitted to {len(out) - len(pinned)} (rms {err:.1f} dB)")
+    if len(bands) > len(out):
+        notes.append(f"EQ: {len(bands)} bands fitted to {len(out)} (rms {err:.1f} dB)")
     return P, notes, info
 
 

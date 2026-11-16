@@ -7,7 +7,8 @@ have Serum 2 presets they like and want to take them on the Move. You bring the 
 wavetable patches: polyphonic, with unison, filters, modulation, eight macros and a full effects rack.
 
 It is a re-creation, not Serum. Every setting is translated from what Serum itself does, and the filters, effects and levels were measured against the real
-plugin, but it is a different engine on a small ARM box: **expect presets to sound close, and a little different.** Some features are not built yet
+plugin. A lot of it was also tuned by ear and by computer, listening and then checking the result against measurements of Serum. It is a different engine on a small
+ARM box: **expect presets to sound close, and a little different.** Some features are not built yet
 (see [What is supported](#what-is-supported)), and a preset that leans on one of them will lose that part of its sound.
 
 **This is experimental.** TinyHouse is young and the converter is still being tuned. Importing in the browser is the easy route, but it has no copy of
@@ -100,7 +101,7 @@ macros. Pick one and the knob is now on that macro: it shows a small **M** tag, 
 ## The effects chain
 
 Most Serum presets get half their character from the effects rack, so the rack is not an afterthought. TinyHouse has a full effects chain, and each stage was
-measured against Serum with controlled test patches (not tuned by ear), so the effects follow Serum's own curves:
+measured against Serum with controlled test patches and then tuned by ear and by computer, so the effects follow Serum's own curves:
 
 ![The FX tab is a rack like Serum's: the chips along the top switch an effect on or off, and the effects that are on are stacked in signal order, each with its symbol, display and controls](docs/img/remote-fx.png)
 
@@ -154,7 +155,7 @@ preset through the real Serum 2 plugin** and measures it, so it can do three thi
 - **Check the result**: it compares octave-band levels against the Serum render and leaves out a preset that ends up too far from it, with the reason in a
   `skipped_<bank>.md` report. It is stricter than the browser: a preset that uses something TinyHouse cannot carry is dropped, not imported with a part missing.
 
-You need Windows, the Serum 2 plugin (VST3),
+You need Serum 2 installed on the computer (the VST3 plugin), Windows,
 Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine).
 
 ```

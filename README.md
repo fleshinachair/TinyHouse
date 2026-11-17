@@ -6,8 +6,9 @@ TinyHouse is a sound-generator module for [Schwung](https://github.com/charlesve
 TinyHouse converts them, and they play on the Move as native patches: polyphonic, with unison, filters, modulation, eight macros, a sample and granular
 oscillator, and a full effects rack.
 
-TinyHouse is its own engine on a small ARM box, not a copy of Serum: **expect presets to sound close, and a little different.** Some features are
-not built yet (see [What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound.
+TinyHouse is its own engine on a small ARM box, not a copy of Serum: **expect an imported preset or pack to sound similar to, and clearly related to, the Serum 2
+original, but not the same.** Some come out very close, some less so, and a bank will always have a few that miss. Some features are not built yet (see
+[What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound; the import report says which.
 
 **This is experimental.** Importing in the browser is the easy route; it sets loudness, reverb and width from general rules. If you have Serum 2 on Windows and
 want presets to land closer to what you hear in the plugin, use the [Python scripts](#more-accurate-conversion-with-the-python-scripts), which can compare

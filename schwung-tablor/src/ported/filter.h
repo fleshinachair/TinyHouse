@@ -83,6 +83,7 @@ public:
             break;
         case db24:
             if (!ok2) designStage2();                         /* the slope was switched since the last setParams */
+            if (AudioFilter::FilterInstance<float>::processPair(inst1, inst2, chans, inChans, n)) break;      /* both stages in one loop */
             inst1.processBlock(chans, inChans, n);
             inst2.processBlock(chans, inChans, n);
             break;

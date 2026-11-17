@@ -770,8 +770,10 @@ private:
                        : std::clamp(potBipolar(P[k.form]) + modOff[k.dFrm], -1.0f, 1.0f);
             /* a Dist* oscillator warp: the shaper's pre-gain 0.02..300 and output gain 0.5..60, both log over the 0..127 pot */
             v.shape = std::clamp((int) P[k.shape], 0, 5);
-            v.shapeGain = 0.02f * std::pow(15000.0f, P[k.sgain] / 127.0f);
-            v.shapeOut = 0.5f * std::pow(120.0f, P[k.sout] / 127.0f);
+            if (v.shape >= 2 && v.shape != 5) {                        /* the pre-gain and output gain are read only by the Dist shapers 2..4 (two pow calls a voice per block otherwise) */
+                v.shapeGain = 0.02f * std::pow(15000.0f, P[k.sgain] / 127.0f);
+                v.shapeOut = 0.5f * std::pow(120.0f, P[k.sout] / 127.0f);
+            }
             /* shape 5: a measured Serum waveshaper (warp_curves.h) - Gain is its index, Out its amount over 0..127 */
             v.curveMode = std::clamp((int) P[k.sgain], 0, 63);
             v.curveAmt = std::clamp(P[k.sout] / 127.0f, 0.0f, 1.0f);

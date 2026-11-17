@@ -13,7 +13,9 @@ namespace ParametricCreator
 //==============================================================================
 static void getAnalog(BiquadParam& biquad, double Q, double gain, FilterType filterType)
 {
-    const auto A = std::pow(10., 0.025 * gain);
+    /* only the shelves, the peak and the 6 dB shelves read the gain; a low-pass, high-pass, band-pass or notch (every voice filter) skips the pow */
+    const bool usesGain = filterType == afLoShelf || filterType == afHiShelf || filterType == afPeak || filterType == afLoShelf6 || filterType == afHiShelf6;
+    const auto A = usesGain ? std::pow(10., 0.025 * gain) : 1.0;
 
     switch (filterType)
     {
@@ -225,9 +227,17 @@ static void getCorrection(BiquadParam& digital, const BiquadParam& analog, doubl
 
     double H[3];
 
+    /* the three sines depend on the sample rate alone: kept from the last call (a design is made for every voice and every step of the cutoff) */
+    static thread_local double sinSr = 0.0, sinPhi0[3] = { 0, 0, 0 };
+    if (sinSr != sampleRate)
+    {
+        for (int i = 0; i < 3; ++i) sinPhi0[i] = std::sin(M_PI*freqs[i] / sampleRate);
+        sinSr = sampleRate;
+    }
+
     for (int i = 0; i < 3; ++i)
     {
-        const auto phi0 = std::sin(M_PI*freqs[i] / sampleRate);
+        const auto phi0 = sinPhi0[i];
         const auto phi = phi0 * phi0;
         const auto s = freqs[i] / freq;
         const auto a0 = 1.;

@@ -15,6 +15,10 @@ inline float potSquared(float v)   { float x = pot01(v); return x * x; }  /* lev
 /* Envelope stage time: 1 ms .. 10 s, exponential. */
 inline float potEnvTime(float v)
 {
+    /* a whole-number pot (nearly always) reads a table made with the same expression: every voice calls this about eight times a block */
+    static const struct Tab { float t[128]; Tab() { for (int i = 0; i < 128; i++) t[i] = std::pow(10.0f, (float) i / 127.0f * 4.0f - 3.0f); } } tab;
+    const int i = (int) v;
+    if ((float) i == v && i >= 0 && i < 128) return tab.t[i];
     return std::pow(10.0f, pot01(v) * 4.0f - 3.0f);
 }
 

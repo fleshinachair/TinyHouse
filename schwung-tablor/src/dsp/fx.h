@@ -423,31 +423,39 @@ public:
         const float swing = kDepthMs * 0.001f * sr * std::pow(st.hydDetune, kDepthExp);            /* peak to peak, in samples */
         const float rateHz = kRateHz * std::pow(2.0f * st.hydRate, kRateExp);
         const float voiceGain = kVoiceGain * std::pow((float) nv / kVoicesRef, kVoicesExp);        /* Serum's cloud grows a little slower than the number of voices (sine, 2 to 8 voices) */
+        /* Per block, not per sample: each cloud voice's phase step (the same expression the sample loop had), half the swing, and the buffers' base pointers. A phase is never
+         * negative and a step is far under one cycle, so the wrap is one compare and a subtract, which is what floor() gave. */
+        float inc[2][kMaxV];
+        for (int c = 0; c < 2; c++) for (int v = 0; v < nv; v++) inc[c][v] = rateHz * spd[c][v] / sr;
+        const float halfSwing = 0.5f * swing;
         for (int i = 0; i < n; i++) {
             cur += dg;
             float *io[2] = { &L[i], &R[i] };
+            const float dryG = dryGain(cur), wetG = wetGain(cur);
             for (int c = 0; c < 2; c++) {
                 const float x = *io[c];
-                buf[c][(size_t) wp] = x;
+                float *const bc = buf[c].data();
+                bc[(size_t) wp] = x;
                 float acc = 0.0f;
                 for (int v = 0; v < nv; v++) {
                     const float tri = 4.0f * std::fabs(ph[c][v] - 0.5f) - 1.0f;                       /* +1 at phase 0, -1 at 0.5 */
-                    const float d = 2.0f + 0.5f * swing * (1.0f + tri);
+                    const float d = 2.0f + halfSwing * (1.0f + tri);
                     const float rp = (float) wp - d + (float) kBuf;
                     const int i1 = (int) rp;
                     const float fr = rp - (float) i1;
-                    const float y0 = buf[c][(size_t) ((i1 - 1) & (kBuf - 1))], y1 = buf[c][(size_t) (i1 & (kBuf - 1))];
-                    const float y2 = buf[c][(size_t) ((i1 + 1) & (kBuf - 1))], y3 = buf[c][(size_t) ((i1 + 2) & (kBuf - 1))];
+                    const float y0 = bc[(size_t) ((i1 - 1) & (kBuf - 1))], y1 = bc[(size_t) (i1 & (kBuf - 1))];
+                    const float y2 = bc[(size_t) ((i1 + 1) & (kBuf - 1))], y3 = bc[(size_t) ((i1 + 2) & (kBuf - 1))];
                     const float c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
                     acc += ((c3 * fr + c2) * fr + c1) * fr + y1;
-                    ph[c][v] += rateHz * spd[c][v] / sr;
-                    ph[c][v] -= std::floor(ph[c][v]);
+                    float p = ph[c][v] + inc[c][v];
+                    if (p >= 1.0f) p -= std::floor(p);
+                    ph[c][v] = p;
                 }
                 /* Serum's wet path has no bass: a 12 dB/oct high-pass near 150 Hz (white noise through the cloud, third-octave gain re the dry: -2 dB at 159 Hz, -7 at 126, -14 at 63, -20 at 50) */
                 const float hp = hpB0 * acc + hpS1[c];
                 hpS1[c] = hpB1 * acc - hpA1 * hp + hpS2[c];
                 hpS2[c] = hpB2 * acc - hpA2 * hp;
-                *io[c] = x * dryGain(cur) + hp * voiceGain * wetGain(cur);
+                *io[c] = x * dryG + hp * voiceGain * wetG;
             }
             wp = (wp + 1) & (kBuf - 1);
         }
@@ -940,8 +948,8 @@ private:
                     const float rp = (float) chorusPos - d + (float) kChorusMax;
                     const int i0 = (int) rp;
                     const float fr = rp - (float) i0;
-                    const float a = chorusBuf[(size_t) (i0 % kChorusMax)];
-                    const float b = chorusBuf[(size_t) ((i0 + 1) % kChorusMax)];
+                    const float a = chorusBuf[(size_t) (i0 & (kChorusMax - 1))];            /* i0 is positive and kChorusMax a power of two: a mask is the remainder */
+                    const float b = chorusBuf[(size_t) ((i0 + 1) & (kChorusMax - 1))];
                     acc += a + (b - a) * fr;
                 }
                 w[side] = 0.5f * acc;
@@ -952,7 +960,7 @@ private:
             R[i] -= side;
             chorusPhase += rate;
             if (chorusPhase > fxdetail::kTwoPi) chorusPhase -= fxdetail::kTwoPi;
-            chorusPos = (chorusPos + 1) % kChorusMax;
+            chorusPos = (chorusPos + 1) & (kChorusMax - 1);
         }
         wideCur = target;
     }

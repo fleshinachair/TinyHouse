@@ -28,6 +28,10 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 namespace tb {
 
 inline constexpr int kMaxUnison = 16;
@@ -293,6 +297,36 @@ private:
         return ph;
     }
 
+#if defined(__aarch64__)
+    /* Four table reads at once: ph (four phases below 1) in a table of vsz samples; each read's two samples come in one 64-bit load. */
+    static inline float32x4_t look4(const float32x4_t ph, const float32x4_t vsz, const float *d)
+    {
+        const float32x4_t fidx = vmulq_f32(ph, vsz);
+        const int32x4_t idx = vcvtq_s32_f32(fidx);
+        const float32x4_t f = vsubq_f32(fidx, vcvtq_f32_s32(idx));
+        int32_t ix[4]; vst1q_s32(ix, idx);
+        const float32x4_t p01 = vcombine_f32(vld1_f32(d + ix[0]), vld1_f32(d + ix[1])), p23 = vcombine_f32(vld1_f32(d + ix[2]), vld1_f32(d + ix[3]));
+        const float32x4_t a = vuzp1q_f32(p01, p23), b = vuzp2q_f32(p01, p23);
+        return vfmaq_f32(a, f, vsubq_f32(b, a));
+    }
+
+    /* distort() on four phases. */
+    static inline float32x4_t distort4(float32x4_t ph, float bend, float formantMul)
+    {
+        const float32x4_t vone = vdupq_n_f32(1.0f), vmax = vdupq_n_f32(kAlmostOne);
+        if (bend != 0.0f) {
+            const float addDist = std::clamp(bend, 0.0f, 1.0f), subDist = std::clamp(bend, -1.0f, 0.0f);
+            const float32x4_t s2 = vmulq_f32(ph, ph), s4 = vmulq_f32(s2, s2), sub = vmulq_f32(s4, s4);
+            const float32x4_t om = vsubq_f32(vone, ph), a2 = vmulq_f32(om, om), a4 = vmulq_f32(a2, a2), add = vmulq_f32(a4, a4);
+            const float32x4_t addMix = vfmaq_f32(ph, vdupq_n_f32(addDist), vsubq_f32(vsubq_f32(vone, add), ph));
+            const float32x4_t subMix = vfmaq_f32(ph, vdupq_n_f32(-subDist), vsubq_f32(sub, ph));
+            ph = vminq_f32(vmax, vsubq_f32(vaddq_f32(addMix, subMix), ph));
+        }
+        if (formantMul != 1.0f) ph = vminq_f32(vmax, vmulq_f32(ph, vdupq_n_f32(formantMul)));
+        return ph;
+    }
+#endif
+
     void processSimple(float note, const Params &p, float *o, int n)
     {
         if (tableIndex == -1 || tableIndex >= wt->size())
@@ -307,6 +341,24 @@ private:
         while (n > 0) {
             int todo = std::min(n, (int) ((1.0f - phase) / delta) + 1);
             n -= todo;
+#if defined(__aarch64__)
+            /* Four samples at a time: the phases are phase + k delta, the two samples of each lookup come in one 64-bit load, and the interpolation is a vector. The
+             * rounding differs from adding delta one sample at a time by about 1e-7 of a cycle. */
+            if (todo >= 4) {
+                const float32x4_t vfa = vdupq_n_f32((float) la.size), vfb = vdupq_n_f32((float) lb.size), vdel4 = vdupq_n_f32(4.0f * delta), vmax = vdupq_n_f32(kAlmostOne), vfrac = vdupq_n_f32(frac);
+                const float step4[4] = { 0.0f, delta, 2.0f * delta, 3.0f * delta };
+                float32x4_t vph = vaddq_f32(vdupq_n_f32(phase), vld1q_f32(step4));
+                const float *da = la.data.data(), *db = lb.data.data();
+                for (; todo >= 4; todo -= 4) {
+                    const float32x4_t ph = vminq_f32(vph, vmax);
+                    float32x4_t sv = look4(ph, vfa, da);
+                    if (frac > 0.0f) sv = vfmaq_f32(sv, vfrac, vsubq_f32(look4(ph, vfb, db), sv));
+                    vst1q_f32(o, sv);
+                    o += 4; vph = vaddq_f32(vph, vdel4);
+                    phase += 4.0f * delta;
+                }
+            }
+#endif
             for (; todo > 0; todo--) {
                 const float ph = std::min(kAlmostOne, phase);
                 float s = FrameTable::readLinear(la, ph);
@@ -374,7 +426,32 @@ private:
         const float *pmod = p.pmod, *fmod = p.fmod;
         const float bend = p.bend;
         float ph0 = phase;
-        for (int i = 0; i < n; i++) {
+        int i = 0;
+#if defined(__aarch64__)
+        /* Four samples at a time. The phases are an exclusive running sum of the steps (delta + the FM input), added to the block's phase and wrapped; the reads are as
+         * in processSimple. Rounding differs from stepping one sample at a time by about 1e-7 of a cycle. */
+        {
+            const float32x4_t vzero = vdupq_n_f32(0.0f), vdelta = vdupq_n_f32(delta), vmax = vdupq_n_f32(kAlmostOne), vfrac = vdupq_n_f32(frac);
+            const float32x4_t vfa = vdupq_n_f32((float) la.size), vfb = vdupq_n_f32((float) lb.size);
+            const float *da = la.data.data(), *db = lb.data.data();
+            for (; i + 4 <= n; i += 4) {
+                const float32x4_t inc = FM ? vaddq_f32(vdelta, vld1q_f32(fmod + i)) : vdelta;
+                float32x4_t x = vextq_f32(vzero, inc, 3);                                  /* [0, i0, i1, i2] */
+                x = vaddq_f32(x, vextq_f32(vzero, x, 3));                                  /* [0, i0, i0+i1, i1+i2] */
+                x = vaddq_f32(x, vextq_f32(vzero, x, 2));                                  /* [0, i0, i0+i1, i0+i1+i2] */
+                float32x4_t at = vaddq_f32(vdupq_n_f32(ph0), x);
+                if (PM) at = vaddq_f32(at, vld1q_f32(pmod + i));
+                at = vsubq_f32(at, vrndmq_f32(at));
+                const float32x4_t ph = DS ? distort4(vminq_f32(at, vmax), bend, formantMul) : vminq_f32(at, vmax);
+                float32x4_t sv = look4(ph, vfa, da);
+                if (FR) sv = vfmaq_f32(sv, vfrac, vsubq_f32(look4(ph, vfb, db), sv));
+                vst1q_f32(o + i, sv);
+                ph0 += vaddvq_f32(inc);
+                ph0 -= std::floor(ph0);
+            }
+        }
+#endif
+        for (; i < n; i++) {
             float at = PM ? ph0 + pmod[i] : ph0;
             at -= std::floor(at);                          /* kept without PM too: a phase handed in at exactly 1 wraps to 0, as it does above */
             const float ph = DS ? distort(std::min(kAlmostOne, at), bend, formantMul) : std::min(kAlmostOne, at);
@@ -404,6 +481,22 @@ private:
         while (n > 0) {
             int todo = std::min(n, (int) ((1.0f - phase) / delta) + 1);
             n -= todo;
+#if defined(__aarch64__)
+            if (todo >= 4) {                                                     /* four samples at a time, as in processSimple */
+                const float32x4_t vfa = vdupq_n_f32((float) la.size), vfb = vdupq_n_f32((float) lb.size), vdel4 = vdupq_n_f32(4.0f * delta), vmax = vdupq_n_f32(kAlmostOne), vfrac = vdupq_n_f32(frac);
+                const float step4[4] = { 0.0f, delta, 2.0f * delta, 3.0f * delta };
+                float32x4_t vph = vaddq_f32(vdupq_n_f32(phase), vld1q_f32(step4));
+                const float *da = la.data.data(), *db = lb.data.data();
+                for (; todo >= 4; todo -= 4) {
+                    const float32x4_t ph = distort4(vminq_f32(vph, vmax), p.bend, formantMul);
+                    float32x4_t sv = look4(ph, vfa, da);
+                    if (frac > 0.0f) sv = vfmaq_f32(sv, vfrac, vsubq_f32(look4(ph, vfb, db), sv));
+                    vst1q_f32(o, sv);
+                    o += 4; vph = vaddq_f32(vph, vdel4);
+                    phase += 4.0f * delta;
+                }
+            }
+#endif
             for (; todo > 0; todo--) {
                 float ph = distort(std::min(kAlmostOne, phase), p.bend, formantMul);
                 float s = FrameTable::readLinear(la, ph);

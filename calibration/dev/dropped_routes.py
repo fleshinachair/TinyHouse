@@ -9,8 +9,8 @@ import test_render_calibration as H
 from serum2_preset_loader.codec import decode_preset_file
 d2m = H.d2m
 orig = d2m.map_lfos; rec = []
-def wrap(ph, P, other, slot_of, appr, note):
-    out = orig(ph, P, other, slot_of, appr, note); rec.append(out); return out
+def wrap(ph, P, other, slot_of, appr, note, *more):
+    out = orig(ph, P, other, slot_of, appr, note, *more); rec.append(out); return out
 d2m.map_lfos = wrap
 tally = collections.Counter(); who = collections.defaultdict(set)
 for p in sorted(Path(sys.argv[1]).rglob("*.SerumPreset")):

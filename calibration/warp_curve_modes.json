@@ -6,7 +6,11 @@
   "kDistZeroSquare",
   "kDistRectify",
   "kDistSineShaper",
-  "kQuantize"
+  "kQuantize",
+  "kDistHardClip",
+  "kDistSinFold",
+  "kDistStompBox",
+  "kDistLinFold"
  ],
  "limit": {
   "kDistSoftClip": 1.0,
@@ -15,7 +19,11 @@
   "kDistZeroSquare": 1.0,
   "kDistRectify": 1.0,
   "kDistSineShaper": 0.4,
-  "kQuantize": 0.55
+  "kQuantize": 0.55,
+  "kDistHardClip": 1.0,
+  "kDistSinFold": 0.275,
+  "kDistStompBox": 1.0,
+  "kDistLinFold": 0.2
  },
  "noop_below": {
   "kDistSoftClip": null,
@@ -24,7 +32,11 @@
   "kDistZeroSquare": null,
   "kDistRectify": null,
   "kDistSineShaper": null,
-  "kQuantize": 0.3
+  "kQuantize": 0.3,
+  "kDistHardClip": 0.1,
+  "kDistSinFold": 0.0,
+  "kDistStompBox": 0.0,
+  "kDistLinFold": null
  },
  "amounts": [
   0.0,

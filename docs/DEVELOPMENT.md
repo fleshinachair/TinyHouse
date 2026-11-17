@@ -6,11 +6,16 @@ TinyHouse converts Serum 2 presets (`.SerumPreset` / `.SerumPack`) into presets 
 [Tablor](https://github.com/athousanddetails/schwung-tablor) (a wavetable synth module for the Move's [Schwung](https://github.com/charlesvestal/schwung)
 host).
 
-**The initial aim** was narrow: make the Loopsy *DEEP HOUSE* Serum preset bank (70 presets) play faithfully on the Move. That bank is the
-reference the engine, the converter and the calibration were built and measured against, and it is still the main test of whether a change helps.
-The project then grew into a general goal: a **drop-in importer** that takes a folder of any Serum presets and gives back a Move bank, with every
-setting translated from what Serum itself does, not tuned by ear per preset. That is why no preset is fitted individually: a rule that only fixes
-one Deep House preset would not carry over to other packs.
+**The goal** is a **drop-in importer**: take a folder of any Serum 2 presets and get back a Move bank, with every setting translated from what Serum itself does,
+not tuned by ear per preset. That is why no preset is fitted individually: a rule that only fixes one preset would not carry over to the next pack.
+
+**What it is tested on.** Most people will not have the packs this was built against, so do not read the numbers below as something you can reproduce without them.
+- **Serum 2's own Factory presets** (626) are the general test: every Serum 2 owner has them, and they cover every feature. The importer's gate keeps the ones that match
+  Serum's render (363 are installed on the development Move).
+- **Third-party packs** were the development set: the Loopsy *Deep House* pack (70 presets, the first aim and the main early reference), the free
+  SynthHacker pack, OPS Hardstyle and Weapon Sounds. Each pack's licence is its author's; none is in this repository.
+- **Your own packs** work the same way: point the importer at the folder (see [Typical loop](#working-on-it)). A pack made mostly of wavetable basses, leads, keys, plucks and
+  pads imports best; see `skipped_<bank>.md` for what was left out and why.
 
 ```
  Serum 2 preset ──► deephouse2move.py / import_pack.py ──► tablor-dh preset (.json) + wavetables + sample sets
@@ -24,15 +29,14 @@ one Deep House preset would not carry over to other packs.
 | | |
 |---|---|
 | Engine module | `schwung-tablor/`, version `1.11.0-th`, about 520 parameters, ARM `dsp.so` built with zig |
-| Deep House bank | 70 presets (the Loopsy *Deep House* pack), all converted; none dropped |
-| Factory bank | 363 of Serum's 626 factory presets, kept by the quality gate; also installed: SynthHacker (48), OPS Hardstyle (14) |
-| Fidelity, Deep House | mean full-chain spectral loss about 14 (lower is better; it moves by +-4 between renders of the same state because unison phases are random); level within 0.9 dB of Serum on average |
-| Fidelity, Factory | each preset is gated on octave-band rms and level against its Serum render; `import_pack.py --compare` scores an installed bank with the same metric (the figures here for Deep House and the early Factory picks date from 2026-11-04) |
-| By ear | a first ear A/B against Serum (same-player WAV pairs, `calibration/dev/midi_ab.py` for the pack's demo MIDI): Bass - BUNT and Lead - Sleepless sound great, Catching Flies and I'll Be Yours are close; Lynnic is less brassy and Kisaya less vocal than Serum (Kisaya's formant filter is not built; Lynnic's LFO pitch route was over-deep and is fixed in the staged set, not yet auditioned) |
+| Banks on the development Move | Factory 363 of 626 (kept by the quality gate), Deep House 70 (none dropped), SynthHacker 48, OPS Hardstyle 14 |
+| Fidelity, Deep House (2026-11-04) | mean full-chain spectral loss about 14 (lower is better; it moves by +-4 between renders of the same state because unison phases are random); level within 0.9 dB of Serum on average |
+| Fidelity, any bank | each preset is gated on octave-band rms and level against its Serum render when it is imported; `import_pack.py --compare` scores an installed bank with the same metric |
+| By ear | little systematic listening so far: a first ear A/B on the Deep House pack in 2026-11-04 (`calibration/dev/midi_ab.py` plays a pack's own demo MIDI through Serum and TinyHouse as paired WAVs), then auditioning on the Move as banks were installed. Expect presets to sound close and a little different |
 
 ## What is supported
 
-**Presets.** Serum 2 only (decoded with `serum2-preset-loader`; tested on a 2.0.24 pack, unit curves measured on 2.1.5). A preset is converted only
+**Presets.** Serum 2 only (decoded with `serum2-preset-loader`; unit curves measured on Serum 2.1.5, packs from 2.0.24 on import). A preset is converted only
 if the engine can carry everything audible in it (`unsupported_reasons` in `deephouse2move.py`); `import_pack.py` writes a `skipped_<bank>.md`
 saying why each rejected preset was dropped. Packs with most of their presets in the supported set import best: basses, leads, keys, plucks and pads
 built on wavetables.
@@ -114,7 +118,7 @@ bash schwung-tablor/scripts/zig-build.sh arm                            # after 
 
 ## Open issues
 
-Ordered by how much they matter for the Deep House pack; [docs/ROADMAP.md](ROADMAP.md) has the full list with what each one takes.
+[docs/ROADMAP.md](ROADMAP.md) has the full list with what each one takes.
 
 - **Effects racks with a Comp inside a SplitMS branch, a HyperD / Delay / Comp / Bode in a Split branch, and bus-rack Mono-below**: not carried. EQs, distortion and modulation effects in branches are (mid/side EQ stage, band stage).
 - **Formant voice filters** (FormantONE / TWO / TWB) are measured (`calibration/dev/probe_formant.py`, `docs/TRANSLATION_RULES.md`) but not built; the importer drops presets that use them.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1
+
+**Fixed**
+- A tick on presets that sweep the position of a stepped (no-interpolation) wavetable, such as the PWM pads (SY - Dual PWM Poly). The engine picked the frame once per block, so it changed in the middle of a cycle and put a step in the wave; it now changes only where a cycle begins. It showed with one voice and no unison, and went away once the filter was closed.
+- Remote page: effect slots without a display (the EQ) grow to fit their controls instead of showing a scrollbar; the other slots get a thin scrollbar in the theme's colour.
+
+**Changed**
+- Imports now level presets to a common play loudness by default (the converter's `play_level.py`; `import_pack.py --no-play-level` keeps Serum's own levels). Remote-page imports are not levelled yet.
+
+**Update**: replace the `tinyhouse` folder on the Move with the one in `tinyhouse-module.tar.gz` and restart the Move, so the new engine is loaded.
+
 ## 0.9.0 (first release)
 
 TinyHouse turns Serum 2 presets into native patches for the Ableton Move (a Schwung module): a 3-oscillator wavetable, sample and granular synth with a full effects

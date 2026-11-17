@@ -102,6 +102,7 @@ public:
         phase = (p >= 0.0f) ? p : (float) rand() / (float) RAND_MAX;
         tableIndex = -1;
         lastTableIndex = -1;
+        steppedIdx = -1;
         syncEngaged = false;
         blockerL.reset();
         blockerR.reset();
@@ -124,7 +125,9 @@ public:
                     if (q.pmod) q.pmod += at;
                     if (q.fmod) q.fmod += at;
                     processModulated(note, q, raw, k);
-                } else if (tableIndex != lastTableIndex && lastTableIndex >= 0)
+                } else if (wt->stepped)
+                    processStepped(note, params, raw, k);
+                else if (tableIndex != lastTableIndex && lastTableIndex >= 0)
                     processCrossfade(note, params, raw, k);
                 else if (params.bend == 0.0f && params.formant == 0.0f)
                     processSimple(note, params, raw, k);
@@ -574,6 +577,35 @@ private:
         }
     }
 
+    /* A no-interpolation table (Serum's PWM tables, say) plays one frame at a time. The frame is the one the position names, but it is taken up only where a cycle
+     * begins: picked per block it changed mid-cycle, and a position LFO sweeping across frame boundaries put a step in the waveform at every one (a tick on the PWM
+     * pads, heard with one voice and no unison, gone once the filter is below about 700 Hz). */
+    void processStepped(float note, const Params &p, float *o, int n)
+    {
+        if (steppedIdx < 0 || steppedIdx >= wt->size())
+            steppedIdx = posToIndex(p.position);
+
+        const float delta = freqDelta(note);
+        const float formantMul = (p.formant != 0.0f) ? std::exp(p.formant * 1.60943791243f) : 1.0f;
+        const FrameTable *ft = wt->frame(steppedIdx);
+
+        while (n > 0) {
+            int todo = std::min(n, (int) ((1.0f - phase) / delta) + 1);
+            n -= todo;
+            for (; todo > 0; todo--) {
+                const float ph = distort(std::min(kAlmostOne, phase), p.bend, formantMul);
+                *o++ = ft->processLinear(note, ph);
+                phase += delta;
+            }
+            while (phase >= 1.0f) {
+                phase -= 1.0f;
+                steppedIdx = posToIndex(p.position);
+                ft = wt->frame(steppedIdx);
+            }
+        }
+        lastTableIndex = tableIndex = steppedIdx;
+    }
+
     void processCrossfade(float note, const Params &p, float *o, int n)
     {
         if (tableIndex == -1 || tableIndex >= wt->size())
@@ -613,7 +645,7 @@ private:
     const Wavetable *wt = nullptr;
     double sampleRate = 44100.0;
     float phase = 0.0f;
-    int tableIndex = -1, lastTableIndex = -1;
+    int tableIndex = -1, lastTableIndex = -1, steppedIdx = -1;
     bool blockDC = true;
     float curve[kWarpCurvePts] = {};
     int   curveModeC = -1;

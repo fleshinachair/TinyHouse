@@ -740,6 +740,45 @@ static void testMonoTakeover()
     CHECK(held < 2.0, "a note arriving over a held one joins without a step (%.1f x)", held);
 }
 
+/* A no-interpolation (stepped) table changes frame where a cycle begins, not at a block boundary mid-cycle: two sine frames of different size, the position flipped
+ * between them every block, must not step in the wave. */
+static void testSteppedFrameAtWrap()
+{
+    printf("== stepped table frame change ==\n");
+    std::vector<float> two(2 * 2048);
+    for (int i = 0; i < 2048; i++) {
+        const float v = std::sin(2.0f * (float) M_PI * (float) i / 2048.0f);
+        two[(size_t) i] = 0.4f * v; two[(size_t) (2048 + i)] = 1.0f * v;
+    }
+    auto wt = std::make_shared<Wavetable>();
+    wtBuild(*wt, two.data(), 2, 2048, 44100.0f, 44100.0f);
+    wt->stepped = true;
+    srand(5);
+    Engine e;
+    e.setTable(0, wt);
+    e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_WT2_LEVEL] = 0; e.pots[TB_P_WT3_LEVEL] = 0;
+    e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+    e.pots[TB_P_WT1_POS] = 0;
+    note(e, 60, 100);
+    render(e, 100);
+    double worst = 0.0, steady = 1.0;
+    std::vector<int16_t> out(256);
+    int16_t last = 0;
+    for (int b = 0; b < 200; b++) {
+        e.pots[TB_P_WT1_POS] = (b & 1) ? 127.0f : 0.0f;
+        e.renderBlock(out.data(), 128);
+        for (int i = 0; i < 128; i++) {
+            const double d = std::abs((double) out[(size_t) i * 2] - (double) last);
+            if (b > 0 || i > 0) worst = std::max(worst, d);
+            last = out[(size_t) i * 2];
+        }
+    }
+    /* the largest step of a clean sine of the bigger frame, at this pitch and level, is its peak * 2 pi f / sr */
+    { double peak = 0; for (int b = 0; b < 4; b++) { e.pots[TB_P_WT1_POS] = 127.0f; e.renderBlock(out.data(), 128); for (int i = 0; i < 128; i++) peak = std::max(peak, (double) std::abs(out[(size_t) i * 2])); }
+      steady = peak * 2.0 * M_PI * 261.63 / 44100.0; }
+    CHECK(worst < 2.0 * steady, "no step when the frame changes (largest step %.0f vs the sine's own %.0f)", worst, steady);
+}
+
 /* The clip player: a key down starts the pattern, which plays at the host tempo, looped, transposed from C3, and a key up stops it. At 120 BPM a
  * beat is 0.5 s = 172.3 blocks. */
 static void testClipPlayer()
@@ -1327,6 +1366,7 @@ int main()
     testUtilOutLfo();
     testNoteOnset();
     testMonoTakeover();
+    testSteppedFrameAtWrap();
     testClipPlayer();
     testSample2();
     testSamplePan();

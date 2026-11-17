@@ -8,9 +8,11 @@
 #include "dsp/engine.h"
 #include "ported/wav.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <string>
@@ -107,6 +109,19 @@ int main(int argc, char **argv)
         if (!found) { fprintf(stderr, "unknown key %s\n", k.c_str()); return 3; }
     }
 
+    /* TB_SET="uni_cap=4,voices=3": parameters set over the preset's (by key), for the performance sweeps (calibration/dev/perf_sweep.py). */
+    if (const char *ov = getenv("TB_SET")) {
+        std::stringstream os(ov);
+        for (std::string t; std::getline(os, t, ',');) {
+            const size_t q = t.find('=');
+            if (q == std::string::npos) continue;
+            const std::string k = t.substr(0, q);
+            bool found = false;
+            for (int i = 0; i < TB_PARAM_COUNT; i++) if (k == tb_params[i].key) { e.pots[i] = std::stof(t.substr(q + 1)); found = true; break; }
+            if (!found) { fprintf(stderr, "TB_SET: unknown key %s\n", k.c_str()); return 3; }
+        }
+    }
+
     /* TB_MACRO="1=127,3=0": the macros are turned to these positions (0..127) before the notes: their routed parameters move by the change. */
     e.macroSync();
     if (const char *mc = getenv("TB_MACRO")) {
@@ -143,6 +158,7 @@ int main(int argc, char **argv)
     const int blocks = (int) (dur * 44100.0 / 128.0), offAt = (int) (hold * 44100.0 / 128.0);
     std::vector<float> out((size_t) blocks * 256);
     int16_t b[256];
+    std::vector<double> blockUs;
     for (int i = 0; i < blocks; i++) {
         if (!events.empty()) {
             for (const Ev &ev : events) {
@@ -157,8 +173,15 @@ int main(int argc, char **argv)
             }
         } else if (i == offAt)
             for (int n : notes) { const uint8_t off[] = { 0x80, (uint8_t) n, 0 }; e.onMidi(off, 3); }
+        const auto t0 = std::chrono::steady_clock::now();
         e.renderBlock(b, 128);
+        { const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count(); blockUs.push_back(us); }
         for (int s = 0; s < 256; s++) out[(size_t) i * 256 + s] = (float) b[s] / 32768.0f;
+    }
+    if (getenv("TB_TIME")) {                                    /* mean and 99th percentile of one block's render, microseconds (a 128-frame block is 2902 us of audio) */
+        std::vector<double> sorted(blockUs); std::sort(sorted.begin(), sorted.end());
+        double sum = 0; for (double u : sorted) sum += u;
+        fprintf(stderr, "TIME mean %.1f p99 %.1f max %.1f\n", sum / std::max<size_t>(1, sorted.size()), sorted.empty() ? 0.0 : sorted[(size_t) (sorted.size() * 0.99)], sorted.empty() ? 0.0 : sorted.back());
     }
     FILE *f = fopen(argv[3], "wb");
     if (!f) return 4;

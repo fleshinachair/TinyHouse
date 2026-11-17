@@ -28,10 +28,18 @@ def run(uni=1, pan=None, amt=None, src=23, bip=1.0):
         s = copy.deepcopy(slot); s["source"] = [src, 0]; s["destModuleID"] = 0
         s["plainParams"] = {"kParamAmount": amt, "kParamBipolar": bip}; b["ModSlot0"] = s
     return lr(serum.render(b, [48], 1.5, 1.2, vel=100))
-print("no route, unison 1             L/R %.2f dB level %.1f" % run(1))
-for pan in (-50.0, 50.0, 100.0): print("stored pan %-6s unison 1       L/R %.2f dB level %.1f" % ((pan,) + run(1, pan=pan)))
-for amt in (100.0, 50.0, -100.0):
-    for uni in (1, 7):
-        print("src23 amt %-6s bip=1 unison %d  L/R %.2f dB level %.1f" % ((amt, uni) + run(uni, amt=amt)), flush=True)
-print("src23 amt 100 bip=0 unison 1   L/R %.2f dB level %.1f" % run(1, amt=100.0, bip=0.0))
+import math
+def t_of(db):
+    lo, hi = 0.0, 1.0
+    for _ in range(40):
+        t = (lo + hi) / 2
+        d = 20 * math.log10(((1 - t) * (1 + 0.172 * t)) / ((1 + t) * (1 - 0.172 * t)) + 1e-12)
+        if d > db: lo = t
+        else: hi = t
+    return (lo + hi) / 2
+print("stored pan p -> t:")
+for pan in (10.0, 25.0, 40.0): print(" pan %5.1f  L/R %.2f dB  t=%.2f (pan/50=%.2f)" % ((pan,) + (run(1, pan=pan)[0], t_of(run(1, pan=pan)[0]), pan / 50)))
+print("src 23 bipolar, unison 1, by amount:")
+for amt in (10.0, 20.0, 30.0, 50.0, 75.0, -30.0):
+    db = run(1, amt=amt)[0]; print(" amt %6.1f  L/R %.2f dB  t=%s" % (amt, db, ("%.2f" % t_of(db)) if db < 0 else ("-%.2f" % t_of(-db))))
 os._exit(0)

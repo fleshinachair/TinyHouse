@@ -302,18 +302,15 @@
       "title": "Too loud?",
       "lines": [
         "Distorted or",
-        "clipping? Turn VOL",
-        "down, on the Tone",
-        "or Voice page.",
+        "clipping? Turn the",
+        "module's Gain down",
+        "in Schwung (the",
+        "slot's setting), not",
+        "TinyHouse's VOL.",
         "",
-        "DRIV adds",
-        "saturation after",
-        "the volume, so",
-        "check it too.",
-        "",
-        "The slot keeps the",
-        "new volume with",
-        "your set."
+        "Gain is kept with",
+        "the slot and your",
+        "set."
       ]
     },
     {

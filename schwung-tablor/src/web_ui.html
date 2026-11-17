@@ -3108,8 +3108,9 @@ function macReload() {
 function buildMacros(page) {
   var g = el("div", "grid g2", page);
   var p = panel("Macros", g);
-  var r = row(["mac1", "mac2", "mac3", "mac4", "mac5", "mac6", "mac7", "mac8"], p.body);
-  var wraps = r.querySelectorAll(".knob");
+  /* two rows of four, as on the Move: 1-4 on top, 5-8 below */
+  var r1 = row(["mac1", "mac2", "mac3", "mac4"], p.body), r2 = row(["mac5", "mac6", "mac7", "mac8"], p.body);
+  var wraps = Array.prototype.slice.call(r1.querySelectorAll(".knob")).concat(Array.prototype.slice.call(r2.querySelectorAll(".knob")));
   for (var i = 0; i < wraps.length; i++) {
     MAC.wraps[i] = wraps[i]; MAC.labs[i] = wraps[i].querySelector(".lab");
     (function (n) { on("mac" + (n + 1), function (v) { macPredict(n, v); macFollow(n); }); })(i);

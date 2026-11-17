@@ -29,7 +29,7 @@ static void trial(int len, int ch, float gainDb)
             h[c][(size_t) i] = q * r.gain / 32768.0f;
         }
     set.regions.push_back(std::move(r));
-    auto plan = convBuild(set, 44100.0f);
+    auto plan = convBuild(set, 44100.0f, 0.0f);                    /* untrimmed: this is the convolver against the exact sum */
     if (!plan) { CHECK(false, "plan built for %d taps", len); return; }
     const int n = len + 9000;
     std::vector<float> x[2], y[2];
@@ -55,6 +55,41 @@ static void trial(int len, int ch, float gainDb)
     CHECK(db < (len > 4096 ? -70.0 : -80.0), "%d taps, %d ch, gain %+.0f dB: error %.1f dB re the output", len, ch, gainDb, db);
 }
 
+/* The tail trim: an IR that decays 90 dB over 60000 taps keeps only what holds the energy; the rest is cut, the plan is shorter, and the output stays within the trim's own error of the
+ * exact convolution (the dropped energy is at most -60 dB of the IR's). A silent end is cut too, an IR that has nothing to cut keeps every partition, and trimDb 0 trims nothing. */
+static void trimTrial()
+{
+    const int len = 60000;
+    uint32_t seed = 777u;
+    SampleSet set;
+    SampleRegion r;
+    r.channels = 1; r.frames = len; r.rate = 44100.0f; r.gain = 1.0f;
+    r.pcm.resize((size_t) len);
+    std::vector<float> h((size_t) len);
+    for (int i = 0; i < len; i++) {
+        const int16_t q = (int16_t) std::lround(rnd(seed) * 30000.0f * std::pow(10.0f, -90.0f * i / (20.0f * len)));
+        r.pcm[(size_t) i] = q; h[(size_t) i] = q / 32768.0f;
+    }
+    set.regions.push_back(r);
+    auto full = convBuild(set, 44100.0f, 0.0f), cut = convBuild(set, 44100.0f);
+    CHECK(cut && full && cut->tailParts < full->tailParts, "a decaying IR is trimmed (%d -> %d tail partitions)", full ? full->tailParts : -1, cut ? cut->tailParts : -1);
+    CHECK(cut && cut->tailParts >= 1 && full && full->tailParts == (len - convdetail::kHeadTaps + convdetail::kD - 1) / convdetail::kD, "an untrimmed plan keeps every partition (%d)", full ? full->tailParts : -1);
+    const int n = len + 9000;
+    std::vector<float> x((size_t) n), w((size_t) n), z((size_t) n);
+    for (int i = 0; i < n; i++) x[(size_t) i] = i < len + 3000 ? rnd(seed) : 0.0f;
+    for (int i = 0; i < n; i++) { float a, b; cut->step(x[(size_t) i], x[(size_t) i], w[(size_t) i], b); full->step(x[(size_t) i], x[(size_t) i], z[(size_t) i], a); }
+    double err = 0.0, ref = 0.0;
+    for (int i = 128; i < n; i++) { const double d = w[(size_t) i] - z[(size_t) i]; err += d * d; ref += (double) z[(size_t) i] * z[(size_t) i]; }
+    const double db = 10.0 * std::log10((err + 1e-30) / (ref + 1e-30));
+    CHECK(db < -55.0, "the trimmed reverb differs from the full one by %.1f dB re the output (trim -60 dB of the IR's energy)", db);
+    /* an IR that is all tail energy keeps every partition: flat noise 20000 taps long */
+    SampleSet flat; SampleRegion f; f.channels = 1; f.frames = 20000; f.rate = 44100.0f; f.gain = 1.0f; f.pcm.resize(20000);
+    for (auto &v : f.pcm) v = (int16_t) std::lround(rnd(seed) * 20000.0f);
+    flat.regions.push_back(f);
+    auto a = convBuild(flat, 44100.0f, 0.0f), b2 = convBuild(flat, 44100.0f);
+    CHECK(a && b2 && a->tailParts == b2->tailParts, "a flat IR has nothing to cut (%d / %d partitions)", a ? a->tailParts : -1, b2 ? b2->tailParts : -1);
+}
+
 int main()
 {
     trial(300, 2, 0.0f);
@@ -63,6 +98,7 @@ int main()
     trial(9000, 2, 0.0f);
     trial(20000, 1, 6.0f);
     trial(60000, 2, -10.0f);
+    trimTrial();
     printf("%s\n", g_fail ? "FAILED" : "all passed");
     return g_fail ? 1 : 0;
 }

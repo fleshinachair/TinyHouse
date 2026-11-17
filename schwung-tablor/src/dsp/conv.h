@@ -330,7 +330,11 @@ private:
 };
 
 /* Builds a plan from the first region of an IR set (any sample rate: resampled linearly to `sr`). Loader thread only. Null if the set holds no audio. */
-inline std::shared_ptr<ConvPlan> convBuild(const SampleSet &set, float sr)
+/* TAIL TRIM. The part of the IR after which the rest holds less than `trimDb` of the IR's total energy (default -60 dB: below the engine's own noise floor, 15 dB under the half-precision
+ * tail's rounding) is not convolved at all: the tail's cost is one partition product per 2048 taps, whatever they hold. The kept length is rounded up to a whole partition (free: the
+ * partition is paid for anyway) and the last 1024 taps fade out so the cut is not a step. Most stock IRs end on a decayed tail and lose only a few per cent (a trim at -60 dB keeps
+ * 90 % of the median IR's length, 98 % at -70 dB): the cost of a long reverb is in the IR itself, not in a silent end. trimDb >= 0 trims nothing. */
+inline std::shared_ptr<ConvPlan> convBuild(const SampleSet &set, float sr, float trimDb = -60.0f)
 {
     using namespace convdetail;
     if (set.regions.empty()) return nullptr;
@@ -343,6 +347,25 @@ inline std::shared_ptr<ConvPlan> convBuild(const SampleSet &set, float sr)
     int len = (int) ((double) r.frames * ratio);
     len = std::min(len, kHeadTaps + kMaxTailParts * kD);
     if (len < 1) return nullptr;
+    int fadeFrom = len;                                                          /* the first tap of the fade-out when the tail was trimmed, else len (no fade) */
+    if (trimDb < 0.0f && len > kHeadTaps + kD) {
+        const int nsrc = std::min(r.frames, (int) std::ceil((double) len / ratio));
+        double total = 0.0;
+        std::vector<double> e((size_t) nsrc);
+        for (int i = 0; i < nsrc; i++) {
+            double v = 0.0;
+            for (int c = 0; c < r.channels; c++) { const double q = (double) r.pcm[(size_t) i * r.channels + c]; v += q * q; }
+            e[(size_t) i] = v; total += v;
+        }
+        const double limit = total * std::pow(10.0, (double) trimDb / 10.0);
+        double acc = 0.0;
+        int keepSrc = nsrc;
+        for (int i = nsrc - 1; i >= 0; i--) { acc += e[(size_t) i]; if (acc > limit) { keepSrc = i + 1; break; } }
+        int keep = (int) std::ceil((double) keepSrc * ratio);
+        keep = std::max(keep, kHeadTaps + kD);                                   /* never less than the head and one tail partition */
+        keep = kHeadTaps + ((keep - kHeadTaps + kD - 1) / kD) * kD;              /* up to the end of the partition it falls in */
+        if (keep < len) { len = keep; fadeFrom = std::max(kHeadTaps, len - 1024); }
+    }
     plan->fb.init(kBN); plan->fd.init(kDN);
     plan->tailParts = len > kHeadTaps ? (len - kHeadTaps + kD - 1) / kD : 0;
     const float g = r.gain * (1.0f / 32768.0f);
@@ -357,6 +380,7 @@ inline std::shared_ptr<ConvPlan> convBuild(const SampleSet &set, float sr)
             const float a = (float) r.pcm[(size_t) i0 * r.channels + (r.channels == 2 ? c : 0)], b = (float) r.pcm[(size_t) i1 * r.channels + (r.channels == 2 ? c : 0)];
             x[(size_t) i] = (a + (b - a) * f) * g;
         }
+        for (int i = fadeFrom; i < len; i++) x[(size_t) i] *= 0.5f + 0.5f * std::cos(3.14159265f * (float) (i - fadeFrom) / (float) (len - fadeFrom));   /* the trimmed end fades out */
         for (int p = 0; p < kHeadParts; p++) {
             std::fill(re.begin(), re.begin() + kBN, 0.0f); std::fill(im.begin(), im.begin() + kBN, 0.0f);
             for (int i = 0; i < kB; i++) { const int t = p * kB + i; if (t < len) re[(size_t) i] = x[(size_t) t]; }

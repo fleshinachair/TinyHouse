@@ -20,11 +20,12 @@ each preset against your own copy of it.
 
 - An Ableton Move running [Schwung](https://github.com/charlesvestal/schwung), with the TinyHouse module installed on it (see [Installing](#installing)).
 - Serum 2 presets (`.SerumPreset` files or a `.SerumPack`). Nothing from Xfer is included.
-- Ideally, Serum 2 installed on your computer. Many presets use Serum's own wavetables and samples, which TinyHouse reads from your `Documents\Xfer` folder; without that
-  folder those oscillators are silent. Serum 2 on Windows is also needed for the more accurate [Python route](#more-accurate-conversion-with-the-python-scripts) (with Python 3.13).
+- Serum 2 installed on your computer, for any preset that uses Serum's own wavetables or samples (most factory presets do). Serum's installer puts those files in your
+  `Documents\Xfer\Serum 2 Presets` folder, and TinyHouse reads them from there; the plugin itself does not have to run. Without that folder those oscillators are silent.
+  A preset that carries its own wavetables and samples inside the file imports without it. Serum 2 on Windows is also needed for the more accurate
+  [Python route](#more-accurate-conversion-with-the-python-scripts) (with Python 3.13).
 
-The browser import runs the converter inside the page, so it needs no Python and no Serum plugin on your computer, but the browser needs internet access (it loads the
-Python runtime from a CDN).
+The browser import runs the converter inside the page, so it needs no Python on your computer, but the browser needs internet access (it loads the Python runtime from a CDN).
 
 ## The workflow
 

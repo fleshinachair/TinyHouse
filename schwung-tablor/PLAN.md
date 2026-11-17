@@ -1,5 +1,7 @@
 # Tablor — a wavetable synth for Ableton Move
 
+> **Historical.** This is the original study from before any code was written. The build is described in the READMEs and docs/DEVELOPMENT.md.
+
 Analysis and build plan. **No code written yet** — this document is the study.
 
 ---

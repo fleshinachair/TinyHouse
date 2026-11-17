@@ -47,7 +47,7 @@ Your presets go nowhere but your Move: the converter runs inside the browser pag
 ## Tweaking and playing
 
 **Fine-tuning is on the remote UI**, laid out after Serum: tabs along the top (Osc, Sample, Macros, Filter, Envelopes, FX, Mix, Globals, Demo). The Osc tab has
-three oscillators with 3D wavetable displays, and the **Sample** tab has the three sample slots (sample or granular, with a picture of the grains). Drag the
+three oscillators with 3D wavetable displays, and the **Sample** tab has the three sample slots (sample or granular, with a picture of the grains). On the **FX** tab every control in an effect's slot wears that effect's colour. Drag the
 filter curve and envelopes, pick wavetables from the list, set the effects, and save the result as a preset. The import report's loudness, reverb and width come
 from general rules, so set **Volume** and the effects to taste.
 
@@ -59,10 +59,10 @@ from general rules, so set **Volume** and the effects to taste.
 |---|---|
 | **Main** | filter freq, res and envelope amount, decay, sub, width, space, bank |
 | **Tone** | the three wavetable positions drawn as waves (an oscillator that is off shows an empty slot), attack, release, drive, high shelf, volume |
-| **Macros** | the preset's eight macros as dials, each with its name over a value bar; an unused macro is an empty slot |
+| **Macros** | the preset's eight macros as two rows of four dials, each with its name over a value bar; an unused macro is an empty slot |
 | **Effects**, **Mod FX** | each effect on or off, drawn as the chain, with its main controls |
 | **Voice** | voice mode, **Voices**, **Unison Cap**, glide, glide mode, legato, pitch-bend range, volume |
-| **Grain 1-3** | the sample's shape with its start point and scan direction, above the four grain knobs |
+| **Grain 1-3** | the sample's shape with its scan head, start point and loop, above eight knobs: Density, Length, Scan, Start, Kind, Loop mode, Loop start, Loop end |
 | **Demo** | plays a MIDI part from a folder on the Move so you can audition a bank; it waits for Play and joins on the next bar |
 
 **If it clicks or glitches, turn down Unison Cap and Voices** (both on the **Voice** page). The Move renders every slot on one audio thread, so a busy set
@@ -113,14 +113,14 @@ There are also **two FX buses**, each a full copy of the rack, with their own os
 - Serum 2 presets and packs (`.SerumPreset`, `.SerumPack`).
 - Three wavetable oscillators with unison to 16 voices, a sub and a noise oscillator; stepped or interpolated wavetable position; fixed-pitch and pitch-envelope oscillators.
 - Warps: bend, PWM, sync, even/odd, the filter warps, and FM, phase-distortion, ring-mod and AM warps driven by the Sub or another oscillator (two per oscillator), with LFO and envelope routes into their amounts.
-- Sample and multisample oscillators (from your Samples folders), and the **granular oscillator** (density, length, scan, start).
-- Two filters, in parallel or series: ladder, high-pass and low-pass models, and notch, band-reject, Exp, Scream, RM and DJMixer models, each matched to the closest engine filter.
+- Sample and multisample oscillators (from your Samples folders), and the **granular oscillator** (density, length, scan, start, loops, scan range, tempo and BPM modes, random settings, unison).
+- Two filters, in parallel or series: ladder, high-pass and low-pass models, notch, band-reject, Exp, Scream, RM and DJMixer models, and the comb, flange and phase models, each matched to the closest engine filter.
 - Envelopes, four LFOs, the arpeggiator, and routes from macros, velocity, note number, mod wheel and random sources. Synced LFOs run at their 120 BPM rate.
 - The whole effects chain and both FX buses, including the reverb and convolution reverb of a Split band; Convolution (Space) reverbs use the impulse response from Serum's Impulses folder or the preset.
 
 **Not carried yet**
 - FM, ring-mod and phase-distortion warps driven by the noise or by Filter 1; DLM, spectral tables, Sync Var.
-- Formant, comb, flange, phase and reverb filter models.
+- Formant and reverb filter models, and the rarer comb variants (Comb2, Combs).
 - A second distortion, compressor or delay; a filter placed before the distortion; sends moved by an LFO or envelope (the Distortion's Wet follows one).
 - The Bode frequency shifter: a preset whose only unsupported effect is a Bode imports without it and the report says so.
 - In Split and SplitMS branches, only the Distortion, Chorus / Flanger / Phaser (Distortion only for SplitMS), EQ and band reverbs are carried; a HyperD, Delay,
@@ -150,7 +150,7 @@ SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh
 ```
 
 For Serum's own Factory presets, point it at `Presets\Factory` in your Serum 2 folder with `--bank Factory`; it keeps only presets that match Serum's render
-(about 290 of the 626) and takes hours, because every preset is rendered. If it stops, run the same command again with `--resume`. Reload the slot afterwards and
+(about 360 of the 626) and takes hours, because every preset is rendered. If it stops, run the same command again with `--resume`. Reload the slot afterwards and
 the bank is in the preset browser. `converter/deephouse2move.py` converts a `.SerumPack` directly, and `converter/serum_paths.py` explains how Serum's folders are
 found (set `SERUM_ROOT` and `SERUM_VST` if yours are elsewhere). Renders are cached, so a second run is fast. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the
 options and rules.

@@ -9,7 +9,7 @@ else stays out of the way.
 
 ![Main page: both wavetables on knobs 1-2, position, level and tune](docs/img/move-main.png)
 
-8 pages, 59 controls, no menus inside menus. The graphics are Schwung's own
+9 pages, 71 controls on the device, no menus inside menus. The graphics are Schwung's own
 — declared, not drawn by us — so the filter curve and both envelopes are the
 real values:
 
@@ -59,11 +59,10 @@ upstream release and are not used on the device.
 - **A performance page first**: the device opens on cutoff, resonance, filter
   envelope amount and decay, sub, amp decay and release, and SPACE.
   Everything else is a jog away
-- **9 factory sounds**, seeded into Schwung's own preset store on first run.
-  Presets, modulation and knob mapping are all the host's: jog to the module's
+- **Presets** live in Schwung's own preset store (the importer writes TinyHouse's
+  banks there; the module can also seed a few factory sounds). Presets, modulation and knob mapping are all the host's: jog to the module's
   **My Presets** page and open **Preset**, and point a slot LFO or a mapped knob
   at any Tablor parameter from the slot settings
-- A seeded library of **115 wavetables**
 - **Web panel** — full control surface in the browser at
   `move.local:7700/remote-ui`
 

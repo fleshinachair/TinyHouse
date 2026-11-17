@@ -23,11 +23,11 @@ one Deep House preset would not carry over to other packs.
 
 | | |
 |---|---|
-| Engine module | `schwung-tablor/`, version `1.11.0-th`, 315 parameters, ARM `dsp.so` built with zig |
+| Engine module | `schwung-tablor/`, version `1.11.0-th`, about 520 parameters, ARM `dsp.so` built with zig |
 | Deep House bank | 70 presets (the Loopsy *Deep House* pack), all converted; none dropped |
-| Factory Picks bank | 25 presets from Serum's 626 factory presets (37 tried, 12 dropped by the quality gate) |
+| Factory bank | 363 of Serum's 626 factory presets, kept by the quality gate; also installed: SynthHacker (48), OPS Hardstyle (14) |
 | Fidelity, Deep House | mean full-chain spectral loss about 14 (lower is better; it moves by +-4 between renders of the same state because unison phases are random); level within 0.9 dB of Serum on average |
-| Fidelity, Factory Picks | octave bands 9.2 dB rms from Serum on average, level within 1.2 dB |
+| Fidelity, Factory | each preset is gated on octave-band rms and level against its Serum render; `import_pack.py --compare` scores an installed bank with the same metric (the figures here for Deep House and the early Factory picks date from 2026-11-04) |
 | By ear | a first ear A/B against Serum (same-player WAV pairs, `calibration/dev/midi_ab.py` for the pack's demo MIDI): Bass - BUNT and Lead - Sleepless sound great, Catching Flies and I'll Be Yours are close; Lynnic is less brassy and Kisaya less vocal than Serum (Kisaya's formant filter is not built; Lynnic's LFO pitch route was over-deep and is fixed in the staged set, not yet auditioned) |
 
 ## What is supported
@@ -41,8 +41,9 @@ built on wavetables.
 - Three wavetable oscillators with unison up to 16 voices, plus a sub and a noise oscillator (white, pink, brown and Serum's colour filters).
 - Wavetable position is stepped or interpolated per table, as Serum does it (the WAV `clm ` chunk).
 - Warps: bend, PWM, sync, even/odd, the filter warps and the FM, RM, PD and AM warps driven by the Sub or by another oscillator, with two warp slots per oscillator. Not carried: warps driven by the noise or by Filter 1, DLM, spectral tables, Sync Var.
+- The **granular oscillator** is a sample slot in granular mode (`granular.h`; laws in [GRANULAR_PROBE_NOTES.md](GRANULAR_PROBE_NOTES.md), status in [GRANULAR_DESIGN.md](GRANULAR_DESIGN.md)).
 - Sample and multisample oscillators, from SFZ or audio, as `.tbs` sample sets (`sample_export.py`). A Sample oscillator's level follows the wavetable law with no offset (measured within 0.3 dB over six files spanning 22 dB of recorded level); a Multisample plays 7.3 dB louder in Serum, carried in each region's volume (`calibration/dev/probe_sample_level.py`, `probe_multisample_level.py`). Warps, unison and their own release are not modelled.
-- Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched, and so are the notch, band-reject, Exp, Scream, RM and DJMixer models (`calibration/dev/fit_filter_model.py` finds the closest engine filter and cutoff; the importer's A/B gate judges the rest). Formant, comb, flange, phase and reverb models are not: they are not a plain low / high / band / notch response, so they need new engine filters (comb and flange / phase are the largest group, about 17 of the 52 presets that name an unsupported model; only 15 of those 52 are blocked by it alone).
+- Two voice filters, in parallel with a balance control or in series. The common ladder / H / L models are matched, and so are the notch, band-reject, Exp, Scream, RM and DJMixer models (`calibration/dev/fit_filter_model.py` finds the closest engine filter and cutoff; the importer's A/B gate judges the rest). The comb, flange and phase models are carried by their own engine filters (`comb.h`, types 8 to 15; `Comb2`, `Combs` and the `L6` / `H6` variants are not). Formant and reverb models are not carried: they are not a plain low / high / band / notch response, so they need new engine filters.
 - Envelopes, 4 LFOs, and the modulation routes of macros, velocity, note number, mod wheel and random sources. Macros, velocity and note are folded
   at their saved values (there is no live macro); a route gated by something that is closed at rest is switched off, as it would be in Serum.
 - Source routing: filter, master, direct (past the effects) and none, and Serum's outputs of Filter 1 / Filter 2 as sources.
@@ -81,7 +82,7 @@ Bode frequency shifter, Utils width inside a bus rack, a filter placed before th
 | `docs/TRANSLATION_RULES.md` | the measured Serum facts and the translation rules built on them |
 | `converter/serum_paths.py`, `requirements.txt` | where Serum is found (environment variables override), and the Python packages |
 | `calibration/dev/midi_ab.py` | play a preset's own demo MIDI through Serum and through TinyHouse and compare (writes paired WAVs); `reports/2026-11-04-demo-midi-ab.md` has the results for the Loopsy pack |
-| `reports/` | what each round of work changed and measured. `2026-11-04-*.md` are the newest; `FX_COVERAGE.md` and `MISSING_FEATURES.md` predate the compressor, distortion, LFO and bus work and are out of date |
+| `reports/` | what each round of work changed and measured. dated snapshots, not kept current: `FX_COVERAGE.md` and `MISSING_FEATURES.md` predate the compressor, distortion, LFO and bus work and are out of date |
 
 ## Working on it
 
@@ -115,9 +116,9 @@ bash schwung-tablor/scripts/zig-build.sh arm                            # after 
 
 Ordered by how much they matter for the Deep House pack; [docs/ROADMAP.md](ROADMAP.md) has the full list with what each one takes.
 
-- **Effects racks with a Comp / Distortion inside a SplitMS branch, band-split (Split) branches and bus-rack Mono-below**: not carried. EQs inside SplitMS branches are carried (mid/side EQ stage).
+- **Effects racks with a Comp inside a SplitMS branch, a HyperD / Delay / Comp / Bode in a Split branch, and bus-rack Mono-below**: not carried. EQs, distortion and modulation effects in branches are (mid/side EQ stage, band stage).
 - **Formant voice filters** (FormantONE / TWO / TWB) are measured (`calibration/dev/probe_formant.py`, `docs/TRANSLATION_RULES.md`) but not built; the importer drops presets that use them.
-- **Tempo-synced LFOs** are read as Hz (Lead - Loop, Pluck - Deep In The Water); needs a Serum probe of the Rate scale and an engine sync option.
+- **Tempo-synced LFOs** run at their 120 BPM rate (Serum's synced Rate is a beat period, probed); they do not follow the Move's tempo yet, which needs an engine sync option.
 - Unsupported warps (the noise-driven and Filter-1-driven FM, RM and PD, DLM), non-wavetable oscillator kinds, Bode, a filter before the distortion, and filter-model gaps are the largest groups among the factory presets the importer drops.
 - Second distortion / compressor / delay stage; chorus / flanger / phaser default rates and depths; delay and reverb corner cases are listed in the notes next to each rule.
 - **Reverb tails (mostly done).** The wet gain is now 2.25 (was 1.50), which brings the median tail of a played note to within 1 to 3 dB of Serum's (it was 2 to 5 dB under). A hotter

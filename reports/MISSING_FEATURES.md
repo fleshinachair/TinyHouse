@@ -1,5 +1,7 @@
 # What Serum does in these 70 presets that TinyHouse does not (yet), most used first
 
+> **Out of date.** Written on 2026-11-04 for the 70-preset Deep House pack, before the compressor, distortion, LFO, second filter, sample and bus work. See docs/ROADMAP.md for the current list.
+
 Counted from the Serum files (calibration/fx_coverage.json, out/report.json). "Presets" is the number of the 70 that use it.
 
 ## Effects

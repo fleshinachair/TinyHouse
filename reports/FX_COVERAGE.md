@@ -1,5 +1,7 @@
 # FX coverage: which presets carry their whole Serum effect chain in TinyHouse
 
+> **Out of date.** Written on 2026-11-04 before the compressor, distortion, LFO, bus and Split work; most of what it lists as not carried is carried now. See docs/ROADMAP.md for the current list.
+
 Carried: EQ (up to four bands), Delay (one), Reverb, and width (HyperDimension/Chorus/Flanger/Phaser as one width control). Not carried: Filter, Comp, Distortion, Utils, SplitMS, Bode, effects in the two bus racks, EQ in a Split branch, a second delay.
 
 'Worth' is measured on Serum itself (calibration/dev/fx_contribution.py): the loss between the full render and one with every missing effect switched off, minus the noise floor of two Serum renders of the same preset. It is the most that carrying the missing effects could gain; over about 5 is audible in the spectrum or envelope.

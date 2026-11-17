@@ -19,7 +19,7 @@ identical.
 - Formant filters, a second distortion / compressor / delay, Bode, and a few warp sources are not carried yet; such presets are skipped or import with that part left out.
 - Synced LFOs run at their 120 BPM rate, not the Move's tempo.
 - The Move's wavetable knobs list at most 128 tables.
-- Some presets come out loud: turn the module's Gain setting down in Schwung if one distorts.
+- Some presets come out loud: turn Master Gain (VOL on the Tone page) down if one distorts.
 
 **Install**: download `tinyhouse-module.tar.gz`, unpack it and copy the `tinyhouse` folder to `/data/UserData/schwung/modules/sound_generators/` on the Move (see the README, "Installing"), or build it yourself with `zig`.
 

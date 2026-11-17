@@ -52,7 +52,7 @@ three oscillators with 3D wavetable displays, and the **Sample** tab has the thr
 filter curve and envelopes, pick wavetables from the list, set the effects, and save the result as a preset. The import report's loudness, reverb and width come
 from general rules, so set **Volume** and the effects to taste.
 
-**Distorted or clipping?** A few presets come out louder than the Move's output can carry, and they crackle or distort on loud passages. Turn the module's **Gain** setting down in Schwung (the slot's setting, not TinyHouse's own Volume) until it is clean. It is kept with the slot and your set.
+**Distorted or clipping?** A few presets come out louder than the Move's output can carry, and they crackle or distort on loud passages. Turn **Master Gain** down until it is clean: it is the last knob (VOL) on the Tone page, and also on the Voice page and in the Output panel of the Globals tab on the remote page. The slot keeps the new gain with your set, and you can save it as a preset from the remote page.
 
 ![The Sample tab on a granular oscillator: the sample's shape with its start point and loop, a lane of grains sized by the density, length and window, and every grain control below](docs/img/remote-sample.png)
 

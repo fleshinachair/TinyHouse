@@ -118,7 +118,9 @@ body{
 .fxslot > .body{flex:1 1 auto; min-width:0; min-height:0; flex-direction:row; align-items:stretch; gap:14px; padding:10px 12px; overflow:hidden}
 .fxgfx{flex:0 0 clamp(200px,28%,320px); display:flex; min-width:0}
 .fxgfx canvas.gr{flex:1; height:auto !important; min-height:0}
-.fxctl{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:8px; overflow-y:auto}
+.fxctl{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:8px; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line2) transparent}
+.fxrack > .panel.fxslot.nogfx{height:auto; min-height:214px}                          /* no display to keep square: the slot grows with its controls (the EQ's four bands) instead of scrolling */
+.fxslot.nogfx .fxctl{overflow:visible}
 .fxhead > .body{flex-direction:row; align-items:center; gap:18px}
 .fxhead > .body .note{flex:1 1 auto; margin:0}
 .fxrack > .panel.fxslot.nogfx{--kw:84px; --ks:50px}                                   /* no display: the controls take the whole width, bigger */

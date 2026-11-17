@@ -9,7 +9,8 @@ For every .SerumPreset under SRC_DIR:
      an effect the engine has no stage for) and say why in OUT/skipped.md;
   3. play it through Serum (full chain, notes chosen by test_render_calibration.sounding_notes) and set the preset's volume so its
      loudness matches, with the output limiter kept out of the sound (the same two steps as fit_level.py and post_level.py);
-  4. write OUT/<bank>/<name>.json (Schwung's preset format) and the wavetables it needs under out/move/data/UserData/UserLibrary/Wavetables/<bank>/.
+  4. set the volume last so a chord plays at the same loudness as every other preset (play_level.py; --no-play-level keeps Serum's own levels);
+  5. write OUT/<bank>/<name>.json (Schwung's preset format) and the wavetables it needs under out/move/data/UserData/UserLibrary/Wavetables/<bank>/.
 The plugin goes silent after about 1200 s of audio per process, so it is reloaded before that. The Serum renders are cached
 in calibration/refs/ like the rest, so a second run is fast. Copy OUT/<bank> to the Move with BANK="<bank>" deploy_presets.sh.
 """
@@ -32,6 +33,7 @@ import fx_fingerprint as FP
 import fxmap
 import comp_rescale as CR
 import post_fit as PF
+import play_level as PL
 import voice_survey as VS
 import test_render_calibration as H
 from serum2_preset_loader.codec import decode_preset_file
@@ -284,6 +286,7 @@ def main():
     ap.add_argument("--no-bode-out", action="store_true", help="skip a preset whose Bode is audible in Serum (the default imports it without the Bode and lists it in the report)")
     ap.add_argument("--no-ab-ignore", action="store_true", help="do not test whether the effects the converter leaves out are inaudible in Serum itself; skip those presets")
     ap.add_argument("--compare", type=Path, default=None, help="a folder of installed preset .json files: each one is also scored against Serum's render with the same metric, and the line says which is closer (nothing is written for it)")
+    ap.add_argument("--no-play-level", action="store_true", help="keep each preset at Serum's own loudness. By default the volume is set last so every preset plays a chord at the same loudness (play_level.py): Serum's presets differ by tens of dB")
     ap.add_argument("--no-level", action="store_true", help="skip the Serum render and the loudness fit (the converter's own volume)")
     a = ap.parse_args()
 
@@ -413,9 +416,13 @@ def main():
                 print(f"  dropped {name}: level {gap:+.1f} dB, bands {berr:.1f} dB rms (volume {int(PF.getk(state, 'volume', 0))}{cap_note})", flush=True)
                 continue
             ab_note += cap_note
+        play_note = ""
+        if not a.no_play_level:                  # after the gate, which judges the preset against Serum's own level
+            state, pl = PL.fit_state(state, name)
+            play_note = f"; play level: volume {pl['from']} -> {pl['to']}" + (" (held by the peak ceiling)" if pl["held_by_peak"] else "")
         (bank_dir / f"{name}.json").write_text(json.dumps({"name": name, "module": "tinyhouse", "version": 1, "state": state}) + "\n", encoding="utf-8")
         kept.append(name)
-        print(f"  kept {name}" + ("" if a.no_level else f"  (volume {int(PF.getk(state, 'volume', 0))}, {m['tier']}, level {gap:+.1f} dB, bands {berr:.1f} dB rms{ab_note})"), flush=True)
+        print(f"  kept {name}" + ("" if a.no_level else f"  (volume {int(PF.getk(state, 'volume', 0))}, {m['tier']}, level {gap:+.1f} dB, bands {berr:.1f} dB rms{ab_note}{play_note})") + (play_note.lstrip("; ") if a.no_level else ""), flush=True)
         if a.limit and len(kept) >= a.limit:
             break
     lines = [f"# {a.bank}: {len(kept)} imported, {len(skipped)} skipped", ""] + [f"- {n}: {'; '.join(w)}" for n, w in skipped]

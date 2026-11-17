@@ -206,6 +206,8 @@ const saw = waveDigest(24, 64, (p, x) => 2 * x - 1);
     check(near(T.headPos(v({ smp_gscan: 0 }), "smp", 5).x, 0.2), "a rate of 0 stands at Start");
     const lp = v({ smp_gv: "100,1,40,60,0,0" });
     check(near(T.headPos(lp, "smp", 0).x, 0.4) && near(T.headPos(lp, "smp", 0.4).x, 0.5) && near(T.headPos(lp, "smp", 0.8).x, 0.4), "with Loop on it walks the loop (40-60 %), not Start..End");
+    const pp = v({ smp_gv: "100,2,40,60,0,0" });
+    check(near(T.headPos(pp, "smp", 0.4).x, 0.5) && near(T.headPos(pp, "smp", 0.8).x, 0.6) && near(T.headPos(pp, "smp", 1.2).x, 0.5) && near(T.headPos(pp, "smp", 1.6).x, 0.4), "PingPong: the head goes out to Loop end and comes back to Loop start (a triangle)");
     const lh = T.headPos(lp, "smp", 0);
     check(lh.loopOn && near(lh.aLo, 0.2) && near(lh.aHi, 0.6) && near(lh.lo, 0.4) && near(lh.hi, 0.6), "a Start below Loop end: the scan reads from Start (the run-in) to Loop end, the head cycles the loop");
     const ig = T.headPos(v({ smp_gstart: 70, smp_gv: "90,1,40,60,0,0" }), "smp", 0);

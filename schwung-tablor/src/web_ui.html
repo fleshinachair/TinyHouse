@@ -1385,7 +1385,7 @@ function grainDraw(c, p) {
   var kd = val(p + "_gdens") / 127, kl = val(p + "_glen") / 127, scan = val(p + "_gscan");
   var st = val(p + "_gstart") / 100, en = val(p + "_gend") / 100;
   if (en <= st) en = Math.min(1, st + 0.01);
-  var loopOn = val(p + "_gloop") >= 1, ls = val(p + "_gloops") / 100, le = val(p + "_gloope") / 100;
+  var loopMode = val(p + "_gloop"), loopOn = loopMode >= 1, ls = val(p + "_gloops") / 100, le = val(p + "_gloope") / 100;
   if (le <= ls) le = Math.min(1, ls + 0.01);
   var man = val(p + "_gman") >= 1, mpos = val(p + "_gpos") / 100;
   var shape = val(p + "_gwin"), wparam = val(p + "_gwinp"), wskew = val(p + "_gskew");
@@ -1400,7 +1400,9 @@ function grainDraw(c, p) {
   var rate = scan / 100 / GRAIN_FILE_S;                                            /* fractions of the file per second */
   function headAt(tt) {
     if (man) return mpos;
-    var span = hi - lo, f = ((tt * rate) % span + span) % span;
+    var span = hi - lo;
+    if (loopOn && loopMode >= 2) { var per = 2 * span, q = ((tt * rate) % per + per) % per; return q < span ? lo + q : hi - (q - span); }   /* PingPong: a triangle */
+    var f = ((tt * rate) % span + span) % span;
     return rate >= 0 ? lo + f : hi - (span - f) % span;
   }
 

@@ -303,6 +303,10 @@
         const ex = { lo: lo, hi: hi, aLo: aLo, aHi: aHi, loopOn: loopOn, ls: ls, le: le };
         if (g.man >= 1) return Object.assign({ x: Math.max(0, Math.min(1, g.pos / 100)) }, ex);
         const rate = scan / 100 / GRAIN_FILE_S, span = hi - lo;
+        if (loopOn && g.loop >= 2) {                                       /* PingPong: out to the loop end and back to the loop start, as a triangle */
+            const per = 2 * span, q = ((now * rate) % per + per) % per;
+            return Object.assign({ x: q < span ? lo + q : hi - (q - span) }, ex);
+        }
         const f = ((now * rate) % span + span) % span;
         return Object.assign({ x: rate >= 0 ? lo + f : hi - (span - f) % span }, ex);
     }

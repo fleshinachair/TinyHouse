@@ -21,8 +21,8 @@ real values:
 
 This is **TinyHouse** (`tinyhouse`), which installs beside stock Tablor
 under its own module id and preset folder, so a store update to Tablor cannot
-replace it. `release.json` and `docs/catalog-entry.json` still describe the
-upstream release and are not used on the device.
+replace it. TinyHouse's `release.json` is in the repository root; `docs/catalog-entry.json`
+is an upstream Tablor proposal and is not used on the device.
 
 ## Features
 

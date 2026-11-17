@@ -718,10 +718,10 @@ BANKS = [
     ("Granular 3", False, [row(*G.values()) for G in (GRANC1, GRANC2, GRANC3)]),
     # After Granular 3, for the same reason: a sample slot's Pan. Set by the converter; no page on the device.
     ("Granular 4", False, [row(GRAND1["pan"], GRAND2["pan"], GRAND3["pan"])]),
-    # The Grain pages of the device (PAGE_MAP): the four main grain knobs of a slot on the first line (under the sample's picture), then its Kind and Level and the window.
-    # Every key is in the table already (an earlier bank), so no number moves.
-    ("Grain", False, [row(G["dens"], G["len"], G["scan"], G["start"], G["kind"], S["level"], G["win"], G["winp"])
-                      for G, S in ((GRAN1, SAMPLE), (GRAN2, SAMPLE2), (GRAN3, SAMPLE3))]),
+    # The Grain pages of the device (PAGE_MAP): the four main grain knobs of a slot on the first line (under the sample's picture), then its Kind and the loop (mode, start, end).
+    # The slot's Level is on its Sample page; the window and its shape are remote-UI only. Every key is in the table already (an earlier bank), so no number moves.
+    ("Grain", False, [row(G["dens"], G["len"], G["scan"], G["start"], G["kind"], GB["loop"], GB["loops"], GB["loope"])
+                      for G, GB in ((GRAN1, GRANB1), (GRAN2, GRANB2), (GRAN3, GRANB3))]),
     # The Effects and Mod FX pages as the device shows them now: the switches together on the first line (they draw as a strip of boxes) and the knobs for them under.
     # The older Effects and Mod FX rows above stay as they were (they fix the parameters' numbers); these only reorder keys that are in the table already.
     ("Effects Page", False, [row(FX["eqon"], FX["wideon"], FX["dlyon"], FX["revon"], FX["compon"], FX["fxon"], FX["dtime"], FX["rdec"])]),

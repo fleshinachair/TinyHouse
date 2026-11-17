@@ -295,17 +295,23 @@
         if (en <= st) en = Math.min(1, st + 0.01);
         let ls = g.ls / 100, le = g.le / 100;
         if (le <= ls) le = Math.min(1, ls + 0.01);
-        const lo = g.loop >= 1 ? ls : st, hi = g.loop >= 1 ? le : en;
-        if (g.man >= 1) return { x: Math.max(0, Math.min(1, g.pos / 100)), lo: lo, hi: hi };
+        /* The engine's rule (measured on Serum): a forward scan runs on from Start, and the loop takes over only once the head reaches Loop end; a Start at or past Loop end means no loop at
+         * all (End applies). A negative scan starts at End and runs down into the loop. So the head cycles the loop in steady state, and [aLo, aHi] is everything the scan can read. */
+        const loopOn = g.loop >= 1 && (scan < 0 || st < le);
+        const lo = loopOn ? ls : st, hi = loopOn ? le : en;
+        const aLo = loopOn ? (scan < 0 ? Math.min(ls, en) : Math.min(st, ls)) : st, aHi = loopOn ? (scan < 0 ? Math.max(le, en) : le) : en;
+        const ex = { lo: lo, hi: hi, aLo: aLo, aHi: aHi, loopOn: loopOn, ls: ls, le: le };
+        if (g.man >= 1) return Object.assign({ x: Math.max(0, Math.min(1, g.pos / 100)) }, ex);
         const rate = scan / 100 / GRAIN_FILE_S, span = hi - lo;
         const f = ((now * rate) % span + span) % span;
-        return { x: rate >= 0 ? lo + f : hi - (span - f) % span, lo: lo, hi: hi };
+        return Object.assign({ x: rate >= 0 ? lo + f : hi - (span - f) % span }, ex);
     }
     function drawHead(ctx, values, slot, startX) {
         const h = headPos(values, slot, Date.now() / 1000);
         if (!h) return;
         const W = ctx.width, H = ctx.height, hx = Math.max(0, Math.min(W - 1, Math.round(h.x * (W - 1))));
-        for (let x = Math.round(h.lo * (W - 1)); x <= Math.round(h.hi * (W - 1)); x += 2) ctx.fillRect(x, H - 1, 1, 1, 1);        /* the stretch it walks, dotted */
+        const x0 = Math.round(h.aLo * (W - 1)), x1 = Math.round(h.aHi * (W - 1)), l0 = Math.round(h.ls * (W - 1)), l1 = Math.round(h.le * (W - 1));
+        for (let x = x0, i = 0; x <= x1; x += 2, i++) if (!h.loopOn || (x >= l0 && x <= l1) || (i & 1) === 0) ctx.fillRect(x, H - 1, 1, 1, 1);   /* what the scan reads, dotted: the loop dense, the run-in to it sparse */
         ctx.fillRect(hx, 0, 1, H, 1);                                                                                           /* the head: a line with a block at its middle */
         ctx.fillRect(Math.max(0, hx - 1), (H >> 1) - 1, 3, 3, 1);
     }

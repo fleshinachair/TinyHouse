@@ -1392,7 +1392,11 @@ function grainDraw(c, p) {
   var rOff = val(p + "_groff") / 100, rGain = val(p + "_grgain") / 100;
   var N = 30 * kd, lenSec = 10 * Math.pow(kl, 4);
   var wavH = Math.round(h * 0.52), laneTop = wavH + 14, laneH = h - laneTop - 16, mid = wavH / 2;
+  /* Serum's rule (measured): a forward scan runs on from Start and the loop takes over only at Loop end; a Start at or past Loop end means no loop (End applies); a negative scan starts
+   * at End and runs down into the loop. The head cycles the loop in steady state; [aLo, aHi] is all the scan can read. */
+  loopOn = loopOn && (scan < 0 || st < le);
   var lo = loopOn ? ls : st, hi = loopOn ? le : en;                              /* the stretch the head travels */
+  var aLo = loopOn ? (scan < 0 ? Math.min(ls, en) : Math.min(st, ls)) : st, aHi = loopOn ? (scan < 0 ? Math.max(le, en) : le) : en;
   var rate = scan / 100 / GRAIN_FILE_S;                                            /* fractions of the file per second */
   function headAt(tt) {
     if (man) return mpos;
@@ -1417,11 +1421,12 @@ function grainDraw(c, p) {
   }
   /* outside the scan stretch: dimmed; the stretch's edges, and the loop's when it differs */
   g.fillStyle = "rgba(10,11,12,.62)";
-  g.fillRect(0, 0, st * w, wavH); g.fillRect(en * w, 0, w - en * w, wavH);
+  g.fillRect(0, 0, aLo * w, wavH); g.fillRect(aHi * w, 0, w - aHi * w, wavH);
   g.fillStyle = "rgba(" + GREEN + ",.9)";
-  g.fillRect(Math.round(st * w), 0, 1, wavH); g.fillRect(Math.round(en * w) - 1, 0, 1, wavH);
+  g.fillRect(Math.round(st * w), 0, 1, wavH);
+  if (!loopOn || scan < 0) g.fillRect(Math.round(en * w) - 1, 0, 1, wavH);        /* End does not bound a forward scan inside a loop */
   label(g, "START", Math.min(w - 30, st * w + 3), 9);
-  if (en < 0.995) label(g, "END", Math.max(24, en * w - 3), 9, "right");
+  if (en < 0.995 && (!loopOn || scan < 0)) label(g, "END", Math.max(24, en * w - 3), 9, "right");
   if (loopOn) {
     g.strokeStyle = "rgba(255,200,90,.85)"; g.lineWidth = 1;
     g.strokeRect(Math.round(ls * w) + .5, wavH - 6.5, Math.max(2, Math.round((le - ls) * w)), 6);

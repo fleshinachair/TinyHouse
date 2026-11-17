@@ -277,6 +277,39 @@
         return r;
     }
 
+    /* The scan head: the point of the sample the grains are read from, moving as the remote UI's picture does (the same law: the module serves a slot's End, Loop, Loop start/end, Manual
+     * position and Position as `<slot>_gv`, the page's own Start and Scan rate come with the cell). The file is drawn as 4 s wide, so a Scan rate of 100 % crosses it in 4 s; the head
+     * walks the scan stretch (Start..End), or the loop's when one is on, and wraps; in Manual position it stands at Position. It is an illustration of the settings, not the audio (the clock is
+     * the screen's, not the voice's). A dotted line along the bottom marks the stretch it walks. */
+    const GRAIN_FILE_S = 4;
+    function parseGv(v) {
+        if (typeof v !== "string") return null;
+        const a = v.split(",").map(Number);
+        return a.length >= 6 && a.every(Number.isFinite) ? { end: a[0], loop: a[1], ls: a[2], le: a[3], man: a[4], pos: a[5] } : null;
+    }
+    function headPos(values, slot, now) {
+        const g = parseGv(values[slot + "_gv"]);
+        if (!g) return null;
+        const st = num(values[slot + "_gstart"], 0) / 100, scan = num(values[slot + "_gscan"], 100);
+        let en = g.end / 100;
+        if (en <= st) en = Math.min(1, st + 0.01);
+        let ls = g.ls / 100, le = g.le / 100;
+        if (le <= ls) le = Math.min(1, ls + 0.01);
+        const lo = g.loop >= 1 ? ls : st, hi = g.loop >= 1 ? le : en;
+        if (g.man >= 1) return { x: Math.max(0, Math.min(1, g.pos / 100)), lo: lo, hi: hi };
+        const rate = scan / 100 / GRAIN_FILE_S, span = hi - lo;
+        const f = ((now * rate) % span + span) % span;
+        return { x: rate >= 0 ? lo + f : hi - (span - f) % span, lo: lo, hi: hi };
+    }
+    function drawHead(ctx, values, slot, startX) {
+        const h = headPos(values, slot, Date.now() / 1000);
+        if (!h) return;
+        const W = ctx.width, H = ctx.height, hx = Math.max(0, Math.min(W - 1, Math.round(h.x * (W - 1))));
+        for (let x = Math.round(h.lo * (W - 1)); x <= Math.round(h.hi * (W - 1)); x += 2) ctx.fillRect(x, H - 1, 1, 1, 1);        /* the stretch it walks, dotted */
+        ctx.fillRect(hx, 0, 1, H, 1);                                                                                           /* the head: a line with a block at its middle */
+        ctx.fillRect(Math.max(0, hx - 1), (H >> 1) - 1, 3, 3, 1);
+    }
+
     /* A Grain page: the sample's shape across the row. A granular slot also gets the start point (a vertical line with a tick above and below) and an arrow in
      * the corner the scan runs toward (the right for a positive scan rate, the left for a negative one, none for 0). */
     function drawGrain(ctx, payload) {
@@ -297,139 +330,13 @@
         ctx.fillRect(Math.max(0, sx - 1), 0, 3, H, 0);                                /* the marker stands out of the bars: a gap, then the line */
         ctx.fillRect(sx, 0, 1, H, 1);
         ctx.fillRect(Math.max(0, sx - 1), 0, 3, 1, 1); ctx.fillRect(Math.max(0, sx - 1), H - 1, 3, 1, 1);
+        drawHead(ctx, values, slot, sx);
         const sc = num(values[slot + "_gscan"], 100);
         if (sc !== 0) {                                                                 /* the scan arrow, in the corner it points to */
             const right = sc > 0, ax = right ? W - 8 : 1;
             ctx.fillRect(ax - 1, 0, 9, 5, 0);
             ctx.fillRect(ax, 2, 7, 1, 1);
             for (let k = 0; k < 3; k++) { const hx = right ? ax + 6 - k : ax + k; ctx.fillRect(hx, 2 - k, 1, 1 + 2 * k, 1); }
-        }
-    }
-
-    /* The Demo page's pad lights. A slot's DSP cannot light a pad (the shadow host gives it no midi_send_internal), so this widget does it from the Move's own script
-     * context, the way TinyScratch, TinySID and trance-gate do: move_midi_internal_send([0x09, 0x90, pad, colour]), pads 68..99 from the bottom-left. The DSP serves the pads
-     * the demo holds as `demo_pads` (8 hex digits, bit 0 the bottom-left pad). The widget draws a small picture of the grid in its cell and paints the same pads, while
-     * the page is on screen. A pad it has lit goes back to the colour the Move had (the shim's snapshot) when the demo lets go of it, when the lights are turned off, and when
-     * the page is left (the host calls host_pad_block every frame whatever is on screen; that call is wrapped once to notice that no page has been drawn for a moment).
-     * The Move repaints a pad it has pressed (and its twin an octave away) with its own colour: the snapshot follows the Move's own writes, so a pad it changed is put back at once. */
-    const PAD_FIRST = 68, PAD_COUNT = 32, PAD_WHITE = 120, LEFT_MS = 400, SENDS_PER_DRAW = 8;
-    const pads = globalThis.__thPads || (globalThis.__thPads = { lit: new Array(PAD_COUNT).fill(-1), moveSeen: new Array(PAD_COUNT).fill(-1), touched: new Array(PAD_COUNT).fill(false), lastDraw: 0, heal: 0, ok: 0, fail: 0, watch: false });
-
-    const moveColours = () => (typeof shadow_get_pad_led_snapshot === "function" ? shadow_get_pad_led_snapshot() : null);
-    const ledSend = (note, colour) => {
-        let ok = false;
-        try { ok = !!move_midi_internal_send([0x09, 0x90, note, colour]); } catch (e) { ok = false; }
-        if (ok) pads.ok++; else pads.fail++;
-        return ok;
-    };
-
-    /* what each touched pad should show when we let go: the Move's own colour for it */
-    function releasePads() {
-        if (typeof move_midi_internal_send !== "function") return;
-        const snap = moveColours();
-        let sent = 0;
-        for (let i = 0; i < PAD_COUNT && sent < SENDS_PER_DRAW; i++) {
-            if (!pads.touched[i]) continue;
-            const c = snap && typeof snap[PAD_FIRST + i] === "number" ? snap[PAD_FIRST + i] : 0;
-            if (ledSend(PAD_FIRST + i, c)) { pads.touched[i] = false; pads.lit[i] = -1; }
-            sent++;
-        }
-    }
-
-    function watchPadBlock() {
-        if (pads.watch || typeof host_pad_block !== "function") return;
-        const original = host_pad_block;
-        pads.watch = true;
-        globalThis.host_pad_block = function () {
-            const r = original.apply(this, arguments);
-            try {
-                if (Date.now() - pads.lastDraw > LEFT_MS && pads.touched.some((t) => t)) releasePads();      /* the page is no longer in front */
-            } catch (e) { /* never in the way of the host */ }
-            return r;
-        };
-    }
-
-    /* the wanted pads (bit i = pad i): read straight from the DSP when the host lets a widget do that, else the extra key (about 5 Hz) */
-    function wantedMask(values) {
-        let v = null;
-        if (typeof host_module_get_param === "function") { try { v = host_module_get_param("demo_pads"); } catch (e) { v = null; } }
-        if (typeof v !== "string" || !/^[0-9a-f]{8}$/i.test(v)) v = values && values.demo_pads;
-        return typeof v === "string" && /^[0-9a-f]{8}$/i.test(v) ? parseInt(v, 16) >>> 0 : 0;
-    }
-
-    /* DIAGNOSTIC (only while the file /data/UserData/schwung/th_padlog_on exists): for each live note the module receives, the Move's pad colours at that moment and the pads it changed since
-     * the last frame, written to /data/UserData/schwung/th_padlog.json. It is how the Move's pad-to-note layout (key, In Key, octave view) is read off a few presses. */
-    const padlog = pads.log || (pads.log = { seq: -1, prev: null, entries: [], on: false, check: 0, rest: null });
-    function logStatus(info) {                                                  /* the widget's own state, every 30 draws: is it drawn at all, what it reads, what the Move did with the packets */
-        if (typeof host_write_file !== "function") return;
-        padlog.draws = (padlog.draws || 0) + 1;
-        if ((padlog.draws % 30) !== 1) return;
-        try {
-            host_write_file("/data/UserData/schwung/th_padstatus.json", JSON.stringify(Object.assign({ draws: padlog.draws, ok: pads.ok, fail: pads.fail, lastDrawAgoMs: 0, now: Date.now(),
-                hasSend: typeof move_midi_internal_send === "function", hasSnap: typeof shadow_get_pad_led_snapshot === "function", hasDirect: typeof host_module_get_param === "function",
-                lit: pads.lit.filter((v) => v === PAD_WHITE).length, touched: pads.touched.filter((v) => v).length }, info)));
-        } catch (e) { /* diagnostic only */ }
-    }
-    function logPads() {
-        if (typeof host_file_exists !== "function" || typeof host_write_file !== "function" || typeof host_module_get_param !== "function") return;
-        if ((padlog.check++ % 120) === 0) padlog.on = !!host_file_exists("/data/UserData/schwung/th_padlog_on");
-        if (!padlog.on) return;
-        const snap = moveColours(); if (!snap) return;
-        const now = []; for (let i = 0; i < PAD_COUNT; i++) now.push(typeof snap[PAD_FIRST + i] === "number" ? snap[PAD_FIRST + i] : -1);
-        let live = null; try { live = host_module_get_param("demo_live"); } catch (e) { live = null; }
-        const m = typeof live === "string" ? /^(\d+),(-?\d+)$/.exec(live) : null;
-        if (!padlog.rest) padlog.rest = now.slice();
-        const changed = []; if (padlog.prev) for (let i = 0; i < PAD_COUNT; i++) if (now[i] !== padlog.prev[i]) changed.push([i, padlog.prev[i], now[i]]);
-        let write = false;
-        if (m && Number(m[1]) !== padlog.seq) {
-            if (padlog.seq >= 0) { padlog.entries.push({ t: Date.now(), seq: Number(m[1]), note: Number(m[2]), changed: changed, snap: now }); write = true; }
-            padlog.seq = Number(m[1]);
-        } else if (changed.length && padlog.seq >= 0) { padlog.entries.push({ t: Date.now(), seq: padlog.seq, note: null, changed: changed }); write = true; }
-        padlog.prev = now;
-        if (padlog.entries.length > 60) padlog.entries.splice(0, padlog.entries.length - 60);
-        if (write) { try { host_write_file("/data/UserData/schwung/th_padlog.json", JSON.stringify({ rest: padlog.rest, entries: padlog.entries })); } catch (e) { /* diagnostic only */ } }
-    }
-
-    function paintPads(mask) {
-        const snap = moveColours();
-        let sent = 0;
-        for (let i = 0; i < PAD_COUNT && sent < SENDS_PER_DRAW; i++) {
-            const on = ((mask >>> i) & 1) === 1, note = PAD_FIRST + i;
-            const seen = snap && typeof snap[note] === "number" ? snap[note] : -1;
-            const moved = pads.moveSeen[i] >= 0 && seen !== pads.moveSeen[i];        /* the Move wrote this pad itself since we looked */
-            pads.moveSeen[i] = seen;
-            if (on) {
-                if (pads.lit[i] === PAD_WHITE && !moved) continue;
-                if (ledSend(note, PAD_WHITE)) { pads.lit[i] = PAD_WHITE; pads.touched[i] = true; } else pads.lit[i] = -1;
-                sent++;
-            } else if (pads.touched[i]) {
-                if (ledSend(note, seen >= 0 ? seen : 0)) { pads.touched[i] = false; pads.lit[i] = -1; }
-                sent++;
-            }
-        }
-        /* one lit pad is repainted every draw whatever happened: heals a Move write the snapshot did not show */
-        for (let k = 0; k < PAD_COUNT; k++) {
-            const i = (pads.heal + k) % PAD_COUNT;
-            if (pads.lit[i] === PAD_WHITE) { ledSend(PAD_FIRST + i, PAD_WHITE); pads.heal = (i + 1) % PAD_COUNT; break; }
-        }
-    }
-
-    /* The Demo page's Pad Lights cell: the grid as a picture (a lit pad is a filled box, the rest dots), "OFF" when the lights are off. */
-    function drawPadLights(ctx, payload) {
-        const values = (payload && payload.values) || {};
-        const mode = values.demo_lights, off = mode === undefined || mode === null || /^(off|0)$/i.test(String(mode).trim());
-        pads.lastDraw = Date.now();
-        if (typeof move_midi_internal_send !== "function") { ctx.print(1, 4, "NO LED", 1); return; }
-        watchPadBlock();
-        const mask = off ? 0 : wantedMask(values);
-        try { paintPads(mask); } catch (e) { ctx.print(1, 4, "ERR", 1); return; }
-        try { logPads(); if (padlog.on) logStatus({ mode: String(mode), mask: mask >>> 0, direct: typeof host_module_get_param === "function" ? String(host_module_get_param("demo_pads")) : null, extra: values.demo_pads === undefined ? null : String(values.demo_pads) }); } catch (e) { /* diagnostic only */ }
-        if (off) { ctx.print((ctx.width - ctx.textWidth("OFF")) >> 1, 4, "OFF", 1); return; }
-        const pw = Math.max(3, Math.floor(ctx.width / 8));
-        for (let i = 0; i < PAD_COUNT; i++) {
-            const x = (i % 8) * pw, y = (3 - (i >> 3)) * 4;
-            if ((mask >>> i) & 1) ctx.fillRect(x, y, pw - 1, 3, 1);
-            else ctx.fillRect(x + 1, y + 1, 1, 1, 1);
         }
     }
 
@@ -441,8 +348,7 @@
     widgetKinds["custom:tinyhouse_waves"] = { draw: drawWaves, nominal: { w: 96, h: 15 } };
     widgetKinds["custom:tinyhouse_fxchain"] = { draw: drawFxChain, nominal: { w: 128, h: 15 } };
     widgetKinds["custom:tinyhouse_grain"] = { draw: drawGrain, nominal: { w: 128, h: 15 } };
-    widgetKinds["custom:tinyhouse_padlights"] = { draw: drawPadLights, nominal: { w: 32, h: 15 } };
     globalThis.canvas_overlay = { widgetKinds };
     /* test seam (tests/canvas_test.mjs) */
-    globalThis.TINYHOUSE_CANVAS_FOR_TEST = { drawMacro, drawPos, drawDial, names, drawWaves, drawFxChain, drawGrain, parseDigest, drawPadLights, wantedMask, pads };
+    globalThis.TINYHOUSE_CANVAS_FOR_TEST = { drawMacro, drawPos, drawDial, names, drawWaves, drawFxChain, drawGrain, parseDigest, headPos, parseGv };
 })();

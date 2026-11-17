@@ -100,9 +100,6 @@ struct tablor_instance {
     };
     std::shared_ptr<const DemoList> demos { std::make_shared<DemoList>() };
     std::atomic<int> demo_pack { 0 }, demo_part { 0 }, demo_on { 0 };
-    std::atomic<uint32_t> live_seq { 0 };                              /* live note-ons received (not the demo's): the count and the last note, for the pad lights to learn the Move's pad layout */
-    std::atomic<int> live_note { -1 };
-    std::atomic<int> demo_lights { 0 }, demo_lights_base { 36 };       /* pad lights while the demo plays: 0 Off, 1 Fourths, 2 Linear; the note of the bottom-left pad */
     /* What a restored state said the slot was playing: the pack and the part by NAME (an index shifts when a song is added or removed), and whether it
      * was on. Held until the worker has scanned the demo store, then applied (apply_want_demo). */
     struct WantDemo { std::string pack, part; bool on = false; };
@@ -1062,8 +1059,6 @@ static void tb_publish_selection(tablor_instance *inst)
     {
         auto dl = inst->demoList();
         hand += ",{\"key\":\"demo_on\",\"name\":\"Demo\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"default\":\"Off\"}";
-        hand += ",{\"key\":\"demo_lights\",\"name\":\"Demo Pad Lights\",\"type\":\"enum\",\"options\":[\"Off\",\"Fourths\",\"Linear\"],\"default\":\"Off\",\"viz\":{\"kind\":\"custom:tinyhouse_padlights\",\"group\":\"padlights\",\"role\":\"a\",\"extra_keys\":[\"demo_pads\"]}}";
-        hand += ",{\"key\":\"demo_lights_base\",\"name\":\"Demo Lights Base Note\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":36}";
         hand += ",{\"key\":\"demo_pack\",\"name\":\"Demo Pack\",\"type\":\"enum\",\"options\":[";
         if (dl->packs.empty()) hand += "\"None\"";
         for (size_t i = 0; i < dl->packs.size(); i++) {
@@ -1085,9 +1080,10 @@ static void tb_publish_selection(tablor_instance *inst)
          * 5-10 fps while the Macros page was open, and a preset scroll hung for over a minute). */
         hand += ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
                 ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}"
-                /* the Demo page's Pad Lights widget reads this on every redraw */
-                ",{\"key\":\"demo_pads\",\"name\":\"Demo Pads\",\"type\":\"string\",\"access\":\"read\"}"
-                ",{\"key\":\"demo_live\",\"name\":\"Demo Live Note\",\"type\":\"string\",\"access\":\"read\"}";
+                /* the Grain pages' moving head: each sample slot's End, Loop, Loop start, Loop end, Manual position and Position in one short string ("100,1,22,81,0,0") */
+                ",{\"key\":\"smp_gv\",\"name\":\"Sample 1 Grain View\",\"type\":\"string\",\"access\":\"read\"}"
+                ",{\"key\":\"smp2_gv\",\"name\":\"Sample 2 Grain View\",\"type\":\"string\",\"access\":\"read\"}"
+                ",{\"key\":\"smp3_gv\",\"name\":\"Sample 3 Grain View\",\"type\":\"string\",\"access\":\"read\"}";
     }
 
     /* The shape digests are DECLARED here so they reach a browser at all:
@@ -1733,18 +1729,6 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         inst->engine.setDemoOn(on);                                 /* ready: the part joins at the next bar once the transport runs (it does not start it) */
         return;
     }
-    if (!strcmp(k, "demo_lights")) {
-        const int m = !strcasecmp(val, "fourths") ? 1 : !strcasecmp(val, "linear") ? 2 : (atoi(val) >= 1 && atoi(val) <= 2 ? atoi(val) : 0);
-        inst->demo_lights = m;
-        inst->engine.setDemoLights(m, inst->demo_lights_base.load());
-        return;
-    }
-    if (!strcmp(k, "demo_lights_base")) {
-        const int b = std::min(std::max(atoi(val), 0), 100);
-        inst->demo_lights_base = b;
-        inst->engine.setDemoLights(inst->demo_lights.load(), b);
-        return;
-    }
     if (!strcmp(k, "demo_pack")) {
         auto dl = inst->demoList();
         if (dl->packs.empty()) return;
@@ -1846,7 +1830,6 @@ static int write_str(char *buf, int buf_len, const char *s)
     return n;
 }
 
-static uint32_t demo_pad_mask(const tablor_instance *inst);
 static int tb_get_param(void *instance, const char *key, char *buf, int buf_len);
 
 /* The settings a stored blob ("TBLR2;a=1;b=2;") names, parsed once: where each parameter's text starts (null when the blob does not name it), and the macro strings. */
@@ -2095,22 +2078,21 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         return write_str(buf, buf_len, inst->storeList()->digest.c_str());
     if (!strcmp(key, "demo_on"))
         return write_str(buf, buf_len, inst->demo_on.load() ? "On" : "Off");
-    if (!strcmp(key, "demo_lights")) {
-        static const char *const names[] = { "Off", "Fourths", "Linear" };
-        return write_str(buf, buf_len, names[inst->demo_lights.load() % 3]);
-    }
-    if (!strcmp(key, "demo_live")) {              /* "count,note": the live note-ons so far and the last one's note (-1 none) */
-        char tmp[24];
-        snprintf(tmp, sizeof tmp, "%u,%d", (unsigned) inst->live_seq.load(std::memory_order_acquire), inst->live_note.load(std::memory_order_relaxed));
+    if (!strcmp(key, "smp_gv") || !strcmp(key, "smp2_gv") || !strcmp(key, "smp3_gv")) {      /* "end,loop,loop start,loop end,manual,position" of that sample slot */
+        static const char *const pre[3] = { "smp", "smp2", "smp3" };
+        static const char *const suf[6] = { "_gend", "_gloop", "_gloops", "_gloope", "_gman", "_gpos" };
+        static int idx[3][6];
+        static bool have = false;
+        if (!have) { for (int a = 0; a < 3; a++) for (int b = 0; b < 6; b++) idx[a][b] = param_index((std::string(pre[a]) + suf[b]).c_str()); have = true; }
+        const int sl = key[3] == '_' ? 0 : key[3] - '1';
+        char tmp[48];
+        int n = 0;
+        for (int b = 0; b < 6; b++) {
+            const float v = idx[sl][b] >= 0 ? inst->params()[idx[sl][b]] : 0.0f;
+            n += snprintf(tmp + n, sizeof tmp - (size_t) n, b ? ",%d" : "%d", (int) lroundf(v));
+        }
         return write_str(buf, buf_len, tmp);
     }
-    if (!strcmp(key, "demo_pads")) {              /* the pads the demo holds lit, as 8 hex digits (bit 0 = bottom-left pad); the Move-side widget paints them */
-        char tmp[16];
-        snprintf(tmp, sizeof tmp, "%08x", (unsigned) demo_pad_mask(inst));
-        return write_str(buf, buf_len, tmp);
-    }
-    if (!strcmp(key, "demo_lights_base"))
-        return write_str(buf, buf_len, std::to_string(inst->demo_lights_base.load()).c_str());
     if (!strcmp(key, "demo_pack"))
         return write_str(buf, buf_len, std::to_string(inst->demo_pack.load()).c_str());
     if (!strcmp(key, "demo_part"))
@@ -2217,7 +2199,6 @@ static void tb_on_midi(void *instance, const uint8_t *msg, int len, int source)
 {
     auto *inst = (tablor_instance *) instance;
     if (!inst || !msg) return;
-    if (len >= 3 && (msg[0] & 0xF0) == 0x90 && msg[2] > 0) { inst->live_note.store(msg[1], std::memory_order_relaxed); inst->live_seq.fetch_add(1, std::memory_order_release); }
     inst->engine.onMidi(msg, len);
 }
 
@@ -2237,26 +2218,6 @@ struct FlushToZero {
     ~FlushToZero() { __asm__ volatile("msr fpcr, %0" : : "r"(saved)); }
 #endif
 };
-
-/* Demo pad lights, the DSP's half. A slot's DSP cannot light a pad: the shadow host leaves host_api->midi_send_internal empty (it is NULL here), so the lights are
- * painted by the Move-side widget (canvas.js, custom:tinyhouse_padlights), which reads this mask. Bit p (0..31) is pad p, the bottom row first, left to right: set when the
- * demo is holding a note that the chosen layout puts on that pad. A note shows on every pad that plays it (Fourths: a row is 5 semitones above the one under it). */
-static uint32_t demo_pad_mask(const tablor_instance *inst)
-{
-    const int mode = inst->demo_lights.load(std::memory_order_relaxed);
-    if (!mode) return 0;
-    const int base = inst->engine.demoLightsBase();
-    const uint8_t *lit = inst->engine.demoNotesLit();
-    uint32_t want = 0;
-    for (int n = 0; n < 128; n++) {
-        if (!lit[n]) continue;
-        const int d = n - base;
-        if (d < 0) continue;
-        if (mode == 2) { if (d < 32) want |= 1u << d; continue; }
-        for (int r = 0; r < 4; r++) { const int c = d - 5 * r; if (c >= 0 && c < 8) want |= 1u << (r * 8 + c); }
-    }
-    return want;
-}
 
 static void tb_render_block(void *instance, int16_t *out_lr, int frames)
 {

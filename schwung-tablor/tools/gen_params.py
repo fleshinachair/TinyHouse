@@ -817,11 +817,12 @@ if MACRO_WIDGETS:
     for _k in ("chor_on", "flan_on", "phas_on"):
         VIZ[_k] = {"kind": "custom:tinyhouse_fxchain", "group": "modfx", "role": _k}
     # The Grain pages (one per sample slot): the sample's shape across the first line with the start point and the scan direction marked, the four main grain
-    # knobs under it. Kind and level are read as extra keys (they are on the second line, outside the picture).
+    # knobs under it. Kind and level are read as extra keys (they are on the second line, outside the picture), and so is `_gv`: End, Loop, Loop start/end, Manual pos and Position as one
+# short string (the module composes it), for the moving head: those six keys sit past the host's 256-key cache, and a read of one of them re-parses the whole contract.
     for _p in ("smp", "smp2", "smp3"):
         for _k in ("gdens", "glen", "gscan", "gstart"):
             VIZ[f"{_p}_{_k}"] = {"kind": "custom:tinyhouse_grain", "group": f"grain_{_p}", "role": _k,
-                                 "extra_keys": [f"{_p}_shape", f"{_p}_kind", f"{_p}_level"]}
+                                 "extra_keys": [f"{_p}_shape", f"{_p}_kind", f"{_p}_level", f"{_p}_gv"]}
 def chain_param(p):
     if p["type"] == "file":
         d = {"key": p["key"], "name": p["full"], "type": "filepath",
@@ -882,7 +883,7 @@ for _bank, _ri, _title in PAGE_MAP:
     for _s in _rows[(_bank, _ri)]:
         if _s and _s["type"] != "file" and _s["key"] not in DEVICE_KEYS:
             DEVICE_KEYS.append(_s["key"])
-DYNAMIC_DEVICE_KEYS = ["wt1_select", "wt2_select", "wt3_select", "bank", "demo_on", "demo_pack", "demo_part", "demo_lights", "demo_lights_base", "preset"]
+DYNAMIC_DEVICE_KEYS = ["wt1_select", "wt2_select", "wt3_select", "bank", "demo_on", "demo_pack", "demo_part", "preset"]
 _head = [d for d in chain if d["key"] in DEVICE_KEYS]
 _rest = [d for d in chain if d["key"] not in DEVICE_KEYS]
 assert len(_head) == len(DEVICE_KEYS), "a page key is missing from chain_params"
@@ -997,10 +998,8 @@ def build_hierarchy():
         "name": "Demo",
         "params": [{"key": "demo_on", "name": "Demo", "type": "enum", "options": ["Off", "On"]},
                    {"key": "demo_pack", "name": "Demo Pack", "type": "enum"},
-                   {"key": "demo_part", "name": "Demo Part", "type": "enum"},
-                   {"key": "demo_lights", "name": "Pad Lights", "type": "enum", "options": ["Off", "Fourths", "Linear"]},
-                   {"key": "demo_lights_base", "name": "Lights Base Note", "type": "int", "min": 0, "max": 100}],
-        "knobs": ["demo_on", "demo_pack", "demo_part", "demo_lights", "demo_lights_base"],
+                   {"key": "demo_part", "name": "Demo Part", "type": "enum"}],
+        "knobs": ["demo_on", "demo_pack", "demo_part"],
     }
     level_ids.append(("demo", "Demo"))
 

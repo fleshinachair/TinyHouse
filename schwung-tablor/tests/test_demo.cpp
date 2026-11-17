@@ -84,19 +84,7 @@ int main()
     auto p1 = peak(run, 300 * 256, 345 * 256), p2 = peak(run, (300 + 690) * 256, (345 + 690) * 256);
     CHECK(p1 > 0.0 && std::fabs(20 * std::log10((p2 + 1e-9) / (p1 + 1e-9))) < 3.0, "it loops: the same stretch one loop later is as loud (%.3f / %.3f)", p1, p2);
 
-    {   /* the pad lights follow the notes the demo holds: a note is lit while it sounds, none once the demo stops */
-        a.setDemoLights(1, 36);
-        CHECK(a.demoLightsMode() == 1 && a.demoLightsBase() == 36, "pad light settings are kept");
-        int blocksWithNote = 0, blocksWith2 = 0;
-        for (int i = 0; i < 700; i++) {
-            render(a, 1);
-            int n = 0; for (int k = 0; k < 128; k++) n += a.demoNotesLit()[k];
-            blocksWithNote += n > 0; blocksWith2 += n > 1;
-        }
-        CHECK(blocksWithNote > 300 && blocksWithNote < 700 && blocksWith2 == 0, "a note is lit while it is held (%d of 700 blocks, a note every beat, half a beat long)", blocksWithNote);
-    }
     a.setDemoOn(false);
-    { int n = 0; render(a, 2); for (int k = 0; k < 128; k++) n += a.demoNotesLit()[k]; CHECK(n == 0, "switched off, no note is left lit"); }
     auto tail = render(a, 600);              /* releases fade */
     auto quiet = render(a, 100);
     CHECK(!a.demoPlaying() && peak(quiet, 0, quiet.size()) < 0.002, "switched off, it stops and the sound dies away");

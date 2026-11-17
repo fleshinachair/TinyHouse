@@ -175,12 +175,11 @@ int main(int argc, char **argv)
         }
         CHECK(late.empty(), "every key the Move turns is inside the host's 256-key cache (%d declared; outside:%s)", n, late.c_str());
         /* the keys the Move's widgets READ on every redraw (extra_keys) belong inside it too: a read of a key past it re-parses the whole list */
-        for (const char *rk : { "macro_names", "macro_routes", "demo_pads", "demo_live", "smp_shape", "smp2_shape", "smp3_shape", "wt_on" }) {
+        for (const char *rk : { "macro_names", "macro_routes", "smp_shape", "smp2_shape", "smp3_shape", "wt_on", "smp_gv", "smp2_gv", "smp3_gv" }) {
             size_t at = 0;
             while (at < declared.size() && declared[at] != rk) at++;
             CHECK(at < 256, "the widget key %s is inside the 256-key cache (position %d)", rk, (int) at);
         }
-        { char pb[32] = {}; api->get_param(inst, "demo_pads", pb, sizeof pb); CHECK(!strcmp(pb, "00000000"), "demo_pads is 8 hex digits and empty with no demo (\"%s\")", pb); }
     }
 
     /* The macro knobs carry the preset's macro names as their unit: the cell label stays "Macro 1" and touching the knob shows the value

@@ -3086,17 +3086,6 @@ function macFollow(i) {
     });
   }, 350);
 }
-/* The sample slots' shapes (the grain picture). The module publishes a slot's shape when its sample has been read, on a worker, a moment AFTER the preset lands, and
- * the host does not push it, so a read at start-up or right after the preset change finds the old shape or none: slot 2 showed "no sample loaded" while the Move's own page
- * (which reads the key on every redraw) drew the wave. So it is read again after each preset change, a few times as the load finishes, and every 2 s while the page is in view. An empty reading
- * clears the picture (a preset without a sample). */
-function smpReload() {
-  ["smp", "smp2", "smp3"].forEach(function (p) {
-    schwungRemote.getParam(KP + p + "_shape").then(function (v) { EXTRA[p + "_shape"](v || ""); }).catch(function () {});
-  });
-}
-function smpReloadSoon() { [150, 700, 1800].forEach(function (ms) { setTimeout(smpReload, ms); }); }
-setInterval(function () { if (!document.hidden) smpReload(); }, 2000);
 function macReload() {
   MACP.hold = Date.now() + 1500;                      /* a preset has just loaded: its macro values are not moves */
   schwungRemote.getParam(KP + "macro_names").then(function (v) { EXTRA.macro_names(v || ""); }).catch(function () {});
@@ -3132,18 +3121,6 @@ function buildDemo(page) {
   u.part = el("select", "demo-sel", row);
   u.part.addEventListener("change", function () { DM.p = +u.part.value; demoSend("demo_part", DM.p); });
   u.stat = el("div", "demo-stat", card, "");
-  /* Pad lights: the demo's notes shown on the Move's pads. Off by default. Fourths = the chromatic layout (a row up is five semitones), Linear = eight semitones to a row; Base is the
-   * note of the bottom-left pad (the one lit when that note plays), set it to match the Move's octave. */
-  el("div", "demo-note", card, "Pad lights (experimental): light the pads of the notes the demo plays. Pick the pad layout and the note of the bottom-left pad to match what your Move plays.");
-  var lr = el("div", "demo-row", card);
-  u.lights = el("select", "demo-sel", lr);
-  ["Lights off", "Fourths", "Linear"].forEach(function (n, i) { var o = el("option", null, u.lights, n); o.value = ["Off", "Fourths", "Linear"][i]; });
-  u.lights.addEventListener("change", function () { demoSend("demo_lights", u.lights.value); });
-  el("span", "demo-note", lr, "bottom-left pad note");
-  u.lbase = el("input", "demo-sel", lr); u.lbase.type = "number"; u.lbase.min = 0; u.lbase.max = 100; u.lbase.value = 36; u.lbase.style.width = "64px";
-  u.lbase.addEventListener("change", function () { demoSend("demo_lights_base", Math.max(0, Math.min(100, +u.lbase.value || 0))); });
-  schwungRemote.getParam(KP + "demo_lights").then(function (v) { if (v) u.lights.value = v; }).catch(function () {});
-  schwungRemote.getParam(KP + "demo_lights_base").then(function (v) { if (v !== "" && v != null) u.lbase.value = v; }).catch(function () {});
 
   var imp = panel("Import MIDI", g).body;
   el("div", "demo-note", imp, "Choose .mid files, or a folder of them (a Serum pack's demo MIDI). Each track becomes a part you can pick above. They play at the Move's tempo.");
@@ -3189,7 +3166,7 @@ function buildDemo(page) {
 
 /* chain_params entries the module adds for the host's own pages (pack and table lists, the preset
  * browser): they are not sound parameters and have their own pickers or none here */
-var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_lights|demo_lights_base|demo_pack|demo_part|demo_list|demo_now|mac[1-8]|macro_names|macro_routes)$/;
+var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_pack|demo_part|demo_list|demo_now|mac[1-8]|macro_names|macro_routes)$/;
 
 /* keys the host streams that are not controls */
 var EXTRA = {
@@ -3215,7 +3192,7 @@ var EXTRA = {
   },
   preset_now: function (v) {
     var p = String(v).split(","), b = parseInt(p[0], 10), i = parseInt(p[1], 10);
-    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); macReload(); smpReloadSoon(); wtPathsSoon(); }
+    if (!isNaN(b) && !isNaN(i)) { PS.b = b; PS.i = i; renderPbar(); renderBrowser(); macReload(); wtPathsSoon(); }
   }
 };
 /* the list of wavetable files can change with a preset (a preset names a pack of its own), and the manager's state push no longer carries it:

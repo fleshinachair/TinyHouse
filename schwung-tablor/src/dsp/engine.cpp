@@ -415,7 +415,6 @@ static double demoSongTicks(float hostBpm)
 void Engine::demoSend(int note, int vel)
 {
     uint8_t m[3] = { (uint8_t) (vel > 0 ? 0x90 : 0x80), (uint8_t) std::clamp(note, 0, 127), (uint8_t) vel };
-    demoNoteLit[m[1]] = vel > 0 ? 1 : 0;
     onMidi(m, 3);                               /* as a played key, so an arpeggiator or clip in the preset answers it */
 }
 
@@ -423,7 +422,6 @@ void Engine::demoStop(bool noteOffs)
 {
     if (noteOffs) for (int i = 0; i < nDAct; i++) demoSend(dAct[i], 0);
     nDAct = 0;
-    memset(demoNoteLit, 0, sizeof demoNoteLit);
     demoRun = false;
     demoArmed = false;
 }

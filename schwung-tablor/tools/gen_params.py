@@ -882,7 +882,7 @@ for _bank, _ri, _title in PAGE_MAP:
     for _s in _rows[(_bank, _ri)]:
         if _s and _s["type"] != "file" and _s["key"] not in DEVICE_KEYS:
             DEVICE_KEYS.append(_s["key"])
-DYNAMIC_DEVICE_KEYS = ["wt1_select", "wt2_select", "wt3_select", "bank", "demo_on", "demo_pack", "demo_part", "preset"]
+DYNAMIC_DEVICE_KEYS = ["wt1_select", "wt2_select", "wt3_select", "bank", "demo_on", "demo_pack", "demo_part", "demo_lights", "demo_lights_base", "preset"]
 _head = [d for d in chain if d["key"] in DEVICE_KEYS]
 _rest = [d for d in chain if d["key"] not in DEVICE_KEYS]
 assert len(_head) == len(DEVICE_KEYS), "a page key is missing from chain_params"
@@ -997,8 +997,10 @@ def build_hierarchy():
         "name": "Demo",
         "params": [{"key": "demo_on", "name": "Demo", "type": "enum", "options": ["Off", "On"]},
                    {"key": "demo_pack", "name": "Demo Pack", "type": "enum"},
-                   {"key": "demo_part", "name": "Demo Part", "type": "enum"}],
-        "knobs": ["demo_on", "demo_pack", "demo_part"],
+                   {"key": "demo_part", "name": "Demo Part", "type": "enum"},
+                   {"key": "demo_lights", "name": "Pad Lights", "type": "enum", "options": ["Off", "Fourths", "Linear"]},
+                   {"key": "demo_lights_base", "name": "Lights Base Note", "type": "int", "min": 0, "max": 100}],
+        "knobs": ["demo_on", "demo_pack", "demo_part", "demo_lights", "demo_lights_base"],
     }
     level_ids.append(("demo", "Demo"))
 

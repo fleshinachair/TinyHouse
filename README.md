@@ -16,6 +16,15 @@ each preset against your own copy of it.
 
 ![The TinyHouse remote UI: tabs along the top, three wavetable oscillators on the Osc tab](docs/img/remote-ui.png)
 
+## What you need
+
+- An Ableton Move running [Schwung](https://github.com/charlesvestal/schwung), with the TinyHouse module installed on it (see [Installing](#installing)).
+- Serum 2 presets (`.SerumPreset` files or a `.SerumPack`). Nothing from Xfer is included.
+- Ideally, Serum 2 installed on your computer. Many presets use Serum's own wavetables and samples, which TinyHouse reads from your `Documents\Xfer` folder; without that
+  folder those oscillators are silent. Serum 2 on Windows is also needed for the more accurate [Python route](#more-accurate-conversion-with-the-python-scripts) (with Python 3.13).
+
+The browser import itself needs nothing else on your computer: no Python, no Serum plugin.
+
 ## The workflow
 
 1. **Bring a Serum 2 preset.** Drop a `.SerumPreset` (or a pack) on the remote UI's Import dialog. It is converted in your browser and stored on the Move.

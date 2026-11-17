@@ -80,7 +80,7 @@ Each keeps its own travel, so one macro can open a filter a little, bring a reve
 
 ![Right-clicking a knob: the menu lists the eight macros, each with its name and an add or remove entry](docs/img/remote-macro-menu.png)
 
-- A new assignment makes the macro raise the control: turn the macro up and the control goes up, over its whole range. The control moves by the macro's change and stops at its ends, so one that starts out of step with the macro (at its bottom with the macro high) joins it when the macro reaches an end. Set a negative travel on the Macros tab to run it the other way.
+- A new assignment makes the macro raise the control: turn the macro up and the control goes up, over its whole range. The control moves by the macro's change and stops at its ends, so one that starts out of step with the macro (at its bottom with the macro high) joins it when the macro reaches an end. Set a negative travel on the Macros tab to run it the other way. The macro's knob is put where its first control sits, so the two agree from the start; **Match knob** on the Macros tab does the same later, for a macro whose knob and control have drifted apart.
 - The **Macros** tab lists what each macro holds. Name a macro (the Move shows the name), set how far each control travels as the macro goes from 0 to 127 (a
   negative number runs it the other way), take a control off, or clear a macro.
 - Assignments are saved with the slot and come back with your set. A macro with nothing on it has no name and stays hidden on the Move.

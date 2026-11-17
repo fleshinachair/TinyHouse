@@ -1651,6 +1651,7 @@ static void macro_edit(tablor_instance *inst, const char *val)
     names.resize(8);
     auto find = [&](const std::string &key) { for (size_t i = 0; i < routes.size(); i++) if (routes[i].m == m && routes[i].key == key) return (int) i; return -1; };
     auto travelStr = [](float t) { char b[32]; snprintf(b, sizeof b, "%g", (double) std::lround(t * 100.0f) / 100.0); return std::string(b); };
+    bool alignIt = false;                              /* the macro's knob is set to where its first control sits (see below) */
     if (op == "add" || op == "travel") {
         if (f.size() < 4) return;
         const int idx = param_index(f[2].c_str());
@@ -1659,7 +1660,12 @@ static void macro_edit(tablor_instance *inst, const char *val)
         const float t = std::clamp(strtof(f[3].c_str(), nullptr), -span, span);
         const int at = find(f[2]);
         if (at >= 0) routes[(size_t) at].travel = travelStr(t);
-        else if (op == "add") routes.push_back({ m, f[2], travelStr(t) });
+        else if (op == "add") {
+            bool first = true;
+            for (const R &r : routes) first = first && r.m != m;
+            alignIt = first;                           /* a macro's first control: the knob and the control then agree */
+            routes.push_back({ m, f[2], travelStr(t) });
+        }
         if (op == "add" && names[(size_t) m - 1].empty()) names[(size_t) m - 1] = f.size() > 4 && !macro_clean(f[4]).empty() ? macro_clean(f[4]) : "Macro " + std::to_string(m);
     } else if (op == "del") {
         if (f.size() < 3) return;
@@ -1670,6 +1676,8 @@ static void macro_edit(tablor_instance *inst, const char *val)
     } else if (op == "name") {
         if (f.size() < 3) return;
         names[(size_t) m - 1] = macro_clean(f[2]);
+    } else if (op == "align") {
+        alignIt = true;
     } else return;
     for (int i = 1; i <= 8; i++) {                    /* a macro that moves nothing has no name (the Move hides it) */
         bool any = false;
@@ -1686,6 +1694,24 @@ static void macro_edit(tablor_instance *inst, const char *val)
     snprintf(inst->macn_str, sizeof inst->macn_str, "%s", macn.c_str());
     apply_macro_routes(inst, inst->mac_str);
     republish_macro_names(inst);
+    if (alignIt) {
+        /* A macro moves its controls by its own change, so a knob and a control only agree when the knob starts where the control sits. Put the macro where the control it holds first is
+         * on the macro's span (travel over the whole range: 0 is the control's bottom for a positive travel, its top for a negative one). No control moves: the macro's last-seen value
+         * is set with it. */
+        for (const R &r : routes) {
+            if (r.m != m) continue;
+            const int idx = param_index(r.key.c_str());
+            const float tv = strtof(r.travel.c_str(), nullptr);
+            if (idx < 0 || std::fabs(tv) < 0.5f) break;
+            const float lo = tv > 0 ? tb_params[idx].min : tb_params[idx].max;
+            const float mv = std::min(std::max(std::round((inst->params()[idx] - lo) / tv * 127.0f), 0.0f), 127.0f);
+            const int mi = TB_P_MAC1 + m - 1;
+            inst->params()[mi] = mv;
+            inst->engine.macroSync();
+            inst->liveNote(mi);
+            break;
+        }
+    }
 }
 
 static void tb_set_param(void *instance, const char *key, const char *val)

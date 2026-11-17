@@ -6,6 +6,9 @@
  * Writes interleaved 32-bit float stereo at 44.1 kHz.
  */
 #include "dsp/engine.h"
+#if defined(__x86_64__) || defined(_M_X64)
+#include <xmmintrin.h>
+#endif
 #include "ported/wav.h"
 
 #include <chrono>
@@ -44,6 +47,9 @@ static std::shared_ptr<Wavetable> loadTable(const std::string &path)
 
 int main(int argc, char **argv)
 {
+#if defined(__x86_64__) || defined(_M_X64)
+    if (!getenv("TB_NOFTZ")) _mm_setcsr(_mm_getcsr() | 0x8040);      /* flush denormals as the plugin does on the Move (FPCR.FZ); TB_NOFTZ=1 turns it off */
+#endif
     if (argc < 9) { fprintf(stderr, "usage: see source\n"); return 2; }
     const std::string root = argv[1];
     const double dur = atof(argv[4]), hold = atof(argv[5]);
@@ -175,7 +181,7 @@ int main(int argc, char **argv)
             for (int n : notes) { const uint8_t off[] = { 0x80, (uint8_t) n, 0 }; e.onMidi(off, 3); }
         const auto t0 = std::chrono::steady_clock::now();
         e.renderBlock(b, 128);
-        { const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count(); blockUs.push_back(us); }
+        { const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count(); blockUs.push_back(us); if (const char *tr = getenv("TB_TRACE")) if (us > atof(tr)) fprintf(stderr, "SPIKE block %d at %.2f s: %.0f us\n", i, i * 128 / 44100.0, us); }
         for (int s = 0; s < 256; s++) out[(size_t) i * 256 + s] = (float) b[s] / 32768.0f;
     }
     if (getenv("TB_TIME")) {                                    /* mean and 99th percentile of one block's render, microseconds (a 128-frame block is 2902 us of audio) */

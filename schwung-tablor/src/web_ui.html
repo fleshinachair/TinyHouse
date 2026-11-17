@@ -2986,6 +2986,7 @@ function macRender() {
 }
 /* ---- user-assigned macros (right-click a knob): the plugin's `macro_edit` key edits the preset's macro routes live; they are saved with the slot and the Move shows the names ---- */
 function macSend(cmd) {
+  if (/^(add|align)\|/.test(cmd)) MACP.hold = Date.now() + 2500;      /* the module sets the macro's knob to match its control: not a move of the macro, so no control follows it */
   try { schwungRemote.setParam(KP + "macro_edit", cmd); } catch (e) {}
   setTimeout(macReload, 160);
 }
@@ -3043,6 +3044,8 @@ function macList() {
     el("span", "b", h, "MACRO " + n);
     var inp = el("input", null, h); inp.type = "text"; inp.maxLength = 24; inp.value = MAC.names[n - 1] || ""; inp.placeholder = "name shown on the Move";
     inp.addEventListener("change", function () { if (inp.value !== (MAC.names[n - 1] || "")) macSend("name|" + n + "|" + inp.value); });
+    var mat = el("button", null, h, "Match knob"); mat.title = "Put the macro's knob where its first control sits, so the two agree (no control moves)";
+    mat.addEventListener("click", function () { macSend("align|" + n); });
     var clr = el("button", null, h, "Clear macro"); clr.addEventListener("click", function () { macSend("clear|" + n); });
     rs.forEach(function (r) {
       var m = META[r.k] || {}, span = ((m.max - m.min) || 1), row2 = el("div", "mr", g);

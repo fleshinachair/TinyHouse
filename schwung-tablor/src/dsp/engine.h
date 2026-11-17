@@ -201,6 +201,12 @@ public:
     void setDemo(std::shared_ptr<const Demo> d) { std::atomic_store(&demoSp, std::move(d)); demoEpoch.fetch_add(1); }
     void setDemoOn(bool on) { demoWant.store(on ? 1 : 0); }
     bool demoPlaying() const { return demoRun; }
+    /* Pad lights for the demo (off by default): which notes the demo is sounding right now, for the plugin to show on the Move's pads. `mode` 0 off, 1 pads a fourth
+     * apart per row (Move's chromatic layout), 2 pads in a run of eight per row; `base` is the note of the bottom-left pad. Read by the plugin on the audio thread. */
+    void setDemoLights(int mode, int base) { demoLightBase.store(base); demoLightMode.store(mode); }
+    int demoLightsMode() const { return demoLightMode.load(std::memory_order_relaxed); }
+    int demoLightsBase() const { return demoLightBase.load(std::memory_order_relaxed); }
+    const uint8_t *demoNotesLit() const { return demoNoteLit; }
 
     /* Wavetable streams running right now: the number kStreamBudget bounds. */
     int activeStreams() const;
@@ -228,6 +234,8 @@ private:
     int  demoLimit(int frames);
     void demoAdvance(int frames);
     void demoSend(int note, int vel);
+    std::atomic<int> demoLightMode { 0 }, demoLightBase { 36 };
+    uint8_t demoNoteLit[128] = {};                 /* 1 while the demo holds that note */
     /* The clip player: one player per held key, each walking the pattern from the key's own start. */
     struct ClipPlayer {
         bool used = false;

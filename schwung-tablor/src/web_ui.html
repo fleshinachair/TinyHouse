@@ -3121,6 +3121,18 @@ function buildDemo(page) {
   u.part = el("select", "demo-sel", row);
   u.part.addEventListener("change", function () { DM.p = +u.part.value; demoSend("demo_part", DM.p); });
   u.stat = el("div", "demo-stat", card, "");
+  /* Pad lights: the demo's notes shown on the Move's pads. Off by default. Fourths = the chromatic layout (a row up is five semitones), Linear = eight semitones to a row; Base is the
+   * note of the bottom-left pad (the one lit when that note plays), set it to match the Move's octave. */
+  el("div", "demo-note", card, "Pad lights (experimental): light the pads of the notes the demo plays. Pick the pad layout and the note of the bottom-left pad to match what your Move plays.");
+  var lr = el("div", "demo-row", card);
+  u.lights = el("select", "demo-sel", lr);
+  ["Lights off", "Fourths", "Linear"].forEach(function (n, i) { var o = el("option", null, u.lights, n); o.value = ["Off", "Fourths", "Linear"][i]; });
+  u.lights.addEventListener("change", function () { demoSend("demo_lights", u.lights.value); });
+  el("span", "demo-note", lr, "bottom-left pad note");
+  u.lbase = el("input", "demo-sel", lr); u.lbase.type = "number"; u.lbase.min = 0; u.lbase.max = 100; u.lbase.value = 36; u.lbase.style.width = "64px";
+  u.lbase.addEventListener("change", function () { demoSend("demo_lights_base", Math.max(0, Math.min(100, +u.lbase.value || 0))); });
+  schwungRemote.getParam(KP + "demo_lights").then(function (v) { if (v) u.lights.value = v; }).catch(function () {});
+  schwungRemote.getParam(KP + "demo_lights_base").then(function (v) { if (v !== "" && v != null) u.lbase.value = v; }).catch(function () {});
 
   var imp = panel("Import MIDI", g).body;
   el("div", "demo-note", imp, "Choose .mid files, or a folder of them (a Serum pack's demo MIDI). Each track becomes a part you can pick above. They play at the Move's tempo.");
@@ -3166,7 +3178,7 @@ function buildDemo(page) {
 
 /* chain_params entries the module adds for the host's own pages (pack and table lists, the preset
  * browser): they are not sound parameters and have their own pickers or none here */
-var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_pack|demo_part|demo_list|demo_now|mac[1-8]|macro_names|macro_routes)$/;
+var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths|demo_on|demo_lights|demo_lights_base|demo_pack|demo_part|demo_list|demo_now|mac[1-8]|macro_names|macro_routes)$/;
 
 /* keys the host streams that are not controls */
 var EXTRA = {

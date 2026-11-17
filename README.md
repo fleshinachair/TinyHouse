@@ -51,6 +51,8 @@ three oscillators with 3D wavetable displays, and the **Sample** tab has the thr
 filter curve and envelopes, pick wavetables from the list, set the effects, and save the result as a preset. The import report's loudness, reverb and width come
 from general rules, so set **Volume** and the effects to taste.
 
+![The Sample tab on a granular oscillator: the sample's shape with its start point and loop, a lane of grains sized by the density, length and window, and every grain control below](docs/img/remote-sample.png)
+
 **Playing live is on the Move**, with no menus:
 
 | Page | What is on it |

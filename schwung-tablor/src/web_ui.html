@@ -2986,14 +2986,14 @@ function macRender() {
 }
 /* ---- user-assigned macros (right-click a knob): the plugin's `macro_edit` key edits the preset's macro routes live; they are saved with the slot and the Move shows the names ---- */
 function macSend(cmd) {
-  if (/^(add|align)\|/.test(cmd)) MACP.hold = Date.now() + 2500;      /* the module sets the macro's knob to match its control: not a move of the macro, so no control follows it */
+  if (/^(add|align)\|/.test(cmd)) MACP.hold = Date.now() + 2500;      /* the module sets the knob to the first control (or puts a later control where the knob says): not a move of the macro by hand, so no control follows it */
   try { schwungRemote.setParam(KP + "macro_edit", cmd); } catch (e) {}
   setTimeout(macReload, 160);
 }
 function macDefaultTravel(key, n) {
   var m = META[key], span = (m.max - m.min) || 1;
-  /* The macro going UP always raises the control (the whole range over the macro's whole travel). The control moves by the macro's change and stops at its ends, so a control that
-   * starts out of step with the macro (at its bottom with the macro high) joins it the first time the macro reaches an end. A negative travel is set by hand on the Macros tab. */
+  /* By default a macro covers the control's WHOLE range, going up: the macro at 0 is the control's bottom, at 127 its top. The module leaves the first control on a macro as it is and sets the
+   * knob to it (or puts a later control where the macro's knob says), so knob and control read the same. A smaller or negative travel is set by hand on the Macros tab. */
   return span;
 }
 function macMenuClose() { var o = document.getElementById("macmenu"); if (o) o.remove(); }
@@ -3044,8 +3044,9 @@ function macList() {
     el("span", "b", h, "MACRO " + n);
     var inp = el("input", null, h); inp.type = "text"; inp.maxLength = 24; inp.value = MAC.names[n - 1] || ""; inp.placeholder = "name shown on the Move";
     inp.addEventListener("change", function () { if (inp.value !== (MAC.names[n - 1] || "")) macSend("name|" + n + "|" + inp.value); });
-    var mat = el("button", null, h, "Match knob"); mat.title = "Put the macro's knob where its first control sits, so the two agree (no control moves)";
+    var mat = el("button", null, h, "Match knob"); mat.title = "Moved a control by hand? This puts the macro's knob back on its first control, so the two agree (no control moves)";
     mat.addEventListener("click", function () { macSend("align|" + n); });
+    var hint = el("div", null, g, "Moved a control by hand? Press Match knob to bring the knob back to it."); hint.style.cssText = "margin:2px 0 6px;font-size:10px;color:var(--faint)";
     var clr = el("button", null, h, "Clear macro"); clr.addEventListener("click", function () { macSend("clear|" + n); });
     rs.forEach(function (r) {
       var m = META[r.k] || {}, span = ((m.max - m.min) || 1), row2 = el("div", "mr", g);

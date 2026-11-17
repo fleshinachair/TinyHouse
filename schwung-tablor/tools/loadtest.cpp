@@ -222,6 +222,9 @@ int main(int argc, char **argv)
         /* The remote UI's macro editing: a knob added to a macro (right-click), its travel changed, removed. The routes and names read back; the name is the macro's own if it has none. */
         auto settleMacros = [&]() { settle(api, inst); for (int i = 0; i < 400; i++) { char l[8] = {}; api->get_param(inst, "is_loading", l, sizeof l); if (l[0] == '0') break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); } };
         auto read = [&](const char *key) { char b[3072] = {}; api->get_param(inst, key, b, sizeof b); return std::string(b); };
+        const char *kept[] = { "wt1_level", "wt2_level", "wt3_level", "wt1_pos", "wt2_pos", "wt3_pos", "flt_freq" };      /* a control put on a macro is reset: put them back at the end, the sound tests below need them */
+        std::string keptVal[7];
+        for (int i = 0; i < 7; i++) keptVal[i] = read(kept[i]);
         api->set_param(inst, "macro_edit", "add|2|wt1_level|40|Level");
         api->set_param(inst, "macro_edit", "add|2|flt_freq|-30|Cutoff");
         api->set_param(inst, "macro_edit", "add|5|no_such_key|10|X");
@@ -242,7 +245,7 @@ int main(int argc, char **argv)
             api->set_param(inst, "synth:mac4", "50");
             api->set_param(inst, "synth:macro_edit", "add|4|wt3_level|30|Ok");
             settleMacros();
-            const float m0 = (float) atof(read("mac4").c_str());               /* the first control moved the knob to where it sits (travel 30: 127 x level / 30, held to 0..127) */
+            const float m0 = (float) atof(read("mac4").c_str());               /* the first (NaN) route moves nothing and sets no knob; this one is put where the knob (50) says */
             api->set_param(inst, "synth:mac4", "0");
             const float a0 = (float) atof(read("wt3_level").c_str()), n0 = (float) atof(read("wt2_level").c_str());
             api->set_param(inst, "synth:mac4", "100");
@@ -267,55 +270,66 @@ int main(int argc, char **argv)
         CHECK(read("macro_routes").empty() && read("macro_names").empty() && unitOf(2) == "", "the last route removed: the macro has no name and no unit (\"%s\"/\"%s\")", read("macro_routes").c_str(), read("macro_names").c_str());
 
         /* Where the macro's knob sits against the controls it holds. A macro moves a control by the macro's CHANGE (travel x change / 127, held to the control's range), so a knob and
-         * a control agree only if the knob starts where the control is: the first control put on a macro sets the knob to its position; later ones keep their own offset. */
+         * a control agree only if they start together. The first control put on a macro is left as it is (the sound does not change) and the knob goes to it; a control added to a
+         * macro that already holds others is put where the knob says. */
         auto num = [&](const char *key) { return (float) atof(read(key).c_str()); };
         auto near = [](float a, float b, float tol = 1.01f) { return std::fabs(a - b) <= tol; };
-        {   /* one control, full range up: the knob equals the control, now and after turning the knob */
+        {   /* one control, full range up: it stays where it was, the knob goes to it, and the two then read the same all the way */
             api->set_param(inst, "wt2_level", "64");
             api->set_param(inst, "macro_edit", "add|6|wt2_level|127|Lvl");
             settleMacros();
-            CHECK(near(num("mac6"), 64.0f), "one control, full range up: the knob is put at the control's position (knob %g, control %g)", (double) num("mac6"), (double) num("wt2_level"));
+            CHECK(near(num("mac6"), 64.0f) && near(num("wt2_level"), 64.0f), "one control, full range up: the control stays and the knob goes to it (knob %g, control %g)", (double) num("mac6"), (double) num("wt2_level"));
             api->set_param(inst, "mac6", "100");
             CHECK(near(num("wt2_level"), 100.0f), "... and turned to 100 the control reads 100 (%g)", (double) num("wt2_level"));
             api->set_param(inst, "mac6", "0");
             CHECK(near(num("wt2_level"), 0.0f), "... and to 0 it reads 0 (%g)", (double) num("wt2_level"));
-            CHECK(read("live_vals").find("wt2_level=0;") != std::string::npos || read("live_vals").find("wt2_level=0") != std::string::npos, "live_vals names what the host wrote lately, with its value now (\"%s\")", read("live_vals").c_str());
+            CHECK(read("live_vals").find("wt2_level=0") != std::string::npos, "live_vals names what the host wrote lately, with its value now (\"%s\")", read("live_vals").c_str());
             api->set_param(inst, "macro_edit", "clear|6"); settleMacros();
         }
-        {   /* a control that runs the other way (negative travel): the knob is at the control's distance from its top, so control = 127 - knob */
+        {   /* a control that runs the other way (negative travel): it stays, the knob is at its distance from the top, so control = 127 - knob */
             api->set_param(inst, "wt3_level", "30");
             api->set_param(inst, "macro_edit", "add|7|wt3_level|-127|Neg");
             settleMacros();
-            CHECK(near(num("mac7"), 97.0f), "negative full travel: the knob reads 127 - control (knob %g, control %g)", (double) num("mac7"), (double) num("wt3_level"));
+            CHECK(near(num("mac7"), 97.0f) && near(num("wt3_level"), 30.0f), "negative full travel: the control stays and the knob reads 127 - control (knob %g, control %g)", (double) num("mac7"), (double) num("wt3_level"));
             api->set_param(inst, "mac7", "20");
             CHECK(near(num("wt3_level"), 107.0f), "... and at 20 the control reads 107 (%g)", (double) num("wt3_level"));
             api->set_param(inst, "macro_edit", "clear|7"); settleMacros();
         }
-        {   /* two controls on one knob: the first sets the knob, the second keeps its own offset and moves in step; they meet again when the knob reaches an end */
+        {   /* two controls on one knob: the first stays and sets the knob, the second is put where the knob says, and they stay in step from end to end */
             api->set_param(inst, "wt1_pos", "40"); api->set_param(inst, "wt2_pos", "100");
             api->set_param(inst, "macro_edit", "add|3|wt1_pos|127|A");
             api->set_param(inst, "macro_edit", "add|3|wt2_pos|127|A");
             settleMacros();
-            CHECK(near(num("mac3"), 40.0f), "two controls: the knob took the FIRST one's position (knob %g, first %g, second %g)", (double) num("mac3"), (double) num("wt1_pos"), (double) num("wt2_pos"));
-            CHECK(near(num("wt1_pos"), 40.0f) && near(num("wt2_pos"), 100.0f), "... and adding them moved neither control (%g, %g)", (double) num("wt1_pos"), (double) num("wt2_pos"));
+            CHECK(near(num("mac3"), 40.0f) && near(num("wt1_pos"), 40.0f) && near(num("wt2_pos"), 40.0f), "two controls: the knob took the first one's position and the second was put there too (knob %g, controls %g, %g)", (double) num("mac3"), (double) num("wt1_pos"), (double) num("wt2_pos"));
             api->set_param(inst, "mac3", "60");
-            CHECK(near(num("wt1_pos"), 60.0f) && near(num("wt2_pos"), 120.0f), "knob +20: both controls move by 20 (%g, %g)", (double) num("wt1_pos"), (double) num("wt2_pos"));
+            CHECK(near(num("wt1_pos"), 60.0f) && near(num("wt2_pos"), 60.0f), "knob at 60: both controls read 60 (%g, %g)", (double) num("wt1_pos"), (double) num("wt2_pos"));
             api->set_param(inst, "mac3", "127");
             CHECK(near(num("wt1_pos"), 127.0f) && near(num("wt2_pos"), 127.0f), "knob at the top: both at their top (%g, %g)", (double) num("wt1_pos"), (double) num("wt2_pos"));
-            api->set_param(inst, "mac3", "0");
-            CHECK(near(num("wt1_pos"), 0.0f) && near(num("wt2_pos"), 0.0f), "knob at the bottom: both at their bottom, in step again (%g, %g)", (double) num("wt1_pos"), (double) num("wt2_pos"));
+        }
+        {   /* a third control added while the knob is up at 127: it is put where the knob says, so it agrees at once; and a reversed one lands at the other end */
+            api->set_param(inst, "wt3_pos", "5");
+            api->set_param(inst, "macro_edit", "add|3|wt3_pos|127|C");
+            api->set_param(inst, "wt3_level", "100");
+            api->set_param(inst, "macro_edit", "add|3|wt3_level|-127|D");
+            settleMacros();
+            CHECK(near(num("mac3"), 127.0f) && near(num("wt3_pos"), 127.0f) && near(num("wt3_level"), 0.0f), "added with the knob at 127: knob stays, the control sits at 127 and the reversed one at 0 (knob %g, %g, %g)", (double) num("mac3"), (double) num("wt3_pos"), (double) num("wt3_level"));
+            api->set_param(inst, "mac3", "50");
+            CHECK(near(num("wt1_pos"), 50.0f) && near(num("wt2_pos"), 50.0f) && near(num("wt3_pos"), 50.0f) && near(num("wt3_level"), 77.0f), "knob at 50: all four agree (%g, %g, %g, reversed %g)", (double) num("wt1_pos"), (double) num("wt2_pos"), (double) num("wt3_pos"), (double) num("wt3_level"));
             api->set_param(inst, "wt1_pos", "90");                                   /* the first control is moved by hand: the knob no longer matches it */
             api->set_param(inst, "macro_edit", "align|3"); settleMacros();
-            CHECK(near(num("mac3"), 90.0f) && near(num("wt1_pos"), 90.0f) && near(num("wt2_pos"), 0.0f), "Match knob puts the knob on the first control and moves nothing (knob %g, controls %g, %g)", (double) num("mac3"), (double) num("wt1_pos"), (double) num("wt2_pos"));
+            CHECK(near(num("mac3"), 90.0f) && near(num("wt1_pos"), 90.0f) && near(num("wt2_pos"), 50.0f), "Match knob puts the knob on the first control and moves nothing (knob %g, controls %g, %g)", (double) num("mac3"), (double) num("wt1_pos"), (double) num("wt2_pos"));
             api->set_param(inst, "macro_edit", "clear|3"); settleMacros();
         }
-        {   /* partial travel cannot be matched exactly: the knob goes as near as it can (held to 127), and nothing breaks */
+        {   /* partial travel on a control further up than the travel reaches: the control stays, the knob is held to 127, and turning the knob down moves it by the travel */
             api->set_param(inst, "wt1_level", "100");
             api->set_param(inst, "macro_edit", "add|8|wt1_level|50|Part");
             settleMacros();
-            CHECK(near(num("mac8"), 127.0f) && near(num("wt1_level"), 100.0f), "travel 50 on a control at 100: the knob is held to 127 and the control stays (knob %g, control %g)", (double) num("mac8"), (double) num("wt1_level"));
+            CHECK(near(num("mac8"), 127.0f) && near(num("wt1_level"), 100.0f), "travel 50 on a control at 100: the control stays and the knob is held to 127 (knob %g, control %g)", (double) num("mac8"), (double) num("wt1_level"));
+            api->set_param(inst, "mac8", "0");
+            CHECK(near(num("wt1_level"), 50.0f), "... and the knob at 0 takes it down by the travel, to 50 (%g)", (double) num("wt1_level"));
             api->set_param(inst, "macro_edit", "clear|8"); settleMacros();
         }
+        for (int i = 0; i < 7; i++) api->set_param(inst, kept[i], keptVal[i].c_str());
     }
 
     /* The slot remembers its demo: pack and part by name, restored from the state once the demo store has been scanned. Two parts of a throwaway pack

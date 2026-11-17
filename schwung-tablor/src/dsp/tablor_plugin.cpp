@@ -1651,7 +1651,9 @@ static void macro_edit(tablor_instance *inst, const char *val)
     names.resize(8);
     auto find = [&](const std::string &key) { for (size_t i = 0; i < routes.size(); i++) if (routes[i].m == m && routes[i].key == key) return (int) i; return -1; };
     auto travelStr = [](float t) { char b[32]; snprintf(b, sizeof b, "%g", (double) std::lround(t * 100.0f) / 100.0); return std::string(b); };
-    bool alignIt = false;                              /* the macro's knob is set to where its first control sits (see below) */
+    bool alignIt = false;                              /* "align": the macro's knob is set to where its first control sits (see below) */
+    std::string addedKey;                              /* "add": a control new to the macro is put where the macro says (see below) */
+    bool addedFirst = false;
     if (op == "add" || op == "travel") {
         if (f.size() < 4) return;
         const int idx = param_index(f[2].c_str());
@@ -1663,7 +1665,8 @@ static void macro_edit(tablor_instance *inst, const char *val)
         else if (op == "add") {
             bool first = true;
             for (const R &r : routes) first = first && r.m != m;
-            alignIt = first;                           /* a macro's first control: the knob and the control then agree */
+            addedKey = f[2];
+            addedFirst = first;
             routes.push_back({ m, f[2], travelStr(t) });
         }
         if (op == "add" && names[(size_t) m - 1].empty()) names[(size_t) m - 1] = f.size() > 4 && !macro_clean(f[4]).empty() ? macro_clean(f[4]) : "Macro " + std::to_string(m);
@@ -1694,15 +1697,31 @@ static void macro_edit(tablor_instance *inst, const char *val)
     snprintf(inst->macn_str, sizeof inst->macn_str, "%s", macn.c_str());
     apply_macro_routes(inst, inst->mac_str);
     republish_macro_names(inst);
+    if (addedFirst) alignIt = true;                   /* the first control on a macro is left as it is; the knob goes to it ("Match knob", below) */
+    if (!addedKey.empty() && !addedFirst) {
+        /* A macro moves its controls by its own change, so a knob and a control agree only when they start together. The first control on a macro is never moved (the sound does not
+         * change): the knob goes to it. A control added to a macro that already holds others is put where the knob says (start + travel x knob / 127), so every control is a plain
+         * function of the knob. The engine takes the knob as it is: nothing else moves. */
+        const int idx = param_index(addedKey.c_str());
+        const float tv = routes.empty() ? 0.0f : strtof(routes.back().travel.c_str(), nullptr);      /* the route just added is the last */
+        if (idx >= 0 && std::fabs(tv) >= 0.5f) {
+            const int mi = TB_P_MAC1 + m - 1;
+            const float lo = tv > 0 ? tb_params[idx].min : tb_params[idx].max;
+            const float at = lo + tv * inst->params()[mi] / 127.0f;
+            const float nv = std::min(std::max(std::round(at), tb_params[idx].min), tb_params[idx].max);
+            if (inst->params()[idx] != nv) inst->liveNote(idx);
+            inst->params()[idx] = nv;
+            inst->engine.macroSync();
+        }
+    }
     if (alignIt) {
-        /* A macro moves its controls by its own change, so a knob and a control only agree when the knob starts where the control sits. Put the macro where the control it holds first is
-         * on the macro's span (travel over the whole range: 0 is the control's bottom for a positive travel, its top for a negative one). No control moves: the macro's last-seen value
-         * is set with it. */
+        /* "Match knob": put the macro where the control it holds first is on the macro's span (travel over the whole range: 0 is the control's bottom for a positive travel, its top for
+         * a negative one). No control moves: the macro's last-seen value is set with it. */
         for (const R &r : routes) {
             if (r.m != m) continue;
             const int idx = param_index(r.key.c_str());
             const float tv = strtof(r.travel.c_str(), nullptr);
-            if (idx < 0 || std::fabs(tv) < 0.5f) break;
+            if (idx < 0 || !(std::fabs(tv) >= 0.5f)) break;                 /* (a NaN travel is no travel) */
             const float lo = tv > 0 ? tb_params[idx].min : tb_params[idx].max;
             const float mv = std::min(std::max(std::round((inst->params()[idx] - lo) / tv * 127.0f), 0.0f), 127.0f);
             const int mi = TB_P_MAC1 + m - 1;
@@ -1870,7 +1889,7 @@ static int write_str(char *buf, int buf_len, const char *s)
     buf[n] = 0;
     return n;
 }
-
+
 static int tb_get_param(void *instance, const char *key, char *buf, int buf_len);
 
 /* The settings a stored blob ("TBLR2;a=1;b=2;") names, parsed once: where each parameter's text starts (null when the blob does not name it), and the macro strings. */

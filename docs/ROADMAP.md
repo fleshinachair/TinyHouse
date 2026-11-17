@@ -25,6 +25,7 @@ browser, Osc / Sample / Macros / FX tabs, macros you assign yourself); the Move'
 | 5 | **Noise- and Filter-1-driven warps**, DLM, spectral tables, Sync Var; the `Comb2` / `Combs` / `L6` comb variants, Diffuser, Reverb and RM filter models | the largest groups among the factory presets the importer drops; each needs a probe first (`census.py` lists what blocks what) |
 | 6 | **Reverb build-up**: Serum's wet holds its peak 50 to 100 ms longer; tails are 1 to 3 dB under | a build-up stage in `processReverb`; `calibration/dev/reverb_engine_only.py` measures it without a Serum render |
 | 7 | **Performance**: a granular preset in slot 2 was the heaviest on the Move (about 1.3 ms of the 2.67 ms block) | name the preset, then an on-device profile (see the overnight notes in the reports) |
+| 8 | **Macro min / max per control** (as Ableton racks): the macro would set the control to a fixed range instead of moving it by the knob's change | state format change, a min / max editor on the Macros tab, and a rule for a control moved by hand. Gives exact part-way ranges and inversion; today's Match knob button goes away |
 
 ## Still open from the Deep House pack, cause not found (not rechecked since 2026-11-04)
 

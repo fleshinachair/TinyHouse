@@ -100,6 +100,8 @@ struct tablor_instance {
     };
     std::shared_ptr<const DemoList> demos { std::make_shared<DemoList>() };
     std::atomic<int> demo_pack { 0 }, demo_part { 0 }, demo_on { 0 };
+    std::atomic<uint32_t> live_seq { 0 };                              /* live note-ons received (not the demo's): the count and the last note, for the pad lights to learn the Move's pad layout */
+    std::atomic<int> live_note { -1 };
     std::atomic<int> demo_lights { 0 }, demo_lights_base { 36 };       /* pad lights while the demo plays: 0 Off, 1 Fourths, 2 Linear; the note of the bottom-left pad */
     /* What a restored state said the slot was playing: the pack and the part by NAME (an index shifts when a song is added or removed), and whether it
      * was on. Held until the worker has scanned the demo store, then applied (apply_want_demo). */
@@ -1077,15 +1079,15 @@ static void tb_publish_selection(tablor_instance *inst)
             hand += "\""; tb_json_append(hand, dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]); hand += "\"";
         }
         hand += "]}";
-        out += ",{\"key\":\"demo_list\",\"name\":\"Demo List\",\"type\":\"string\",\"access\":\"read\"}"
-               ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}";
+        out += ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}";
         /* The Macros page cells read macro_names on every redraw, and the Tone and Grain pages read the shapes below: keys the Move reads belong
          * inside the host's 256-key cache (a key past it makes the host parse this whole list again, ~20 ms, on every read: the Move UI ran at
          * 5-10 fps while the Macros page was open, and a preset scroll hung for over a minute). */
         hand += ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
                 ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}"
                 /* the Demo page's Pad Lights widget reads this on every redraw */
-                ",{\"key\":\"demo_pads\",\"name\":\"Demo Pads\",\"type\":\"string\",\"access\":\"read\"}";
+                ",{\"key\":\"demo_pads\",\"name\":\"Demo Pads\",\"type\":\"string\",\"access\":\"read\"}"
+                ",{\"key\":\"demo_live\",\"name\":\"Demo Live Note\",\"type\":\"string\",\"access\":\"read\"}";
     }
 
     /* The shape digests are DECLARED here so they reach a browser at all:
@@ -1106,7 +1108,6 @@ static void tb_publish_selection(tablor_instance *inst)
     hand += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"wt3_shape\",\"name\":\"WT3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"wt_paths\",\"name\":\"WT Paths\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"smp_shape\",\"name\":\"Sample 1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"smp2_shape\",\"name\":\"Sample 2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
            ",{\"key\":\"smp3_shape\",\"name\":\"Sample 3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
@@ -1117,7 +1118,13 @@ static void tb_publish_selection(tablor_instance *inst)
      * reads back fine: if it does not, the tail of the list is dropped. So the list ends on a key that always reads (preset_now); `preset` moved up with the other keys the Move turns (see `hand`). */
     out += ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}"
            ",{\"key\":\"macro_edit\",\"name\":\"Macro Edit\",\"type\":\"string\"}"
-           ",{\"key\":\"preset_list\",\"name\":\"Preset List\",\"type\":\"string\",\"access\":\"read\"}"
+           /* THE BIG LISTS THE WEB PANEL READS (preset_list, demo_list, wt_paths) ARE NOT DECLARED. The page only sees what the manager pushes into its cache, and the manager pushes a
+            * module's JSON state (which leaves these out on purpose: they are tens of kilobytes) plus its viz `extra_keys`, and it leaves an extra key out when the key is also declared (it
+            * expects the main loop to fetch it). So since the state became JSON (5daf5ed) a declared list never reached the page: the preset bar, the Demo packs and the wavetable list stayed empty,
+            * and so did a sample's shape. An undeclared key named as an extra key IS read by the manager (on subscribe, on a preset change and every 500 ms while the panel is open, sending only
+            * what moved). `data_feed` is the declared key that carries that list; it sits on no page, so the Move's own screen never reads the keys (an undeclared key read by the host
+            * re-parses chain_params). */
+           ",{\"key\":\"data_feed\",\"name\":\"Data Feed\",\"type\":\"string\",\"access\":\"read\",\"viz\":{\"kind\":\"custom:tinyhouse_data\",\"group\":\"data\",\"role\":\"a\",\"extra_keys\":[\"preset_list\",\"demo_list\",\"wt_paths\"]}}"
            ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}";
     hand += ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
     out.insert(tb_chain_params_prio_len, hand);      /* right after the page keys: inside the host's 256-key cache */
@@ -1965,6 +1972,14 @@ static std::string build_state_json(tablor_instance *inst, const std::string &bl
         const std::string k = "wt" + std::to_string(s + 1) + "_select";
         put(k.c_str(), tmp);
     }
+    /* The sample slots' shapes (99 characters each) ARE here, LAST (they land after the preset, on the worker, so a comparison of a waiting state with a landed one stops before them): the remote UI only ever sees what the manager pushes, and the manager skips a viz extra key that is also a declared key
+     * (it expects the main loop to fetch it, which reads this state), so a shape left out of the state never reached the page: slot 2's Sample tab said "no sample loaded" over a sample the
+     * Move's own page drew. (The wavetable shapes stay out: they are kilobytes, and the page loads those tables from their files.) */
+    for (int sl = 0; sl < 3; sl++) {
+        const char *k = sl == 0 ? "smp_shape" : (sl == 1 ? "smp2_shape" : "smp3_shape");
+        auto sp = std::atomic_load(&inst->smp_shape[sl]);
+        put(k, sp ? *sp : std::string());
+    }
     o += '}';
     return o;
 }
@@ -2074,6 +2089,8 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     /* The web panel's browser: every bank with its preset names (a string built at scan time), and "bank,index" for the sound
      * the page shows. */
+    if (!strcmp(key, "data_feed"))                /* declared only to carry the extra keys above; nothing to read */
+        return write_str(buf, buf_len, "1");
     if (!strcmp(key, "preset_list"))
         return write_str(buf, buf_len, inst->storeList()->digest.c_str());
     if (!strcmp(key, "demo_on"))
@@ -2081,6 +2098,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "demo_lights")) {
         static const char *const names[] = { "Off", "Fourths", "Linear" };
         return write_str(buf, buf_len, names[inst->demo_lights.load() % 3]);
+    }
+    if (!strcmp(key, "demo_live")) {              /* "count,note": the live note-ons so far and the last one's note (-1 none) */
+        char tmp[24];
+        snprintf(tmp, sizeof tmp, "%u,%d", (unsigned) inst->live_seq.load(std::memory_order_acquire), inst->live_note.load(std::memory_order_relaxed));
+        return write_str(buf, buf_len, tmp);
     }
     if (!strcmp(key, "demo_pads")) {              /* the pads the demo holds lit, as 8 hex digits (bit 0 = bottom-left pad); the Move-side widget paints them */
         char tmp[16];
@@ -2195,6 +2217,7 @@ static void tb_on_midi(void *instance, const uint8_t *msg, int len, int source)
 {
     auto *inst = (tablor_instance *) instance;
     if (!inst || !msg) return;
+    if (len >= 3 && (msg[0] & 0xF0) == 0x90 && msg[2] > 0) { inst->live_note.store(msg[1], std::memory_order_relaxed); inst->live_seq.fetch_add(1, std::memory_order_release); }
     inst->engine.onMidi(msg, len);
 }
 

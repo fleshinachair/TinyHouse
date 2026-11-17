@@ -357,6 +357,39 @@
         return typeof v === "string" && /^[0-9a-f]{8}$/i.test(v) ? parseInt(v, 16) >>> 0 : 0;
     }
 
+    /* DIAGNOSTIC (only while the file /data/UserData/schwung/th_padlog_on exists): for each live note the module receives, the Move's pad colours at that moment and the pads it changed since
+     * the last frame, written to /data/UserData/schwung/th_padlog.json. It is how the Move's pad-to-note layout (key, In Key, octave view) is read off a few presses. */
+    const padlog = pads.log || (pads.log = { seq: -1, prev: null, entries: [], on: false, check: 0, rest: null });
+    function logStatus(info) {                                                  /* the widget's own state, every 30 draws: is it drawn at all, what it reads, what the Move did with the packets */
+        if (typeof host_write_file !== "function") return;
+        padlog.draws = (padlog.draws || 0) + 1;
+        if ((padlog.draws % 30) !== 1) return;
+        try {
+            host_write_file("/data/UserData/schwung/th_padstatus.json", JSON.stringify(Object.assign({ draws: padlog.draws, ok: pads.ok, fail: pads.fail, lastDrawAgoMs: 0, now: Date.now(),
+                hasSend: typeof move_midi_internal_send === "function", hasSnap: typeof shadow_get_pad_led_snapshot === "function", hasDirect: typeof host_module_get_param === "function",
+                lit: pads.lit.filter((v) => v === PAD_WHITE).length, touched: pads.touched.filter((v) => v).length }, info)));
+        } catch (e) { /* diagnostic only */ }
+    }
+    function logPads() {
+        if (typeof host_file_exists !== "function" || typeof host_write_file !== "function" || typeof host_module_get_param !== "function") return;
+        if ((padlog.check++ % 120) === 0) padlog.on = !!host_file_exists("/data/UserData/schwung/th_padlog_on");
+        if (!padlog.on) return;
+        const snap = moveColours(); if (!snap) return;
+        const now = []; for (let i = 0; i < PAD_COUNT; i++) now.push(typeof snap[PAD_FIRST + i] === "number" ? snap[PAD_FIRST + i] : -1);
+        let live = null; try { live = host_module_get_param("demo_live"); } catch (e) { live = null; }
+        const m = typeof live === "string" ? /^(\d+),(-?\d+)$/.exec(live) : null;
+        if (!padlog.rest) padlog.rest = now.slice();
+        const changed = []; if (padlog.prev) for (let i = 0; i < PAD_COUNT; i++) if (now[i] !== padlog.prev[i]) changed.push([i, padlog.prev[i], now[i]]);
+        let write = false;
+        if (m && Number(m[1]) !== padlog.seq) {
+            if (padlog.seq >= 0) { padlog.entries.push({ t: Date.now(), seq: Number(m[1]), note: Number(m[2]), changed: changed, snap: now }); write = true; }
+            padlog.seq = Number(m[1]);
+        } else if (changed.length && padlog.seq >= 0) { padlog.entries.push({ t: Date.now(), seq: padlog.seq, note: null, changed: changed }); write = true; }
+        padlog.prev = now;
+        if (padlog.entries.length > 60) padlog.entries.splice(0, padlog.entries.length - 60);
+        if (write) { try { host_write_file("/data/UserData/schwung/th_padlog.json", JSON.stringify({ rest: padlog.rest, entries: padlog.entries })); } catch (e) { /* diagnostic only */ } }
+    }
+
     function paintPads(mask) {
         const snap = moveColours();
         let sent = 0;
@@ -390,6 +423,7 @@
         watchPadBlock();
         const mask = off ? 0 : wantedMask(values);
         try { paintPads(mask); } catch (e) { ctx.print(1, 4, "ERR", 1); return; }
+        try { logPads(); if (padlog.on) logStatus({ mode: String(mode), mask: mask >>> 0, direct: typeof host_module_get_param === "function" ? String(host_module_get_param("demo_pads")) : null, extra: values.demo_pads === undefined ? null : String(values.demo_pads) }); } catch (e) { /* diagnostic only */ }
         if (off) { ctx.print((ctx.width - ctx.textWidth("OFF")) >> 1, 4, "OFF", 1); return; }
         const pw = Math.max(3, Math.floor(ctx.width / 8));
         for (let i = 0; i < PAD_COUNT; i++) {

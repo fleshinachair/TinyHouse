@@ -175,7 +175,7 @@ int main(int argc, char **argv)
         }
         CHECK(late.empty(), "every key the Move turns is inside the host's 256-key cache (%d declared; outside:%s)", n, late.c_str());
         /* the keys the Move's widgets READ on every redraw (extra_keys) belong inside it too: a read of a key past it re-parses the whole list */
-        for (const char *rk : { "macro_names", "macro_routes", "demo_pads", "smp_shape", "smp2_shape", "smp3_shape", "wt_on" }) {
+        for (const char *rk : { "macro_names", "macro_routes", "demo_pads", "demo_live", "smp_shape", "smp2_shape", "smp3_shape", "wt_on" }) {
             size_t at = 0;
             while (at < declared.size() && declared[at] != rk) at++;
             CHECK(at < 256, "the widget key %s is inside the 256-key cache (position %d)", rk, (int) at);
@@ -519,7 +519,7 @@ int main(int argc, char **argv)
      * Schwung's own contract checker flags as an empty numeric range
      * (athousanddetails/schwung-tablor#2). They stay on no page on purpose. */
     n = api->get_param(inst, "chain_params", big, sizeof big);
-    for (const char *k : { "wt1_shape", "wt2_shape", "wt_paths" }) {
+    for (const char *k : { "wt1_shape", "wt2_shape", "data_feed" }) {
         char pat[64]; snprintf(pat, sizeof pat, "\"key\":\"%s\"", k);
         const char *at = strstr(big, pat);
         std::string ent = at ? std::string(at, strchr(at, '}') ? (size_t) (strchr(at, '}') - at) : strlen(at)) : std::string();   /* this entry only */
@@ -566,10 +566,11 @@ int main(int argc, char **argv)
     CHECK(strstr(big, "\"wt_pack\"") && strstr(big, "\"wt1_select\"") &&
           strstr(big, "\"wt2_select\""),
           "chain_params publishes the turnable selection enums");
-    CHECK(strstr(big, "\"wt1_shape\"") && strstr(big, "\"wt2_shape\"") &&
-          strstr(big, "\"wt_paths\""),
-          "chain_params declares the shape digests and the path list (the "
-          "manager only streams declared keys)");
+    CHECK(strstr(big, "\"wt1_shape\"") && strstr(big, "\"wt2_shape\"") && strstr(big, "\"key\":\"data_feed\"") &&
+          strstr(big, "\"extra_keys\":[\"preset_list\",\"demo_list\",\"wt_paths\"]"),
+          "chain_params declares the shape digests and the data feed that names the big lists as extra keys (the manager pushes those, and skips an extra key that is also declared)");
+    CHECK(!strstr(big, "\"key\":\"preset_list\"") && !strstr(big, "\"key\":\"demo_list\"") && !strstr(big, "\"key\":\"wt_paths\""),
+          "the big lists are NOT declared keys (a declared one is never pushed to the web panel)");
     n = api->get_param(inst, "wt_paths", big, sizeof big);
     CHECK(n > 10 && big[0] == '[' && strstr(big, "/data/UserData"),
           "wt_paths lists the file behind each wtN_select index (%d bytes)", n);
@@ -600,6 +601,8 @@ int main(int argc, char **argv)
             settle(api, inst);
             for (int i = 0; i < 400; i++) { api->get_param(inst, "smp_shape", buf, sizeof buf); if (buf[0]) break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); }
             CHECK(!strncmp(buf, "96,", 3) && strlen(buf) == 3 + 96, "smp_shape of a loaded sample is \"96,\" and 96 characters (%zu bytes) for %s", strlen(buf), sp);
+            { std::string stj; { char sb[65536] = {}; api->get_param(inst, "state", sb, sizeof sb); stj = sb; }
+              CHECK(stj.find(std::string("\"smp_shape\":\"") + buf + "\"") != std::string::npos, "the state JSON (what the remote UI's manager reads) carries the sample shape"); }
             api->set_param(inst, "state", "TBLR2;smp_set=;");
             settle(api, inst);
             for (int i = 0; i < 400; i++) { api->get_param(inst, "smp_shape", buf, sizeof buf); if (!buf[0]) break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); }
@@ -1131,7 +1134,9 @@ int main(int argc, char **argv)
                 char l1[64] = {}, l2[64] = {};
                 api->get_param(iw, "flt_freq", l1, sizeof l1);
                 api->get_param(iw, "wt1_level", l2, sizeof l2);
-                const char *wa = strstr(wj, "\",\""), *la = strstr(lj, "\",\"");
+                std::string wcut(wj), lcut(lj);
+                for (std::string *c : { &wcut, &lcut }) { const size_t q = c->find(",\"smp_shape\":"); if (q != std::string::npos) c->resize(q); }       /* the sample shapes come last and land later, on the worker */
+                const char *wa = strstr(wcut.c_str(), "\",\""), *la = strstr(lcut.c_str(), "\",\"");
                 CHECK(wj[0] == '{' && wa && la && !strcmp(wa, la), "a waiting preset's state holds the same values as the preset once it has landed (%d and %d bytes)", (int) strlen(wj), (int) strlen(lj));
                 CHECK(!strcmp(w1, l1) && !strcmp(w2, l2), "a read of a setting while it waits gives what it will hold (flt_freq %s / %s, wt1_level %s / %s)", w1, l1, w2, l2);
                 api->destroy_instance(iw);

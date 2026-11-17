@@ -170,6 +170,11 @@ body{
 .knob .val{color:#7e8a82; font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:13px}
 .knob:hover .val,.knob.live .val{color:var(--g)}
 .knob:hover .lab{color:var(--txt)}
+.knob .arc{stroke:var(--g)}
+.knob.macoff{opacity:.35}
+.knob.macoff:hover{opacity:.7}
+/* an effect's slot wears its own colour on every control (knobs, switches, menus, tags), so what a control belongs to shows at a glance */
+.fxslot[style*="--fxc"]{--g:var(--fxc); --g2:color-mix(in srgb, var(--fxc) 55%, #0b0c0d); --g3:color-mix(in srgb, var(--fxc) 20%, #0b0c0d)}
 
 /* ---- enum controls ---- */
 .fld{display:flex; flex-direction:column; gap:3px; min-width:0}
@@ -576,7 +581,7 @@ function knob(key, label, into) {
   if (!/^mac\d$/.test(key)) wrap.addEventListener("contextmenu", function (e) { e.preventDefault(); macMenu(key, m.name, e.clientX, e.clientY); });
   var svg = svgNode(wrap, "svg", { width: 40, height: 40, viewBox: "0 0 40 40" });
   svgNode(svg, "path", { d: arcPath(20, 20, KR, A0, A1), stroke: "#1f2326", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
-  var arc = svgNode(svg, "path", { stroke: "#5be584", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
+  var arc = svgNode(svg, "path", { "class": "arc", stroke: "#5be584", "stroke-width": 3, fill: "none", "stroke-linecap": "round" });
   var ptr = svgNode(svg, "line", { stroke: "#d9ffe4", "stroke-width": 2, "stroke-linecap": "round" });
   el("div", "lab", wrap, label || m.name);
   var out = el("div", "val", wrap);
@@ -2971,8 +2976,10 @@ function macRender() {
   for (var i = 0; i < 8; i++) {
     var nm = MAC.names[i] || "", w = MAC.wraps[i];
     if (!w) continue;
-    w.style.display = nm ? "" : "none";
-    if (nm) { any = true; MAC.labs[i].textContent = nm; }
+    w.style.display = "";                              /* all eight, in the Move's order: macro N is always the Nth knob; one that moves nothing is greyed, as on the Move */
+    w.classList.toggle("macoff", !nm);
+    if (nm) any = true;
+    MAC.labs[i].textContent = nm || "Macro " + (i + 1);
   }
   if (MAC.note) MAC.note.style.display = any ? "none" : "";
 }

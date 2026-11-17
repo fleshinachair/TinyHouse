@@ -101,7 +101,6 @@ struct tablor_instance {
     std::shared_ptr<const DemoList> demos { std::make_shared<DemoList>() };
     std::atomic<int> demo_pack { 0 }, demo_part { 0 }, demo_on { 0 };
     std::atomic<int> demo_lights { 0 }, demo_lights_base { 36 };       /* pad lights while the demo plays: 0 Off, 1 Fourths, 2 Linear; the note of the bottom-left pad */
-    uint32_t pad_lit = 0;                                              /* the pads this slot has lit (bit = pad 0..31), audio thread only */
     /* What a restored state said the slot was playing: the pack and the part by NAME (an index shifts when a song is added or removed), and whether it
      * was on. Held until the worker has scanned the demo store, then applied (apply_want_demo). */
     struct WantDemo { std::string pack, part; bool on = false; };
@@ -1061,7 +1060,7 @@ static void tb_publish_selection(tablor_instance *inst)
     {
         auto dl = inst->demoList();
         hand += ",{\"key\":\"demo_on\",\"name\":\"Demo\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"default\":\"Off\"}";
-        hand += ",{\"key\":\"demo_lights\",\"name\":\"Demo Pad Lights\",\"type\":\"enum\",\"options\":[\"Off\",\"Fourths\",\"Linear\"],\"default\":\"Off\"}";
+        hand += ",{\"key\":\"demo_lights\",\"name\":\"Demo Pad Lights\",\"type\":\"enum\",\"options\":[\"Off\",\"Fourths\",\"Linear\"],\"default\":\"Off\",\"viz\":{\"kind\":\"custom:tinyhouse_padlights\",\"group\":\"padlights\",\"role\":\"a\",\"extra_keys\":[\"demo_pads\"]}}";
         hand += ",{\"key\":\"demo_lights_base\",\"name\":\"Demo Lights Base Note\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":36}";
         hand += ",{\"key\":\"demo_pack\",\"name\":\"Demo Pack\",\"type\":\"enum\",\"options\":[";
         if (dl->packs.empty()) hand += "\"None\"";
@@ -1084,7 +1083,9 @@ static void tb_publish_selection(tablor_instance *inst)
          * inside the host's 256-key cache (a key past it makes the host parse this whole list again, ~20 ms, on every read: the Move UI ran at
          * 5-10 fps while the Macros page was open, and a preset scroll hung for over a minute). */
         hand += ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
-                ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}";
+                ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}"
+                /* the Demo page's Pad Lights widget reads this on every redraw */
+                ",{\"key\":\"demo_pads\",\"name\":\"Demo Pads\",\"type\":\"string\",\"access\":\"read\"}";
     }
 
     /* The shape digests are DECLARED here so they reach a browser at all:
@@ -1837,7 +1838,8 @@ static int write_str(char *buf, int buf_len, const char *s)
     buf[n] = 0;
     return n;
 }
-
+
+static uint32_t demo_pad_mask(const tablor_instance *inst);
 static int tb_get_param(void *instance, const char *key, char *buf, int buf_len);
 
 /* The settings a stored blob ("TBLR2;a=1;b=2;") names, parsed once: where each parameter's text starts (null when the blob does not name it), and the macro strings. */
@@ -2080,6 +2082,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         static const char *const names[] = { "Off", "Fourths", "Linear" };
         return write_str(buf, buf_len, names[inst->demo_lights.load() % 3]);
     }
+    if (!strcmp(key, "demo_pads")) {              /* the pads the demo holds lit, as 8 hex digits (bit 0 = bottom-left pad); the Move-side widget paints them */
+        char tmp[16];
+        snprintf(tmp, sizeof tmp, "%08x", (unsigned) demo_pad_mask(inst));
+        return write_str(buf, buf_len, tmp);
+    }
     if (!strcmp(key, "demo_lights_base"))
         return write_str(buf, buf_len, std::to_string(inst->demo_lights_base.load()).c_str());
     if (!strcmp(key, "demo_pack"))
@@ -2208,34 +2215,24 @@ struct FlushToZero {
 #endif
 };
 
-/* Demo pad lights: the pads whose notes the demo holds are lit white, the rest of this slot's pads put out. The wanted set is worked out from the engine's held notes every block and
- * only the differences are sent, at most 8 packets a block (the host's own limit for injected MIDI), so a busy chord catches up over a few blocks and nothing is queued. A
- * note shows on every pad that plays it in the chosen layout. Off (or a demo that stopped) puts out what was lit. */
-static void demo_pad_lights(tablor_instance *inst)
+/* Demo pad lights, the DSP's half. A slot's DSP cannot light a pad: the shadow host leaves host_api->midi_send_internal empty (it is NULL here), so the lights are
+ * painted by the Move-side widget (canvas.js, custom:tinyhouse_padlights), which reads this mask. Bit p (0..31) is pad p, the bottom row first, left to right: set when the
+ * demo is holding a note that the chosen layout puts on that pad. A note shows on every pad that plays it (Fourths: a row is 5 semitones above the one under it). */
+static uint32_t demo_pad_mask(const tablor_instance *inst)
 {
-    if (!g_host || !g_host->midi_send_internal) return;
     const int mode = inst->demo_lights.load(std::memory_order_relaxed);
+    if (!mode) return 0;
     const int base = inst->engine.demoLightsBase();
+    const uint8_t *lit = inst->engine.demoNotesLit();
     uint32_t want = 0;
-    if (mode) {
-        const uint8_t *lit = inst->engine.demoNotesLit();
-        for (int n = 0; n < 128; n++) {
-            if (!lit[n]) continue;
-            const int d = n - base;
-            if (d < 0) continue;
-            if (mode == 2) { if (d < 32) want |= 1u << d; continue; }
-            for (int r = 0; r < 4; r++) { const int c = d - 5 * r; if (c >= 0 && c < 8) want |= 1u << (r * 8 + c); }
-        }
+    for (int n = 0; n < 128; n++) {
+        if (!lit[n]) continue;
+        const int d = n - base;
+        if (d < 0) continue;
+        if (mode == 2) { if (d < 32) want |= 1u << d; continue; }
+        for (int r = 0; r < 4; r++) { const int c = d - 5 * r; if (c >= 0 && c < 8) want |= 1u << (r * 8 + c); }
     }
-    uint32_t diff = want ^ inst->pad_lit;
-    for (int sent = 0; diff && sent < 8; sent++) {
-        const int p = __builtin_ctz(diff);
-        const uint32_t bit = 1u << p;
-        const uint8_t pkt[4] = { 0x09, 0x90, (uint8_t) (68 + p), (uint8_t) ((want & bit) ? 120 : 0) };
-        if (!g_host->midi_send_internal(pkt, 4)) break;
-        inst->pad_lit ^= bit;
-        diff &= ~bit;
-    }
+    return want;
 }
 
 static void tb_render_block(void *instance, int16_t *out_lr, int frames)
@@ -2255,7 +2252,6 @@ static void tb_render_block(void *instance, int16_t *out_lr, int frames)
     else
         inst->engine.setHostBeat(-1.0, false);
     inst->engine.renderBlock(out_lr, frames);
-    if (inst->demo_lights.load(std::memory_order_relaxed) || inst->pad_lit) demo_pad_lights(inst);
 }
 
 /* ------------------------------------------------------------------ */

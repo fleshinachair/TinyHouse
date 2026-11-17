@@ -30,7 +30,7 @@ function mockCtx() {
 }
 const lit = (c) => c.px.reduce((a, v) => a + v, 0);
 const kinds = globalThis.canvas_overlay.widgetKinds;
-check(Object.keys(kinds).length === 14, "fourteen widget kinds (8 macros, 3 positions, waves, fx chain, grain)");
+check(Object.keys(kinds).length === 15, "fifteen widget kinds (8 macros, 3 positions, waves, fx chain, grain, pad lights)");
 for (let i = 1; i <= 8; i++) check(!!kinds["custom:tinyhouse_mac" + i] && kinds["custom:tinyhouse_mac" + i].nominal.w === 32, "kind mac" + i);
 const run = (i, values) => { const c = mockCtx(); kinds["custom:tinyhouse_mac" + i].draw(c, { values }); return c; };
 
@@ -193,5 +193,55 @@ const saw = waveDigest(24, 64, (p, x) => 2 * x - 1);
     kd("grain").draw(ctxOf(128, 15), undefined);
 }
 
+// ---- the Demo page's pad lights: what it sends, what it puts back, and that a page that is left gives the pads back
+{
+    const sent = [], snap = {};
+    for (let n = 68; n < 100; n++) snap[n] = 5;                                  // the Move's own colour on every pad
+    globalThis.move_midi_internal_send = (pkt) => { sent.push(pkt.slice()); return true; };
+    globalThis.shadow_get_pad_led_snapshot = () => snap;
+    let dsp = "00000000";
+    globalThis.host_module_get_param = (k) => (k === "demo_pads" ? dsp : null);
+    let pad_block_calls = 0;
+    globalThis.host_pad_block = () => { pad_block_calls++; };
+    const draw = (values) => { const c = mockCtx(); kinds["custom:tinyhouse_padlights"].draw(c, { values }); return c; };
+    check(kinds["custom:tinyhouse_padlights"].nominal.w === 32, "pad lights kind is one cell");
+    draw({ demo_lights: "Off" });
+    check(sent.length === 0, "lights off: nothing is sent to the pads");
+    dsp = "00000009";                                                             // pads 0 and 3
+    const c1 = draw({ demo_lights: "Fourths" });
+    const on = [...new Set(sent.filter((p) => p[3] === 120).map((p) => p[2]))].sort((a, b) => a - b);
+    check(on.length === 2 && on[0] === 68 && on[1] === 71, "pads 0 and 3 are lit white as notes 68 and 71 (" + on + ")");
+    check(sent.every((p) => p[0] === 0x09 && p[1] === 0x90), "packets are note-on, cable 0");
+    check(c1.outOfBounds === 0 && lit(c1) > 0, "the picture stays in the cell");
+    const n1 = sent.length;
+    draw({ demo_lights: "Fourths" });
+    check(sent.length === n1 + 1, "a steady frame sends only the one heal pad (" + (sent.length - n1) + ")");
+    dsp = "00000001";                                                             // pad 3 lets go
+    sent.length = 0;
+    draw({ demo_lights: "Fourths" });
+    check(sent.some((p) => p[2] === 71 && p[3] === 5), "a pad the demo lets go goes back to the Move's colour (5)");
+    snap[68] = 9;                                                                // the Move repaints pad 0 itself
+    sent.length = 0;
+    draw({ demo_lights: "Fourths" });
+    check(sent.some((p) => p[2] === 68 && p[3] === 120), "a pad the Move repainted is lit again at once");
+    sent.length = 0;
+    draw({ demo_lights: "Off" });
+    check(sent.some((p) => p[2] === 68 && p[3] === 9) && !sent.some((p) => p[3] === 120), "lights turned off: the lit pad goes back to the Move's colour");
+    // fall back to the extra key when the host has no direct read
+    delete globalThis.host_module_get_param;
+    sent.length = 0;
+    draw({ demo_lights: "Linear", demo_pads: "00000002" });
+    check(sent.some((p) => p[2] === 69 && p[3] === 120), "without a direct read the extra key is used");
+    // a page that is left: the host's own pad_block call gives the pads back after a moment
+    globalThis.TINYHOUSE_CANVAS_FOR_TEST.pads.lastDraw = Date.now() - 2000;
+    sent.length = 0;
+    globalThis.host_pad_block(0);
+    check(sent.some((p) => p[2] === 69 && p[3] === 5), "page left: the lit pad is handed back");
+    delete globalThis.move_midi_internal_send;
+    const c2 = draw({ demo_lights: "Fourths" });
+    check(c2.outOfBounds === 0, "no LED API: draws without throwing");
+}
+
 console.log(failures ? `canvas_test: ${failures} of ${checks} checks FAILED` : `canvas_test: ${checks} checks passed`);
+
 process.exit(failures ? 1 : 0);

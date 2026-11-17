@@ -173,6 +173,19 @@ struct tablor_instance {
     std::shared_ptr<const std::string> smp_shape[3];
 
     float *params() { return engine.pots; }
+
+    /* The parameters the host has written lately (the Move's clip automation plays a knob by writing it; no write is announced to the remote UI, which only
+     * hears a hardware knob turn). A ring of the last kLive changed parameter indices, newest last, served as `live_vals`. */
+    enum { kLive = 24 };
+    short live_ring[kLive] = {};
+    unsigned live_n = 0;                                                         /* how many are held (at most kLive), oldest first */
+    void liveNote(int idx) {
+        unsigned i = 0;
+        while (i < live_n && live_ring[i] != idx) i++;
+        if (i == live_n) { if (live_n == (unsigned) kLive) i = 0; else live_n++; }   /* new: take the next place, or the oldest's */
+        for (; i + 1 < live_n; i++) live_ring[i] = live_ring[i + 1];             /* close the gap, then it is the newest */
+        live_ring[live_n - 1] = (short) idx;
+    }
 };
 
 /* User presets are plain files the user can copy, share and manage:
@@ -1120,7 +1133,7 @@ static void tb_publish_selection(tablor_instance *inst)
             * and so did a sample's shape. An undeclared key named as an extra key IS read by the manager (on subscribe, on a preset change and every 500 ms while the panel is open, sending only
             * what moved). `data_feed` is the declared key that carries that list; it sits on no page, so the Move's own screen never reads the keys (an undeclared key read by the host
             * re-parses chain_params). */
-           ",{\"key\":\"data_feed\",\"name\":\"Data Feed\",\"type\":\"string\",\"access\":\"read\",\"viz\":{\"kind\":\"custom:tinyhouse_data\",\"group\":\"data\",\"role\":\"a\",\"extra_keys\":[\"preset_list\",\"demo_list\",\"wt_paths\"]}}"
+           ",{\"key\":\"data_feed\",\"name\":\"Data Feed\",\"type\":\"string\",\"access\":\"read\",\"viz\":{\"kind\":\"custom:tinyhouse_data\",\"group\":\"data\",\"role\":\"a\",\"extra_keys\":[\"preset_list\",\"demo_list\",\"wt_paths\",\"live_vals\"]}}"
            ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}";
     hand += ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
     out.insert(tb_chain_params_prio_len, hand);      /* right after the page keys: inside the host's 256-key cache */
@@ -1816,7 +1829,9 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         v = strtof(val, nullptr);
     }
 
-    inst->params()[idx] = clamp_param(p, v);
+    const float nv = clamp_param(p, v);
+    if (inst->params()[idx] != nv) inst->liveNote(idx);
+    inst->params()[idx] = nv;
     if (idx >= TB_P_MAC1 && idx <= TB_P_MAC8)
         inst->engine.macroMoved(idx - TB_P_MAC1, inst->params()[idx]);       /* the macro's parameters move by its change */
 }
@@ -2072,6 +2087,17 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
     /* The web panel's browser: every bank with its preset names (a string built at scan time), and "bank,index" for the sound
      * the page shows. */
+    if (!strcmp(key, "live_vals")) {              /* "key=value;key=value": the parameters the host wrote lately, with their values now (see liveNote) */
+        std::string s;
+        for (unsigned i = 0; i < inst->live_n; i++) {
+            const int idx = inst->live_ring[i];
+            char num[48];
+            const ParamView pv = param_view(inst, idx, nullptr, num);
+            if (!s.empty()) s += ';';
+            s += tb_params[idx].key; s += '='; s.append(pv.s, pv.n);
+        }
+        return write_str(buf, buf_len, s.c_str());
+    }
     if (!strcmp(key, "data_feed"))                /* declared only to carry the extra keys above; nothing to read */
         return write_str(buf, buf_len, "1");
     if (!strcmp(key, "preset_list"))

@@ -436,6 +436,7 @@ function clampTo(m, v) {
   if (m.type === "enum") return Math.max(0, Math.min(m.options.length - 1, Math.round(v)));
   return v;
 }
+var TOUCH = {};                                       /* when the user last moved each control here: a late echo of an older value must not pull it back */
 function setVal(key, v, push) {
   var m = META[key];
   v = clampTo(m, v);
@@ -444,7 +445,7 @@ function setVal(key, v, push) {
   var s = SUBS[key];
   if (s) for (var i = 0; i < s.length; i++) s[i](v);
   redrawSoon();
-  if (push) send(key, v);
+  if (push) { TOUCH[key] = Date.now(); send(key, v); }
 }
 function on(key, fn) {
   (SUBS[key] = SUBS[key] || []).push(fn);
@@ -2989,15 +2990,10 @@ function macSend(cmd) {
   setTimeout(macReload, 160);
 }
 function macDefaultTravel(key, n) {
-  var m = META[key], cur = Number(val(key)), span = (m.max - m.min) || 1;
-  if (!isFinite(cur)) cur = m.min;
-  var mv = Number(val("mac" + n)); if (!isFinite(mv)) mv = 0;
-  /* The macro going UP raises the control, so a macro turned up makes more of it. The control moves by its change, so it can only go where it has room: a control at its top
-   * with the macro low (or at its bottom with the macro high) can only follow the macro the other way round, and then it runs backwards. Otherwise the travel is the whole range, so the
-   * macro sweeps the control from bottom to top however far each sits to start with. */
-  var ctrlBias = (m.max - cur) - (cur - m.min), macBias = (127 - mv) - mv;
-  var sign = ctrlBias * macBias < 0 ? -1 : 1;
-  return Math.round(sign * span);
+  var m = META[key], span = (m.max - m.min) || 1;
+  /* The macro going UP always raises the control (the whole range over the macro's whole travel). The control moves by the macro's change and stops at its ends, so a control that
+   * starts out of step with the macro (at its bottom with the macro high) joins it the first time the macro reaches an end. A negative travel is set by hand on the Macros tab. */
+  return span;
 }
 function macMenuClose() { var o = document.getElementById("macmenu"); if (o) o.remove(); }
 function macMenu(key, label, x, y) {
@@ -3118,7 +3114,7 @@ function buildMacros(page) {
   MAC.note = el("div", "demo-note", p.body, "This sound has no macros yet. Right-click any knob (on any tab) and choose a macro to put it there: the macro then moves that control, and the Move shows it as one of its eight macro knobs. Imported Serum presets bring their own.");
   macRender();
   var ap = panel("Assignments", g);
-  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. A new assignment lets the macro sweep the control across its whole range, up as the macro goes up (it runs the other way only if the control sits at its top with the macro low, or the reverse); here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
+  el("div", "demo-note", ap.body, "Right-click a knob to add it to a macro or take it off. A new assignment lets the macro sweep the control across its whole range, up as the macro goes up; here you set how far each control travels as the macro goes from 0 to 127 (a negative number runs it the other way), name the macro, or clear it. Knobs that sit on a macro show a small M tag.");
   MAC.list = el("div", null, ap.body);
   MAC.empty = el("div", "demo-note", ap.body, "Nothing is assigned yet.");
   macList();
@@ -3185,6 +3181,15 @@ var NOT_CONTROLS = /^(wt_pack|wt\d_select|preset|bank|rescan|is_loading|wt_paths
 
 /* keys the host streams that are not controls */
 var EXTRA = {
+  /* The parameters the host wrote lately ("key=value;key=value"): the Move's clip automation moves a knob by writing it, which the manager never announces. Read on its 500 ms beat. */
+  live_vals: function (v) {
+    String(v || "").split(";").forEach(function (kv) {
+      var i = kv.indexOf("="); if (i < 1) return;
+      var k = kv.substring(0, i);
+      if (Date.now() - (TOUCH[k] || 0) < 1500) return;
+      if (META[k] && META[k].type !== "filepath") incoming(k, kv.substring(i + 1));
+    });
+  },
   wt_paths: function (v) { try { var a = JSON.parse(v); if (a && a.length) PATHS = a; } catch (e) {} },
   wt1_shape: function (v) { ingestShape(1, v); },
   wt2_shape: function (v) { ingestShape(2, v); },

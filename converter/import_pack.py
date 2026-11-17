@@ -283,6 +283,7 @@ def main():
     ap.add_argument("--max-band-rms", type=float, default=14.0, help="drop a preset whose octave-band levels are further than this (rms dB) from Serum's")
     ap.add_argument("--no-bode-out", action="store_true", help="skip a preset whose Bode is audible in Serum (the default imports it without the Bode and lists it in the report)")
     ap.add_argument("--no-ab-ignore", action="store_true", help="do not test whether the effects the converter leaves out are inaudible in Serum itself; skip those presets")
+    ap.add_argument("--compare", type=Path, default=None, help="a folder of installed preset .json files: each one is also scored against Serum's render with the same metric, and the line says which is closer (nothing is written for it)")
     ap.add_argument("--no-level", action="store_true", help="skip the Serum render and the loudness fit (the converter's own volume)")
     a = ap.parse_args()
 
@@ -394,6 +395,10 @@ def main():
                 skipped.append((name, [f"Serum made no sound for the voice reference: {str(e)[:50]}"]))
                 continue
             gap, berr = quality(state, it, a.band_floor)
+            if a.compare is not None and (a.compare / f"{name}.json").exists():
+                inst = json.loads((a.compare / f"{name}.json").read_text(encoding="utf-8"))["state"]
+                g2, b2 = quality(inst, it, a.band_floor)
+                print(f"  COMPARE {name}: fresh level {gap:+.1f} dB bands {berr:.1f} | installed level {g2:+.1f} dB bands {b2:.1f}", flush=True)
             # A preset whose Serum render goes over full scale (a float peak above 1.0: it would clip on any output) cannot be matched in loudness without
             # the engine's output clipper working on it, so the limiter caps hold it under Serum's level on purpose. That shortfall is not a conversion
             # error: the level gate judges what the fit reached before the caps, and the kept line says how far under it sits. A quieter-than-Serum result

@@ -53,7 +53,7 @@ def main():
         return rms_db([serum[0].render(tree, [NOTE], DUR, HOLD)])
 
     def render_engine(tree):
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(tree, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(tree, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
         st = PF.setk(d2m.blob(m), "fx_on", 0)
         return rms_db([H.run_cli(st, [NOTE], DUR, HOLD) for _ in range(2)]), m["params"]
 
@@ -77,7 +77,7 @@ def main():
         hdr, tree = decode_preset_file(p)
         t = H.strip_fx(tree)
         s = render_serum(t)
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(t, hdr)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(t, hdr)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
         e = rms_db([H.run_cli(PF.setk(d2m.blob(m), "fx_on", 0), [NOTE], DUR, HOLD) for _ in range(2)])
         vol = tree["Oscillator0"]["plainParams"]["kParamVolume"]
         out[name] = {"vol": vol, "serum_db": s, "engine_db": e, "pot": m["params"].get("smp_level"), "volume": m["params"].get("volume"), "multisample": True}

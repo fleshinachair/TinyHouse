@@ -57,7 +57,7 @@ def render(it, m, scale):
 
 
 def fit_item(it):
-    m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
+    m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
     P = m["params"]
     stacked = [i for i in (1, 2, 3) if P[f"wt{i}_uni"] > 1 and P[f"wt{i}_level"] > 0 and P[f"wt{i}_spread"] > 0]
     if not stacked:

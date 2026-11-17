@@ -44,7 +44,7 @@ def main():
         t["Oscillator0"]["plainParams"] = {"kParamType": "kOsc_Sample", "kParamVolume": 0.75, **pp}
         t["Oscillator0"]["SampleOsc0"] = {"samplePathRelative": REL, "baseNote": NOTE, "sampleRate": sr, "numFrames": n, "numChannels": 1, "plainParams": "default"}
         s = serum.render(t, [NOTE], DUR, HOLD).mean(axis=0)
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(t, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(t, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
         e = H.run_cli(PF.setk(d2m.blob(m), "fx_on", 0), [NOTE], DUR, HOLD)
         e = e.mean(axis=0) if e.ndim == 2 else e
         k = int(1.0 * SR); a, b = s[:int(4.0 * SR)], e[:int(4.0 * SR)]
@@ -70,7 +70,7 @@ def main():
         t["Oscillator0"]["SampleOsc0"] = {"embedded_audio": {"data": [xs.tolist()], "sampleRate": 44100, "table_name": "xfnoise"}, "baseNote": NOTE, "sampleRate": 44100,
                                           "numFrames": N, "numChannels": 1, "plainParams": "default"}
         s = serum.render(t, [NOTE], DUR, HOLD).mean(axis=0)
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(t, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(t, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
         e = H.run_cli(PF.setk(d2m.blob(m), "fx_on", 0), [NOTE], DUR, HOLD)
         e = e.mean(axis=0) if e.ndim == 2 else e
         xf = pp.get("kParamLoopCrossfade", 0.0) / 100.0

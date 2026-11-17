@@ -52,6 +52,8 @@ three oscillators with 3D wavetable displays, and the **Sample** tab has the thr
 filter curve and envelopes, pick wavetables from the list, set the effects, and save the result as a preset. The import report's loudness, reverb and width come
 from general rules, so set **Volume** and the effects to taste.
 
+**Distorted or clipping?** A few presets come out louder than the Move's output can carry, and they crackle or distort on loud passages. Turn **Volume** (the master gain) down until it is clean: it is on the Tone and Voice pages on the Move, and is **Master gain** in the Output panel of the Globals tab on the remote page. Drive adds saturation after the volume, so if it still sounds crunchy, check that too. The slot keeps the new volume with your set, and you can save it as a preset from the remote page.
+
 ![The Sample tab on a granular oscillator: the sample's shape with its start point and loop, a lane of grains sized by the density, length and window, and every grain control below](docs/img/remote-sample.png)
 
 **Playing live is on the Move**, with no menus:
@@ -133,6 +135,18 @@ There are also **two FX buses**, each a full copy of the rack, with their own os
 
 A preset using something in the second list still imports, with that part left out, and the report says which.
 
+### Known limits
+
+Read these before you rely on it for a gig. TinyHouse is an early release (0.9).
+
+- **It sounds similar to the Serum 2 original, not identical.** Levels, filters, effects and the stereo image are matched against Serum, but some presets land closer than others. Reverb tails run 1 to 3 dB quieter than Serum's and the wet signal builds up a little faster.
+- **Not every preset comes across.** Of Serum 2's 626 factory presets, 363 import well enough to install. The rest use something listed under "Not carried yet" (the formant filters are the biggest group) and are skipped, or import with that part left out. The import report says which.
+- **Synced LFOs do not follow the Move's tempo.** They run at their rate at 120 BPM.
+- **Heavy presets use a lot of CPU.** A dense granular preset is the most demanding thing it plays. If a set with several heavy slots crackles, use fewer of them or lighter presets.
+- **The Move's wavetable list stops at 128 tables.** The WT1 to WT3 Table knobs list the first 128 tables of the library, or of the pack you pick with the WT Pack knob. A pack with more than 128 tables shows only its first 128 there.
+- **Macros: eight per slot, and the mapping is yours to keep tidy.** Assigning a macro never changes the sound, but if you move a control by hand afterwards the knob and the control drift apart until you press **Match knob**.
+- **You need your own Serum 2 files.** Nothing from Xfer or the preset authors is in this repository, and Serum 1 presets are not supported.
+
 ## More accurate conversion with the Python scripts
 
 The Python importer does the same conversion but can also **play each preset through your own installed copy of Serum 2** and compare. That lets it:
@@ -169,6 +183,10 @@ bash schwung-tablor/scripts/zig-build.sh arm           # builds schwung-tablor/b
 python schwung-tablor/tools/build_import_bundle.py     # the converter the remote UI's Import runs
 bash schwung-tablor/scripts/deploy.sh ableton@move.local
 ```
+
+**Without zig:** download `tinyhouse-module.tar.gz` from the [Releases](https://github.com/fleshinachair/TinyHouse/releases) page, unpack it on your computer, and copy the
+`tinyhouse` folder to `/data/UserData/schwung/modules/sound_generators/` on the Move with `scp -r`, as the `ableton` user. That is for a first install. To upgrade a module
+that is already loaded, upload `dsp.so` under another name and rename it into place (or use `deploy.sh`): never copy over a `dsp.so` the Move is running.
 
 Then reload the slot (or restart the Shadow UI) so the new module loads. `deploy.sh` replaces the module safely while the Move is running, and first checks that
 the Move's `/` and `/data` are still root-owned (`scripts/move_check_owner.sh`).
@@ -208,7 +226,7 @@ The converter, the importer that matches loudness, reverb and width against Seru
 ## Licences and what is not here
 
 The engine is a fork of [Tablor](https://github.com/athousanddetails/schwung-tablor), itself a port of FigBug's [Wavetable](https://github.com/FigBug/Wavetable),
-under BSD-3-Clause (see `schwung-tablor/LICENSE`).
+under BSD-3-Clause (see `schwung-tablor/LICENSE`). The rest of TinyHouse (the converter, the remote page, the scripts and the docs) is also BSD-3-Clause: see [LICENSE](LICENSE).
 
 This repository contains **no Serum presets, packs, wavetables, samples or renders**, and no presets converted from them: those belong to Xfer and the preset
 authors. You convert your own. Check a pack's licence before sharing presets you converted from it.

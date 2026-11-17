@@ -28,7 +28,7 @@ def main():
             continue
         ph = d2m.physical(t, h)
         notes = H.sounding_notes(t, n)[:1]
-        m = d2m.map_to_tablor(d2m.to_vital(ph) | {"preset_name": n}, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
+        m = d2m.map_to_tablor(d2m.wrap_preset(ph) | {"preset_name": n}, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
         base = d2m.blob(m)
         slots = {}
         for k in ("wt1", "wt2", "wt3"):

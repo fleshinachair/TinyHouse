@@ -64,7 +64,7 @@ def main():
     ref = S.render(t, [60], 6.0, 0.4)
     td = Path(tempfile.mkdtemp()); (td / "tables").mkdir(); (td / "Wavetables").mkdir()
     SE.BROWSER_DIR = td
-    v = d2m.to_vital(d2m.physical(t, header)); v["preset_name"] = "probe_conv"; v["serum2move"]["name"] = "probe_conv"
+    v = d2m.wrap_preset(d2m.physical(t, header)); v["preset_name"] = "probe_conv"; v["serum2move"]["name"] = "probe_conv"
     m = d2m.map_to_tablor(json.loads(json.dumps(v)), {}, H.SERUM_TABLES, H.WT_OUT, "Imports")
     print("conv params:", {k: m["params"].get(k) for k in ("conv_set", "conv_mix", "rev_mix")}, [n for n in m.get("notes", []) if "onvol" in n], flush=True)
     # the engine: the same noise (its own noise source) through the converter's mapping; the rest of the chain at the converter's defaults

@@ -66,7 +66,7 @@ def low_err(ref, tab):
 
 
 def fit_item(it, prev=None):
-    m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
+    m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
     P = m["params"]
     if P["flt_env"] == 64 and P["flt_freq"] >= 120:      # filter wide open and unmodulated: nothing to fit
         return None

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serum 2 pack -> .vital JSON -> Tablor presets for Ableton Move (Schwung).
+"""Serum 2 pack -> Tablor presets for Ableton Move (Schwung).
 
     pip install serum2-preset-loader
     python converter/deephouse2move.py "Loopsy - DEEP HOUSE.SerumPack" -o out \
@@ -8,18 +8,15 @@
 Stages
   1. extract  unzip the .SerumPack (or read a folder of .SerumPreset files),
               decode each preset, copy every packaged wavetable (.wav).
-  2. vital    write out/vital/<name>.vital. Stock key names/units are Vital's as
-              best known, but the files were NOT load-tested in Vital. The
-              authoritative values live in the "serum2move" block (Hz, seconds,
-              semitones, percent), which is what stage 3 reads.
-  3. tablor   read the .vital files, map to Tablor's 71 controls, write
+  2. wrap     read each preset into the physical units stage 3 works in (Hz, seconds,
+              semitones, percent): the "serum2move" block of `wrap_preset`.
+  3. tablor   map each preset to Tablor's 71 controls, write
               out/move/data/UserData/schwung/presets/tinyhouse/<name>.json and the
               wavetables to out/move/data/UserData/UserLibrary/Wavetables/.
               Copy out/move/data/UserData/ onto the Move. A fidelity report
               (report.md / report.json) lists everything Tablor cannot do.
 
-"serum2vital" is not a published package (PyPI 404); decoding uses the real
-`serum2-preset-loader`, whose measured unit curves are reused below.
+Decoding uses the real `serum2-preset-loader`, whose measured unit curves are reused below.
 
 These presets target the patched Tablor 1.5.0-dh (branch deephouse-engine of
 schwung-tablor): three oscillators, unison to 16, hard sync, tune to +/-48, filter
@@ -485,36 +482,15 @@ def physical(tree: dict, header: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: .vital export (informational; see module docstring)
+# Stage 2: the preset in physical units
 # ---------------------------------------------------------------------------
-def to_vital(ph: dict) -> dict:
-    s: dict = {}
-    for o in ph["oscs"]:
-        n = o["id"] + 1
-        s[f"osc_{n}_on"] = float(o["enabled"] and o["kind"] == "kOsc_WT")
-        s[f"osc_{n}_level"] = o["level"] ** 2
-        s[f"osc_{n}_transpose"] = o["octave"] * 12 + o["semitone"]
-        s[f"osc_{n}_tune"] = o["fine_cents"] / 100.0
-        s[f"osc_{n}_unison_voices"] = float(o["unison"])
-        s[f"osc_{n}_unison_detune"] = o["detune"]
-        s[f"osc_{n}_wave_frame"] = _clamp(o["table_pos"] - 1, 0, 255)
-    f = ph["filter"]
-    s["filter_1_on"] = float(f["enabled"])
-    s["filter_1_cutoff"] = 69 + 12 * math.log2(f["cutoff_hz"] / 440)
-    s["filter_1_resonance"] = f["reso_pct"] / 100.0
-    for n, e in enumerate(ph["envs"][:3], 1):
-        s[f"env_{n}_attack"] = e["attack"] ** 0.25
-        s[f"env_{n}_decay"] = e["decay"] ** 0.25
-        s[f"env_{n}_sustain"] = e["sustain"] ** 2
-        s[f"env_{n}_release"] = e["release"] ** 0.25
-    return {"author": "converted", "preset_name": ph["name"],
-            "preset_style": (ph["name"].split(" - ")[0] if " - " in ph["name"] else ""),
-            "comments": "Converted from Serum 2 by deephouse2move.py (not load-tested in Vital)",
-            "settings": s, "serum2move": ph}
+def wrap_preset(ph: dict) -> dict:
+    """What stage 3 and the calibration scripts take: the physical preset under "serum2move", with its name."""
+    return {"preset_name": ph["name"], "serum2move": ph}
 
 
 # ---------------------------------------------------------------------------
-# Stage 3: Vital JSON -> Tablor
+# Stage 3: physical preset -> Tablor
 # ---------------------------------------------------------------------------
 CARRY_BUSES = True                        # the sources' sends to the two FX buses and the buses' racks (engine: Voice sends, Engine::fxBus); off: the old rack-0-only conversion
 def serum_pan_balance(pan_pct):
@@ -1499,10 +1475,10 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
     return left
 
 
-def map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir, _macros: bool = True) -> dict:
-    m = _map_to_tablor(vital, pack, serum_tables, wt_out, subdir)
+def map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir, _macros: bool = True) -> dict:
+    m = _map_to_tablor(wrapped, pack, serum_tables, wt_out, subdir)
     if _macros and MAP_MACROS:
-        attach_macros(m, vital, (pack, serum_tables, wt_out, subdir))
+        attach_macros(m, wrapped, (pack, serum_tables, wt_out, subdir))
     return m
 
 
@@ -1556,9 +1532,9 @@ def macro_travel(P0: dict, P1: dict, paths0: dict, paths1: dict, span: float):
     return routes, store, None
 
 
-def attach_macros(m: dict, vital: dict, args: tuple) -> None:
+def attach_macros(m: dict, wrapped: dict, args: tuple) -> None:
     """Map each routed macro again at the far end of its range, add the routes and the macro positions to `m` (m["macro"]) and its params (mac1..mac8)."""
-    ph = vital["serum2move"]
+    ph = wrapped["serum2move"]
     stored = list(ph["macros"][:8])
     used = sorted({s - 25 for md in ph["mods"] for s in (md["source"], md.get("aux") or 0) if isinstance(s, int) and 25 <= s <= 32})
     names = list(ph.get("macro_names") or [""] * 8)
@@ -1567,7 +1543,7 @@ def attach_macros(m: dict, vital: dict, args: tuple) -> None:
     routes, moved_names, notes = [], [""] * 8, []
     for k in used:
         far = 100.0 if stored[k] < 50.0 else 0.0
-        v2 = dict(vital); p2 = dict(ph); p2["macros"] = list(ph["macros"]); p2["macros"][k] = far; v2["serum2move"] = p2
+        v2 = dict(wrapped); p2 = dict(ph); p2["macros"] = list(ph["macros"]); p2["macros"][k] = far; v2["serum2move"] = p2
         m1 = map_to_tablor(v2, *args, _macros=False)
         label = names[k] or f"Macro {k + 1}"
         found, store, why = macro_travel(m["params"], m1["params"], m["paths"], m1["paths"], (far - stored[k]) / 100.0)
@@ -1587,8 +1563,8 @@ def attach_macros(m: dict, vital: dict, args: tuple) -> None:
         m["notes"].append("macros: " + "; ".join(f"{n} moves {', '.join(key for mk, key, _ in routes if mk == i + 1)}" for i, n in enumerate(moved_names) if n))
 
 
-def _map_to_tablor(vital: dict, pack, serum_tables, wt_out, subdir) -> dict:
-    ph = vital["serum2move"]
+def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
+    ph = wrapped["serum2move"]
     P = dict(TABLOR_DEFAULTS)
     crit: list[str] = []      # audibly changes the sound -> tier C
     appr: list[str] = []      # close but not exact        -> tier B
@@ -2519,10 +2495,9 @@ def main() -> None:
     a = ap.parse_args()
 
     out: Path = a.out
-    vital_dir = out / "vital"
     wt_out = out / "move/data/UserData/UserLibrary/Wavetables"
     pre_out = out / "move/data" / MOVE_PRESET_DIR / a.bank
-    for d in (vital_dir, wt_out, pre_out):
+    for d in (wt_out, pre_out):
         d.mkdir(parents=True, exist_ok=True)
 
     presets, tables = extract(a.src, out)
@@ -2536,9 +2511,10 @@ def main() -> None:
 
     # Stage 2
     used: set[str] = set()
+    wrapped_presets = []
     for p in presets:
         header, tree = decode_preset_file(p)
-        v = to_vital(physical(tree, header))
+        v = wrap_preset(physical(tree, header))
         # The file name is unique and is what the calibration files (FX fingerprints, fits) are keyed
         # by. Headers can repeat: "Pad - Nu Aspect 2.SerumPreset" is headed "Pad - Nu Aspect", and
         # naming by header swapped that pair, so each took the other's fingerprint and fit.
@@ -2549,12 +2525,11 @@ def main() -> None:
         used.add(name.lower())
         v["preset_name"] = name
         v["serum2move"]["name"] = name
-        (vital_dir / f"{name}.vital").write_text(json.dumps(v, indent=1), encoding="utf-8")
+        wrapped_presets.append(v)
 
-    # Stage 3: reads the .vital files back from disk
+    # Stage 3
     results, skipped = [], []
-    for vf in sorted(vital_dir.glob("*.vital")):
-        v = json.loads(vf.read_text(encoding="utf-8"))
+    for v in sorted(wrapped_presets, key=lambda w: w["preset_name"]):
         m = map_to_tablor(v, tables, a.serum_tables or default_serum_tables(), wt_out, a.wt_subdir)
         trim_for_headroom(m, out / "move")
         m["notes"] += apply_level_fit(m["name"], m["params"])

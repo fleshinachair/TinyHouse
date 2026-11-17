@@ -36,7 +36,7 @@ names = NAMES or sorted(p.stem for p in H.PRESET_DIR.glob("*.SerumPreset"))[:N]
 tot_err, tot_base, cnt = 0.0, 0.0, 0
 for n in names:
     hd, tree = H.load_preset(n)
-    v = d2m.to_vital(d2m.physical(tree, hd))
+    v = d2m.wrap_preset(d2m.physical(tree, hd))
     m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
     mc = m["macro"]
     notes = H.sounding_notes(tree, n)

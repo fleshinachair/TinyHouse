@@ -12,7 +12,7 @@ the run instead of being scored. Delete that folder if the presets or Serum chan
 
 Every constant is fitted on its own isolated probe: a minimal Serum patch with one
 thing changed, rendered by Serum 2 through DawDreamer and by the Tablor engine through
-the real converter (deephouse2move.physical -> to_vital -> map_to_tablor). Fitting on
+the real converter (deephouse2move.physical -> wrap_preset -> map_to_tablor). Fitting on
 whole presets instead would just learn those presets.
 
 Filter variants are then chosen on an acceptance set, the canonical patches plus held-out
@@ -125,7 +125,7 @@ def tablor_render(tree, notes, dur, hold, vel=100, header=None):
     """Through the REAL converter, so a fitted constant is a constant that ships."""
     global _seed
     header = header or {"presetName": "probe", "tags": []}
-    m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(tree, header)), {}, SERUM_TABLES, WT_OUT, "Deep House")
+    m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(tree, header)), {}, SERUM_TABLES, WT_OUT, "Deep House")
     return run_cli(d2m.blob(m), notes, dur, hold, vel), m
 
 
@@ -930,7 +930,7 @@ def stage_validate(a):
     load_cal("cal_final.json")
     def shipped(tree, notes, dur, hold, vel=100, header=None):
         header = header or {"presetName": "probe", "tags": []}
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(tree, header)), {}, SERUM_TABLES, WT_OUT, "Deep House")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(tree, header)), {}, SERUM_TABLES, WT_OUT, "Deep House")
         d2m.trim_for_headroom(m, MOVE_ROOT)
         return run_cli(d2m.blob(m), notes, dur, hold, vel), m
     globals()["tablor_render"] = shipped
@@ -985,7 +985,7 @@ def stage_fx(a):
             continue
         notes = sounding_notes(tree, name)
         refs = reference(serum, name + "_fx", tree, notes, 2, dur, hold)
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(tree, header)), {}, SERUM_TABLES, WT_OUT, "Deep House")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(tree, header)), {}, SERUM_TABLES, WT_OUT, "Deep House")
         d2m.trim_for_headroom(m, MOVE_ROOT)
         dry = copy.deepcopy(m)
         dry["params"].update(fxmap.fx_defaults())

@@ -26,6 +26,7 @@ browser, Osc / Sample / Macros / FX tabs, macros you assign yourself); the Move'
 | 6 | **Reverb build-up**: Serum's wet holds its peak 50 to 100 ms longer; tails are 1 to 3 dB under | a build-up stage in `processReverb`; `calibration/dev/reverb_engine_only.py` measures it without a Serum render |
 | 7 | **Performance**: a granular preset in slot 2 was the heaviest on the Move (about 1.3 ms of the 2.67 ms block) | name the preset, then an on-device profile (see the overnight notes in the reports) |
 | 8 | **Macro min / max per control** (as Ableton racks): the macro would set the control to a fixed range instead of moving it by the knob's change | state format change, a min / max editor on the Macros tab, and a rule for a control moved by hand. Gives exact part-way ranges and inversion; today's Match knob button goes away |
+| 9 | **Wavetable lists past 128 on the Move**: the host caps an enum at 128 options, so the WT1 to WT3 Table knobs show only the first 128 tables of the library or pack (the development Move has 346 tables, and one pack can hold more than 128) | split big packs into pages or sub-packs (for example by letter), or a second knob to step through pages; the remote page's own list is separate |
 
 ## Still open from the Deep House pack, cause not found (not rechecked since 2026-11-04)
 
@@ -36,8 +37,5 @@ browser, Osc / Sample / Macros / FX tabs, macros you assign yourself); the Move'
 
 ## Housekeeping
 
-- Push the local commits (12 ahead of origin/main).
-- Remove the `.vital` intermediate (`to_vital`, `out/vital`) from `converter/deephouse2move.py`, `import_pack.py`, `import_web.py` and `refresh_sample_sets.py`: the converter no longer uses Vital's values.
-- Delete the A/B test bank `Deep House UI` on the Move (its presets and the two `Deep House UI` support folders).
-- Before making the repo public: a proper fork / upstream remote for the Tablor code, and keep Serum content out (already ignored).
+- Before making the repo public: a proper fork / upstream remote for the Tablor code. History checked on 2026-11-17: 222 commits by one author, no Serum pack, preset, wavetable, sample or render ever committed (only screenshots), no keys or tokens; the Serum content stays out through `.gitignore`.
 - `reports/` are dated snapshots; `FX_COVERAGE.md` and `MISSING_FEATURES.md` predate most of the effects work.

@@ -50,7 +50,7 @@ def main():
                 s = rms_db([serum[0].render(t, NOTES, DUR, HOLD)])
             except Exception as e:
                 print(sfz, vol, "Serum failed:", str(e)[:80], flush=True); serum[0] = H.Serum(); continue
-            m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(t, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
+            m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(t, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Probe")
             e = rms_db([H.run_cli(PF.setk(d2m.blob(m), "fx_on", 0), NOTES, DUR, HOLD) for _ in range(2)])
             name = sfz or "Factory/Winds/Trumpets LE.sfz (as stored)"
             out[f"{name}@{vol}"] = {"vol": vol, "serum_db": s, "engine_db": e, "pot": m["params"].get("smp_level"), "volume": m["params"].get("volume"), "set": m["params"].get("smp_set")}

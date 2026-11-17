@@ -265,7 +265,7 @@ def convert(bank: str = "Imports", only=None) -> dict:
             needs = sample_needs(tree)
             r["samples"] = [n for n in needs]
             r["missing_samples"] = [n["rel"] for n in needs if not _have_sample(n)]
-            v = d2m.to_vital(d2m.physical(tree, header))
+            v = d2m.wrap_preset(d2m.physical(tree, header))
             v["preset_name"] = name
             v["serum2move"]["name"] = name
             v = json.loads(json.dumps(v))

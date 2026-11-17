@@ -45,7 +45,7 @@ def main():
         if not stem:
             print(f"{f.stem}: no Serum preset of that name, left alone"); skipped += 1; continue
         hd, tree = H.load_preset(stem)
-        v = d2m.to_vital(d2m.physical(tree, hd))
+        v = d2m.wrap_preset(d2m.physical(tree, hd))
         a = (v, {}, H.SERUM_TABLES, H.WT_OUT, bank)
         m_new = d2m.map_to_tablor(*a)
         m_old = d2m.map_to_tablor(*a, _macros=False)

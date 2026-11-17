@@ -52,7 +52,7 @@ def main():
             header, tree = load_source(d["name"])
         except (KeyError, OSError, ValueError) as e:             # no source preset on this machine
             print(f"  skipped (no source) {rel}: {e}"); bad += 1; continue
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(tree, header)), {}, H.SERUM_TABLES, H.WT_OUT, subdir, _macros=False)
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(tree, header)), {}, H.SERUM_TABLES, H.WT_OUT, subdir, _macros=False)
         new = {k: m["params"].get(k, "") for k in KEYS}
         if any(bool(new[k]) != bool(old[k]) or (new[k] and base_of(new[k]) != base_of(old[k])) for k in KEYS):
             print(f"  does not line up with its source, needs a full conversion: {rel}  installed {[base_of(v) for v in old.values() if v]}  now {[base_of(v) for v in new.values() if v]}"); bad += 1

@@ -62,7 +62,7 @@ def main():
         res = {}
         for label, on in (("off", False), ("on", True)):
             d2m.APPLY_FILTER_FITS = d2m.APPLY_WIDTH_FITS = on
-            m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(stripped, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
+            m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(stripped, header)), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
             blob = d2m.blob(m)
             rs = list(F.POOL.map(lambda _: H.run_cli(blob, notes, 2.0, 1.5), range(4)))
             lo = F.loss_of(ref_feat, F.features(rs, end))

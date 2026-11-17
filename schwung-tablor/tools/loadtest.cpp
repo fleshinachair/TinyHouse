@@ -691,21 +691,42 @@ int main(int argc, char **argv)
     /* choosing a pack republishes wt1_select's options — off the audio
      * thread, so the test has to wait for the worker like the host waits
      * for is_loading */
-    int allOpts = 0;
+    /* How many options wt1_select lists: the commas inside its array, read as JSON. The names are file names, so one may hold a "]" or a ",": a count that stops at the first "]"
+     * (this test's first version) stops inside a name, and the same few options come out for every pack. */
+    auto selectOptions = [&](const char *json) {
+        const char *c = strstr(json, "\"wt1_select\"");
+        if (c) c = strchr(c, '[');
+        if (!c) return -1;
+        int count = 0;
+        bool inStr = false, any = false;
+        for (c++; *c; c++) {
+            if (inStr) { if (*c == 92 && c[1]) c++; else if (*c == '"') inStr = false; continue; }
+            if (*c == '"') { inStr = true; any = true; }
+            else if (*c == ',') count++;
+            else if (*c == ']') break;
+        }
+        return any ? count + 1 : 0;
+    };
     api->get_param(inst, "chain_params", big, sizeof big);
-    for (const char *c = strstr(big, "\"wt1_select\""); c && *c && *c != ']'; c++)
-        if (*c == ',') allOpts++;
+    const int allOpts = selectOptions(big);
     api->set_param(inst, "wt_pack", "1");
     settle(api, inst);
     api->get_param(inst, "wt_pack", buf, sizeof buf);
     CHECK(!strcmp(buf, "1"), "wt_pack round-trips -> \"%s\"", buf);
     n = api->get_param(inst, "chain_params", big, sizeof big);
-    int packOpts = 0;
-    for (const char *c = strstr(big, "\"wt1_select\""); c && *c && *c != ']'; c++)
-        if (*c == ',') packOpts++;
-    CHECK(packOpts > 0 && packOpts < allOpts,
-          "picking a pack narrows wt1_select (%d -> %d options)",
-          allOpts, packOpts);
+    const int packOpts = selectOptions(big);
+    /* A pack narrows the list only when the library holds more than one pack (a Move with just one pack of wavetables offers all of it); so count the packs first. */
+    api->get_param(inst, "wt_pack_list", big, sizeof big);
+    int packCount = 0;
+    for (const char *c = big; (c = strstr(c, "\"index\"")) != nullptr; c++) packCount++;        /* includes entry 0, "All" */
+    if (packCount > 2)
+        CHECK(packOpts > 0 && packOpts < allOpts,
+              "picking a pack narrows wt1_select (%d -> %d options, %d packs)",
+              allOpts, packOpts, packCount - 1);
+    else
+        CHECK(packOpts > 0 && packOpts <= allOpts,
+              "with %d pack in the library, picking it offers its wavetables (%d of %d options)",
+              packCount - 1, packOpts, allOpts);
     api->set_param(inst, "wt_pack", "0");
     settle(api, inst);
 

@@ -54,7 +54,7 @@ def main():
             print("  skipped", n, str(err)[:60], flush=True)
             serum = H.Serum()
             continue
-        v = d2m.to_vital(d2m.physical(t, h)); v["preset_name"] = n; v["serum2move"]["name"] = n
+        v = d2m.wrap_preset(d2m.physical(t, h)); v["preset_name"] = n; v["serum2move"]["name"] = n
         m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
         e = H.run_cli(setk(setk(d2m.blob(m), "fx_on", 0), "volume", 30), notes, 1.5, 1.2)    # a low volume: the converter's closed-form one can clip the engine's output stage
         b1, b2 = bands(a), bands(e)

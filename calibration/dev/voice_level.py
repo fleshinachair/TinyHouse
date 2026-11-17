@@ -42,7 +42,7 @@ def main():
         except Exception as err:
             print("  skipped", n, str(err)[:60], flush=True); serum = H.Serum(); continue
         ph = d2m.physical(t, h)
-        v = d2m.to_vital(ph); v["preset_name"] = n; v["serum2move"]["name"] = n
+        v = d2m.wrap_preset(ph); v["preset_name"] = n; v["serum2move"]["name"] = n
         m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
         mast = ph.get("master")
         want = d2m.CAL["master_db0"] + d2m.CAL["master_slope"] * math.log10(max(mast, 1e-4)) if mast is not None else d2m.CAL["master_default_db"]

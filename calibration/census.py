@@ -30,7 +30,7 @@ def main():
             h, t = decode_preset_file(p)
             ph = d2m.physical(t, h)
             nm = str(p.relative_to(src))
-            v = d2m.to_vital(ph); v["preset_name"] = p.stem; v["serum2move"]["name"] = p.stem
+            v = d2m.wrap_preset(ph); v["preset_name"] = p.stem; v["serum2move"]["name"] = p.stem
             m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, ROOT / "out/census_wt", "Census")
         except Exception as e:
             errors.append((str(p.name), repr(e)[:100])); tiers["error"] += 1; continue

@@ -320,7 +320,7 @@ def main():
             skipped.append((name, ["a wavetable Serum's Tables folder does not have"]))
             continue
         def convert():
-            v = d2m.to_vital(d2m.physical(tree, header))
+            v = d2m.wrap_preset(d2m.physical(tree, header))
             v["preset_name"] = name
             v["serum2move"]["name"] = name
             return d2m.map_to_tablor(v, {}, H.SERUM_TABLES, wt_out, a.bank)

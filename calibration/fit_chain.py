@@ -51,7 +51,7 @@ def mapped(name, header=None, tree=None):
     """The converter's own mapping of one preset, FX on, as stage 2 and 3 of main() do it."""
     if tree is None:
         header, tree = H.load_preset(name)
-    v = d2m.to_vital(d2m.physical(tree, header))
+    v = d2m.wrap_preset(d2m.physical(tree, header))
     nm = d2m.ascii_name(name)
     v["preset_name"] = nm
     v["serum2move"]["name"] = nm

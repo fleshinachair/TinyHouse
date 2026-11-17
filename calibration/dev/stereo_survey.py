@@ -43,7 +43,7 @@ def main():
     items = F.load_set(names)
     rows = []
     for it in items:
-        m = H.d2m.map_to_tablor(H.d2m.to_vital(H.d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
+        m = H.d2m.map_to_tablor(H.d2m.wrap_preset(H.d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
         P = m["params"]
         blob = H.d2m.blob(m)
         rs = list(F.POOL.map(lambda _: H.run_cli(blob, it["notes"], 2.0, 1.5), range(3)))

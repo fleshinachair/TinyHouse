@@ -29,7 +29,7 @@ def harm(x):
 
 
 def engine_render(tree, name):
-    v = d2m.to_vital(d2m.physical(tree, {"presetName": name, "tags": []}))
+    v = d2m.wrap_preset(d2m.physical(tree, {"presetName": name, "tags": []}))
     v["preset_name"] = name; v["serum2move"]["name"] = name
     m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
     m["params"]["volume"] = 28

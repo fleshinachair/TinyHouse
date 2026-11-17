@@ -17,7 +17,7 @@ for p in sorted(Path(sys.argv[1]).rglob("*.SerumPreset")):
     rec.clear()
     try:
         h, t = decode_preset_file(p); ph = d2m.physical(t, h)
-        v = d2m.to_vital(ph); v["preset_name"] = p.stem; v["serum2move"]["name"] = p.stem
+        v = d2m.wrap_preset(ph); v["preset_name"] = p.stem; v["serum2move"]["name"] = p.stem
         d2m.map_to_tablor(v, {}, H.SERUM_TABLES, ROOT / "out/census_wt", "Census")
     except Exception as e:
         continue

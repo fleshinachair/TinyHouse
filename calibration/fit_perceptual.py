@@ -109,7 +109,7 @@ def score(cal, items, runs=2):
     d2m.CAL.update(cal)
     jobs = []
     for it in items:
-        m = d2m.map_to_tablor(d2m.to_vital(d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
+        m = d2m.map_to_tablor(d2m.wrap_preset(d2m.physical(it["tree"], it["header"])), {}, H.SERUM_TABLES, H.WT_OUT, "Deep House")
         blob = d2m.blob(m)
         for _ in range(runs):
             jobs.append((it, blob))

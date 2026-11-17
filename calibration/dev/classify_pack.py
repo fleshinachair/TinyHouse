@@ -69,7 +69,7 @@ def main():
             rows[str(p)] = ["wavetable Serum cannot open"]
             continue
         try:
-            v = d2m.to_vital(d2m.physical(tree, header))
+            v = d2m.wrap_preset(d2m.physical(tree, header))
             v["preset_name"] = p.stem
             v["serum2move"]["name"] = p.stem
             m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, wt, "x")

@@ -44,6 +44,7 @@ calibration/h2_final/
 
 # Converted presets, renders and run output: derived from Xfer's and the pack authors' content, and regenerable
 out_*/
+work/
 calibration/*/
 calibration/chain_report_*
 calibration/*.png

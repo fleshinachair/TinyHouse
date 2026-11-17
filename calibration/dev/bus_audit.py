@@ -56,7 +56,7 @@ def main():
         row = {"serum_db": round(sl, 1)}
         for label, on in (("off", False), ("on", True)):
             d2m.CARRY_BUSES = on
-            v = d2m.to_vital(ph); v["preset_name"] = name; v["serum2move"]["name"] = name
+            v = d2m.wrap_preset(ph); v["preset_name"] = name; v["serum2move"]["name"] = name
             try:
                 m = d2m.map_to_tablor(v, {}, H.SERUM_TABLES, H.WT_OUT, "Bus audit")
             except Exception as err:

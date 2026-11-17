@@ -23,7 +23,8 @@ each preset against your own copy of it.
 - Ideally, Serum 2 installed on your computer. Many presets use Serum's own wavetables and samples, which TinyHouse reads from your `Documents\Xfer` folder; without that
   folder those oscillators are silent. Serum 2 on Windows is also needed for the more accurate [Python route](#more-accurate-conversion-with-the-python-scripts) (with Python 3.13).
 
-The browser import itself needs nothing else on your computer: no Python, no Serum plugin.
+The browser import runs the converter inside the page, so it needs no Python and no Serum plugin on your computer, but the browser needs internet access (it loads the
+Python runtime from a CDN).
 
 ## The workflow
 

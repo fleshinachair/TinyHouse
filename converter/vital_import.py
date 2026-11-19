@@ -307,6 +307,7 @@ FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("de
                "delay_feedback": ("delay_on", "dly_fb")}
 # The stored range (min, max) of the effect controls that a macro or velocity route can move (src/common/synth_parameters.cpp). Vital adds a route in the control's own stored units (a fraction of this range), so a macro at its saved value is a fixed offset that can be added to the control before the effect is mapped.
 FX_FOLD_RANGE = {
+    "filter_1_blend": (0.0, 2.0), "filter_2_blend": (0.0, 2.0),                                    # the voice filters' Blend knob: a route adds amount x 2 x the source
     "reverb_pre_low_cutoff": (0.0, 128.0), "reverb_pre_high_cutoff": (0.0, 128.0), "reverb_low_shelf_cutoff": (0.0, 128.0), "reverb_low_shelf_gain": (-6.0, 0.0), "reverb_high_shelf_cutoff": (0.0, 128.0),
     "reverb_high_shelf_gain": (-6.0, 0.0), "reverb_delay": (0.0, 0.3), "reverb_decay_time": (-6.0, 6.0), "reverb_size": (0.0, 1.0), "reverb_chorus_amount": (0.0, 1.0), "reverb_chorus_frequency": (-8.0, 3.0),
     "delay_frequency": (-2.0, 9.0), "delay_aux_frequency": (-2.0, 9.0), "delay_filter_cutoff": (8.0, 136.0), "delay_filter_spread": (0.0, 1.0),
@@ -377,7 +378,11 @@ def env_stage_pot(s: dict, k: int, stage: str) -> int:
 
 
 RANDOM_AS_MEAN = True
-AMOUNT_SWEEP = False                     # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
+AMOUNT_SWEEP = False                                                                        # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
+FILTER_BLEND = True                                                                         # the voice filters' Blend knob as a continuous crossfade (engine flt_vb / flt_blend) instead of the nearest LP / BP / HP type
+FILTER_BLEND_MODELS = (0, 1, 2, 3)
+LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
+FILTER_BLEND_DROP_DB = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}                                  # how far the low-pass / high-pass passband falls at full resonance (engine flt_vbg). Measured per model (Analog 10 dB, Dirty 7.4, Ladder 11, Digital 2: calibration/vital_vfilter_probe.py at res 0.5, taken as res^0.9) but it made the A/B scores worse overall (92 presets: 7.42 without, 7.46 with half, 7.55 with all of it), so it is off
 ROUTE_CURVES = True
 
 
@@ -1122,6 +1127,13 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P[f"{pre}_type"], why = filter_type(mdl, sty, bl)
         if why:
             notes.append(f"filter {fi}: {why}")
+        if FILTER_BLEND and mdl in FILTER_BLEND_MODELS:
+            if LFO_BLEND_MEAN:
+                bl = CLAMP(bl + 2.0 * lfo_route_mean(s, routes, f"filter_{fi}_blend"), 0.0, 2.0)               # an LFO moving the Blend knob, at the mean of its shape
+            P[f"{pre}_type"] = 1 if sty == 1 else 0                                       # the slope; the Blend crossfade picks low / band / high (engine flt_vb)
+            P[f"{pre}_vb"] = 1
+            P[f"{pre}_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
+            P[f"{pre}_vbg"] = int(round(127.0 * FILTER_BLEND_DROP_DB[mdl] / 20.0))
         cut = filter_cutoff_note(s, fi, voice_shift)
         P[f"{pre}_freq"] = pot(cut - 8.0)
         if mdl == 6:

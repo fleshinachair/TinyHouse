@@ -167,6 +167,8 @@ public:
         sub.setSampleRate(sr); noise.setSampleRate(sr);
         filter.setSampleRate(sr);
         filter2.setSampleRate(sr);
+        vb1.setSampleRate(sr);
+        vb2.setSampleRate(sr);
         comb.setSampleRate(sr);
         comb2.setSampleRate(sr);
         phaser.setSampleRate(sr);
@@ -229,6 +231,7 @@ public:
         fltPrev = -1.0f;
         filter2.reset();
         fltPrev2 = -1.0f;
+        vb1.reset(); vb2.reset();
         comb.reset();
         comb2.reset();
         phaser.reset();
@@ -589,6 +592,7 @@ public:
             if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
             else if (combType2 && vcMode2) comb2.processVital(pre2L, pre2R, n, combType2 <= 2 ? 0 : combType2 - 2, combRes2, fltTarget2, vcBlend2, vcTrans2, vcMode2 == 2);
             else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
+            else if (vb2.on) runBlend(vb2, fltTarget2, fltQ2, pre2L, pre2R, n);
             else runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
             if (driving2) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
             if (P[TB_P_FLT2_GAIN] > 0.0f) {
@@ -609,6 +613,7 @@ public:
         if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
         else if (combType && vcMode) comb.processVital(preL, preR, n, combType <= 2 ? 0 : combType - 2, combRes, fltTarget, vcBlend, vcTrans, vcMode == 2);
         else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
+        else if (vb1.on) runBlend(vb1, fltTarget, fltQ, preL, preR, n);
         else runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
         if (driving) driveOut(preL, preR, n, driveMix, driveMixTarget);
         if (P[TB_P_FLT_GAIN] > 0.0f) {                                  /* Serum's filter Drive as the gain it is */
@@ -962,6 +967,8 @@ private:
             int t = ft >= 8 ? 1 : ft & 7;
             filter.setType(kTypes[t]);
             filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
+            vb1.on = P[TB_P_FLT_VB] >= 0.5f && !combType && ft < 8;             /* Vital's Blend knob: a crossfade of the low / band / high outputs (see VBlend) */
+            if (vb1.on) vb1.set(P[TB_P_FLT_BLEND] * (2.0f / 127.0f), (t & 1) != 0, q, P[TB_P_FLT_VBG] * (20.0f / 127.0f));
             fltTarget = f; fltQ = q;           /* applied in steps across the block (see runFilter) */
 
             /* Filter 2: the same law with its own knobs (and its own share of the filter envelope), and the destination the LFOs and
@@ -980,6 +987,8 @@ private:
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
             filter2.setType(kTypes[t2]);
             filter2.setSlope((t2 & 1) ? Filter::db24 : Filter::db12);
+            vb2.on = P[TB_P_FLT2_VB] >= 0.5f && !combType2 && ft2 < 8;
+            if (vb2.on) vb2.set(P[TB_P_FLT2_BLEND] * (2.0f / 127.0f), (t2 & 1) != 0, fltQ2, P[TB_P_FLT2_VBG] * (20.0f / 127.0f));
         }
     }
 
@@ -1033,6 +1042,55 @@ private:
         }
         prev = target;
     }
+    /* Vital's filter Blend knob on its first four models, measured through the plugin (calibration/vital_vfilter_probe.py): 0 low-pass, 1 band-pass, 2 high-pass, and between two neighbours the
+     * ends are weighted (1 - x) for the outer one and sqrt(1 - (1 - x)^2) for the band-pass (equal power: the sum of squares stays 1), x being the distance from the outer end. A 24 dB style is two
+     * such 12 dB stages in a row with the same weights (the second at the fixed Q). Vital's band-pass peaks 6 dB under the biquad's (3 dB per stage in a 24 dB style), and that peak rises with the
+     * resonance (0.45 dB per dB of Q over a 12 dB filter, 0.9 over a 24 dB one, on the first stage). */
+    struct VBlend {
+        bool on = false, steep = false;
+        Filter f[4];                                   /* stage 1: f[0] the nearer end, f[1] the next; stage 2 (24 dB): f[2], f[3] */
+        float prev[4] = { -1.0f, -1.0f, -1.0f, -1.0f };
+        float wa[2] = { 1.0f, 1.0f }, wb[2] = { 0.0f, 0.0f };
+        void setSampleRate(double sr) { for (Filter &x : f) x.setSampleRate(sr); }
+        void reset() { for (int i = 0; i < 4; i++) { f[i].reset(); prev[i] = -1.0f; } }
+        void set(float blend, bool steep_, float q, float dropDb)
+        {
+            steep = steep_;
+            blend = std::clamp(blend, 0.0f, 2.0f);
+            const bool upper = blend > 1.0f;
+            const float x = upper ? blend - 1.0f : blend;                             /* 0 at the nearer end of the pair .. 1 at the next */
+            const float res = std::clamp((1.0f - kFilterQ / std::max(q, kFilterQ)) / 0.99f, 0.0f, 1.0f);
+            const float outer = (upper ? x : 1.0f - x) * std::pow(10.0f, -dropDb * std::pow(res, 0.9f) * 0.05f);   /* the weight of the low-pass (lower pair) or the high-pass (upper pair); the passband falls with the resonance */
+            const float oe = upper ? x : 1.0f - x, band = std::sqrt(std::max(0.0f, 1.0f - oe * oe));
+            const float dbq = 20.0f * std::log10(std::max(q, kFilterQ) / kFilterQ);
+            for (int st = 0; st < (steep ? 2 : 1); st++) {
+                const float outerSt = st == 0 ? outer : oe;                                 /* the passband drop is taken once, on the first stage */
+                const float bpdb = steep ? (st == 0 ? -3.0f + 0.9f * dbq : -3.0f) : -6.0f + 0.45f * dbq;
+                const float bpg = std::pow(10.0f, bpdb * 0.05f) * band;
+                wa[st] = upper ? bpg : outerSt;
+                wb[st] = upper ? outerSt : bpg;
+                f[2 * st].setType(upper ? Filter::bandpass : Filter::lowpass);
+                f[2 * st + 1].setType(upper ? Filter::highpass : Filter::bandpass);
+                f[2 * st].setSlope(Filter::db12);
+                f[2 * st + 1].setSlope(Filter::db12);
+            }
+        }
+    };
+    void blendStage(Filter &a, float &pa, Filter &b, float &pb, float wa, float wb, float target, float q, float *l, float *r, int n)
+    {
+        if (wb <= 0.004f) { runFilter(a, pa, target, q, l, r, n); for (int i = 0; i < n; i++) { l[i] *= wa; r[i] *= wa; } return; }          /* one end only: the other filter is not run */
+        if (wa <= 0.004f) { runFilter(b, pb, target, q, l, r, n); for (int i = 0; i < n; i++) { l[i] *= wb; r[i] *= wb; } return; }
+        float tl[kBlock], tr[kBlock];
+        std::copy(l, l + n, tl); std::copy(r, r + n, tr);
+        runFilter(a, pa, target, q, l, r, n);
+        runFilter(b, pb, target, q, tl, tr, n);
+        for (int i = 0; i < n; i++) { l[i] = l[i] * wa + tl[i] * wb; r[i] = r[i] * wa + tr[i] * wb; }
+    }
+    void runBlend(VBlend &v, float target, float q, float *l, float *r, int n)
+    {
+        blendStage(v.f[0], v.prev[0], v.f[1], v.prev[1], v.wa[0], v.wb[0], target, q, l, r, n);
+        if (v.steep) blendStage(v.f[2], v.prev[2], v.f[3], v.prev[3], v.wa[1], v.wb[1], target, kFilterQ, l, r, n);
+    }
     /* The drive stage before a filter (tanh of the gained signal, mixed in) and after it (tanh alone), both ramped across the block. */
     static void driveIn(float *l, float *r, int n, float g0, float gT, float m0, float mT)
     {
@@ -1059,6 +1117,7 @@ private:
     float drive2Gain = 1.0f, drive2Mix = 0.0f, drive2GainTarget = 1.0f, drive2MixTarget = 0.0f;
 
     Filter filter, filter2, noiseHp, noiseLp;
+    VBlend vb1, vb2;                              /* the voice filters' Blend crossfades (used in place of filter / filter2 while .on) */
     CombFilter comb, comb2;                       /* the comb / flange / phaser filter types (comb.h); 0 = the biquad is used, 1..4 = Comb +, Comb -, Flange +, Flange -, 5..8 = Phase 12..48 + */
     PhaserFilter phaser, phaser2;
     int combType = 0, combType2 = 0;

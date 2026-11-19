@@ -186,4 +186,51 @@ private:
     float prevA = 2.0f;
 };
 
+/* Vital's Phaser voice filter (model 7), derived from Vital's synthesis/filters/phaser_filter.cpp (same notice as the Vital comb above): twelve first-order all-pass stages in three groups of four, Blend 0 / 1 / 2 taking the output
+ * after 4 / 8 / 12 of them (crossfaded between); the input (drive 1 + Reso / 2) plus +-tanh(Reso x the band left after removing the lows and highs of the last all-pass output, corners 20 x and 1/20 of the cutoff)
+ * feeds the chain; the output is half the sum of the input and +-the all-pass output (the sign is the Style). The one-pole coefficient is Vital's tan(x / (x + 1)), x = pi f / sr. */
+class VitalPhaserFilter {
+public:
+    bool on = false;
+    void setSampleRate(double sr) { sampleRate = (float) sr; reset(); }
+    void reset() { for (int c = 0; c < 2; c++) { for (int k = 0; k < 12; k++) st[c][k] = 0.0f; lows[c] = highs[c] = out[c] = 0.0f; } prevC = -1.0f; }
+
+    void process(float *l, float *r, int n, float hz, float reso, float blend, bool inverted, bool clean)
+    {
+        const float x = 3.14159265f * std::min(hz / sampleRate, 1.0f), cT = std::tan(x / (x + 1.0f));
+        if (prevC < 0.0f) prevC = cT;
+        const float res = std::min(std::max(reso, 0.0f), 1.0f), drive = res * 0.5f + 1.0f, inv = inverted ? -1.0f : 1.0f;
+        blend = std::min(std::max(blend, 0.0f), 2.0f);
+        const float p1 = std::min(std::max(1.0f - blend, 0.0f), 1.0f), p5 = std::min(std::max(blend - 1.0f, 0.0f), 1.0f), p3 = 1.0f - p1 - p5;
+        auto one = [](float &s, float in, float cc) { const float d = cc * (in - s); s += d; const float o = s; s += d; return o; };
+        for (int i = 0; i < n; i++) {
+            const float cf = prevC + (cT - prevC) * (float) (i + 1) / (float) n;
+            float *io[2] = { l + i, r + i };
+            for (int c = 0; c < 2; c++) {
+                const float in = *io[c];
+                float *S = st[c];
+                const float lo = one(lows[c], out[c], std::min(cf * 20.0f, 0.9f));
+                const float hi = one(highs[c], lo, cf * (1.0f / 20.0f));
+                const float band = lo - hi;
+                float a = clean ? drive * in + inv * std::tanh(res * band) : std::min(std::max(drive * in + inv * res * band, -1.0f), 1.0f);
+                for (int k = 0; k < 4; k++) { const float so = one(S[k], a, cf); a -= 2.0f * so; }
+                const float o1 = a;
+                for (int k = 4; k < 8; k++) { const float so = one(S[k], a, cf); a -= 2.0f * so; }
+                const float o3 = a;
+                for (int k = 8; k < 12; k++) { const float so = one(S[k], a, cf); a -= 2.0f * so; }
+                const float o5 = a;
+                float ap = p1 * o1 + p3 * o3 + p5 * o5;
+                if (!(ap > -1e6f && ap < 1e6f)) ap = 0.0f;
+                out[c] = ap;
+                *io[c] = (in + inv * ap) * 0.5f;
+            }
+        }
+        prevC = cT;
+    }
+
+private:
+    float sampleRate = 44100.0f, prevC = -1.0f;
+    float st[2][12] = {}, lows[2] = {}, highs[2] = {}, out[2] = {};
+};
+
 }  // namespace tb

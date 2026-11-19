@@ -810,8 +810,8 @@ BANKS = [
     ("Vital Filter FX", False, [row(num("fxf_key", "VFK", "FX Filter Key Track", 0, 127, 64))]),
     # After Vital Filter FX, for the same reason. Vital's filter Blend knob on its first five models (Analog, Dirty, Ladder, Digital, Diode): a linear crossfade of the low-pass (0), band-pass (1) and high-pass (2)
     # outputs of the same two- or four-pole filter (calibration/vital_vfilter_probe.py --blend). Type Blend plays the Type's slope (12 / 24 dB) with the blend, Off plays the Type as it is. Blend is 0..2 over the pot. Passband Drop is how many dB the low-pass / high-pass end loses at full resonance (0..20 over the pot, a curve of res^0.9): Vital's Analog filter drops 10, its Digital none.
-    ("Vital Filter Blend", False, [row(enum("flt_vb", "VB1", "Filter Blend Mode", ["Off", "On"], 0), num("flt_blend", "VBL", "Filter Blend", 0, 127, 0),
-                                       enum("flt2_vb", "VB2", "Filter 2 Blend Mode", ["Off", "On"], 0), num("flt2_blend", "VBM", "Filter 2 Blend", 0, 127, 0),
+    ("Vital Filter Blend", False, [row(enum("flt_vb", "VB1", "Filter Blend Mode", ["Off", "On", "Phaser"], 0), num("flt_blend", "VBL", "Filter Blend", 0, 127, 0),
+                                       enum("flt2_vb", "VB2", "Filter 2 Blend Mode", ["Off", "On", "Phaser"], 0), num("flt2_blend", "VBM", "Filter 2 Blend", 0, 127, 0),
                                        num("flt_vbg", "VD1", "Filter Passband Drop", 0, 127, 0), num("flt2_vbg", "VD2", "Filter 2 Passband Drop", 0, 127, 0))]),
 ]
 

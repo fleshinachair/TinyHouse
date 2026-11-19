@@ -381,6 +381,7 @@ RANDOM_AS_MEAN = True
 AMOUNT_SWEEP = False                                                                        # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
 FILTER_BLEND = True                                                                         # the voice filters' Blend knob as a continuous crossfade (engine flt_vb / flt_blend) instead of the nearest LP / BP / HP type
 FILTER_BLEND_MODELS = (0, 1, 2, 3)
+VITAL_PHASER = True                                                                          # Vital's Phaser voice filter (model 7) as its own engine filter (comb.h VitalPhaserFilter) instead of 'Phase 24 +'
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
 FILTER_BLEND_DROP_DB = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}                                  # how far the low-pass / high-pass passband falls at full resonance (engine flt_vbg). Measured per model (Analog 10 dB, Dirty 7.4, Ladder 11, Digital 2: calibration/vital_vfilter_probe.py at res 0.5, taken as res^0.9) but it made the A/B scores worse overall (92 presets: 7.42 without, 7.46 with half, 7.55 with all of it), so it is off
 ROUTE_CURVES = True
@@ -1127,7 +1128,14 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P[f"{pre}_type"], why = filter_type(mdl, sty, bl)
         if why:
             notes.append(f"filter {fi}: {why}")
-        if FILTER_BLEND and mdl in FILTER_BLEND_MODELS:
+        if VITAL_PHASER and mdl == 7:
+            if LFO_BLEND_MEAN:
+                bl = CLAMP(bl + 2.0 * lfo_route_mean(s, routes, f"filter_{fi}_blend"), 0.0, 2.0)
+            P[f"{pre}_type"] = 1 if sty == 1 else 0                                       # the Style (its sign), carried by the type's low bit (engine flt_vb = 2, comb.h VitalPhaserFilter)
+            P[f"{pre}_vb"] = 2
+            P[f"{pre}_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
+            notes.pop() if why and notes and notes[-1].endswith(why) else None
+        elif FILTER_BLEND and mdl in FILTER_BLEND_MODELS:
             if LFO_BLEND_MEAN:
                 bl = CLAMP(bl + 2.0 * lfo_route_mean(s, routes, f"filter_{fi}_blend"), 0.0, 2.0)               # an LFO moving the Blend knob, at the mean of its shape
             P[f"{pre}_type"] = 1 if sty == 1 else 0                                       # the slope; the Blend crossfade picks low / band / high (engine flt_vb)

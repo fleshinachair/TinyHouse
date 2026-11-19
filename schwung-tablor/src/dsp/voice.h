@@ -172,6 +172,8 @@ public:
         comb.setSampleRate(sr);
         comb2.setSampleRate(sr);
         phaser.setSampleRate(sr);
+        vph1.setSampleRate(sr);
+        vph2.setSampleRate(sr);
         phaser2.setSampleRate(sr);
         noiseHp.setSampleRate(sr); noiseLp.setSampleRate(sr);
         filterADSR.setSampleRate(sr);
@@ -235,6 +237,8 @@ public:
         comb.reset();
         comb2.reset();
         phaser.reset();
+        vph1.reset();
+        vph2.reset();
         phaser2.reset();
         noiseHp.reset(); noiseLp.reset();
         noiseHpSet = noiseLpSet = 0.0f;
@@ -589,7 +593,8 @@ public:
             if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
             const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
             if (driving2) driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget);
-            if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
+            if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
+            else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
             else if (combType2 && vcMode2) comb2.processVital(pre2L, pre2R, n, combType2 <= 2 ? 0 : combType2 - 2, combRes2, fltTarget2, vcBlend2, vcTrans2, vcMode2 == 2);
             else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
             else if (vb2.on) runBlend(vb2, fltTarget2, fltQ2, pre2L, pre2R, n);
@@ -610,7 +615,8 @@ public:
         if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
         const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
         if (driving) driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget);
-        if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
+        if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
+        else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
         else if (combType && vcMode) comb.processVital(preL, preR, n, combType <= 2 ? 0 : combType - 2, combRes, fltTarget, vcBlend, vcTrans, vcMode == 2);
         else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
         else if (vb1.on) runBlend(vb1, fltTarget, fltQ, preL, preR, n);
@@ -967,7 +973,8 @@ private:
             int t = ft >= 8 ? 1 : ft & 7;
             filter.setType(kTypes[t]);
             filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
-            vb1.on = P[TB_P_FLT_VB] >= 0.5f && !combType && ft < 8;             /* Vital's Blend knob: a crossfade of the low / band / high outputs (see VBlend) */
+            vph1.on = P[TB_P_FLT_VB] >= 1.5f; vph1Blend = P[TB_P_FLT_BLEND] * (2.0f / 127.0f); vph1Inv = (ft & 1) != 0;   /* Vital's Phaser filter: the type's low bit is its Style */
+            vb1.on = P[TB_P_FLT_VB] >= 0.5f && P[TB_P_FLT_VB] < 1.5f && !combType && ft < 8;             /* Vital's Blend knob: a crossfade of the low / band / high outputs (see VBlend) */
             if (vb1.on) vb1.set(P[TB_P_FLT_BLEND] * (2.0f / 127.0f), (t & 1) != 0, q, P[TB_P_FLT_VBG] * (20.0f / 127.0f));
             fltTarget = f; fltQ = q;           /* applied in steps across the block (see runFilter) */
 
@@ -987,7 +994,8 @@ private:
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
             filter2.setType(kTypes[t2]);
             filter2.setSlope((t2 & 1) ? Filter::db24 : Filter::db12);
-            vb2.on = P[TB_P_FLT2_VB] >= 0.5f && !combType2 && ft2 < 8;
+            vph2.on = P[TB_P_FLT2_VB] >= 1.5f; vph2Blend = P[TB_P_FLT2_BLEND] * (2.0f / 127.0f); vph2Inv = (ft2 & 1) != 0;
+            vb2.on = P[TB_P_FLT2_VB] >= 0.5f && P[TB_P_FLT2_VB] < 1.5f && !combType2 && ft2 < 8;
             if (vb2.on) vb2.set(P[TB_P_FLT2_BLEND] * (2.0f / 127.0f), (t2 & 1) != 0, fltQ2, P[TB_P_FLT2_VBG] * (20.0f / 127.0f));
         }
     }
@@ -1120,6 +1128,8 @@ private:
     VBlend vb1, vb2;                              /* the voice filters' Blend crossfades (used in place of filter / filter2 while .on) */
     CombFilter comb, comb2;                       /* the comb / flange / phaser filter types (comb.h); 0 = the biquad is used, 1..4 = Comb +, Comb -, Flange +, Flange -, 5..8 = Phase 12..48 + */
     PhaserFilter phaser, phaser2;
+    VitalPhaserFilter vph1, vph2;                 /* Vital's Phaser voice filter (comb.h); flt_vb = 2 */
+    float vph1Blend = 1.0f, vph2Blend = 1.0f; bool vph1Inv = false, vph2Inv = false, vphClean = false;
     int combType = 0, combType2 = 0;
     float combRes = 0.0f, combRes2 = 0.0f;
     int vcMode = 0, vcMode2 = 0;                  /* 0 Serum's comb law, 1 Vital blend, 2 Vital band spread */

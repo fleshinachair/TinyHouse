@@ -16,6 +16,14 @@ Every new parameter defaults to the old behaviour; saved presets load and sound 
 
 **Vital's voice transpose and voice tune are live routes** (Voice Pitch, Voice Fine): the whole voice moves, the plugin's pitch is matched to 0.3 semitones.
 
+**Eight LFOs and sixteen routes for Vital presets.** Vital has eight LFOs and 64 routes; the engine had four LFOs and eight routes. LFO 5 to 8 are route sources 11 to 14 (hidden banks Vital LFO 5-8 and Vital LFO Routes 9-16, appended: saved presets and the module's parameter list are unchanged apart from a few hundred bytes).
+
+**Vital's Analog filter is the engine's own now.** The Sallen-Key filter (12 or 24 dB, with the Blend knob between low, band and high-pass) is ported from Vital's source in place of the biquad: its response matches the plugin to about 0.3 dB at any resonance and 1 dB at heavy drive (the biquad was 2 to 4 dB off near the cutoff, and 1.5 dB under the real passband at no resonance). Vital's resonance passband loss and drive law come with it. 71 of the 100 local presets use this model.
+
+**Vital's EQ is Vital's EQ.** The three bands are two shapes each: the low band a shelf or a high-pass (mode 1), the band a bell or a notch, the high band a shelf or a low-pass. Mode 1 used to be read as a shelf with a gain; it now cuts. The engine gains six EQ band types (V LoSh, V Bell, V HiSh, V HP, V LP, V Notch) and a hidden fine-frequency control, exact against the plugin to 0.1 dB. Fun Pulse went from 13.4 to 7.4 dB of error, corrupted_...+=boot-_ from 9.7 to 5.6.
+
+**Smaller Vital fixes.** The engine's level against Vital's was 2.75 dB low (median preset 3.9 dB); a Line Source wavetable without a nested "line" plays its initial ramp as Vital does (it rendered as silence); a Key route sees the voice transpose and tune; the amplitude knob is not capped at 1 and glides in over the first 100 ms of a note; filter and spare envelopes keep Vital's own decay curve; a modulation envelope takes one stage a block, as Vital's control-rate envelopes do; a silent phase-distortion table falls back to the LFO mean.
+
 ## 0.9.8
 
 The formant filters planned as 0.9.7 and the Vital leads planned as 0.9.8 ship together. Saved presets from earlier versions load and sound the same: of 112 presets rendered with the 0.9.6 engine and this one, 64 are bit-identical and the other 48 (noise and random phases make them differ on every render) differ by no more than their own run-to-run noise. Every new parameter defaults to the old behaviour, so a Serum preset is unchanged; a Vital preset gains the new behaviour when it is imported again.

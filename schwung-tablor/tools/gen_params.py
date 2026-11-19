@@ -873,6 +873,8 @@ BANKS = [
                                           pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64), enum(f"lr{r}_bip", f"R{r}BP", f"LFO Route {r} Polarity", ["Uni", "Bi"], 0)) for r in range(9, 17)]),
     # Last, so the earlier indices stay. The EQ's frequency knob steps by about a semitone; a Vital EQ band is tuned finer than that (a notch is only deep on its exact frequency): this is the remainder, +-0.5 semitone, 64 centred.
     ("Vital EQ Fine", False, [row(*[num(f"eq{n}_ffine", f"E{n}FF", f"EQ{n} Fine Freq", 0, 127, 64) for n in (1, 2, 3, 4)])]),
+    # Vital's own filter models (Analog: Sallen-Key; Ladder), 12 or 24 dB, Blend between low / band / high, in place of the biquad. Set by the Vital converter for a filter of that model in a plain style.
+    ("Vital Filter SK", False, [row(enum("flt_vsk", "FSK", "Vital Model Filter 1", ["Off", "Analog", "Ladder"], 0), enum("flt2_vsk", "F2SK", "Vital Model Filter 2", ["Off", "Analog", "Ladder"], 0))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -1006,7 +1008,7 @@ def chain_param(p):
 # The sample slots' Kind and grain keys are NOT hidden: the remote UI draws its Sample tab from chain_params, and a key missing here is a knob that never appears.
 # The 0.9.8 additions that only the Vital converter sets (random modulators, attack curves, the formant filters' own knobs) stay out of it too: the contract was 800 bytes under the host's 64 KB
 # limit (it refuses to load the synth past it) and these put it over (loadtest, 2026-11-20).
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|eq\d_ffine$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|eq\d_ffine$|flt2?_vsk$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
 # The Vital banks (comp, distortion LFO, unison, envelope, ...) have no control on any page or in the remote UI: only the Vital converter and a preset load set them, as for the LFOs above. The
 # one exception is Vital Reverb, which the remote UI names. Together with the keys above this takes the contract from 64.9 KB to about 55 KB, well inside the host's 64 KB.
 HIDDEN_BANK_KEYS = {s["key"] for name, _, rws in BANKS if name.startswith("Vital ") and name != "Vital Reverb" for r in rws for s in r if s}

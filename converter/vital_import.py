@@ -1385,8 +1385,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             P[f"{pre}_vb"] = 1
             P[f"{pre}_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
             P[f"{pre}_vbg"] = int(round(127.0 * FILTER_BLEND_DROP_DB[mdl] / 20.0))
-            if VITAL_SK and mdl in (0, 2) and sty in (0, 1):
-                P[f"{pre}_vsk"] = 1 if mdl == 0 else 2                                        # Vital's Analog (Sallen-Key) or Ladder model itself (vital_sk.h), 12 or 24 dB
+            if VITAL_SK and mdl in (0, 1, 2) and sty in (0, 1):
+                P[f"{pre}_vsk"] = (1, 3, 2)[mdl]                                        # Vital's Analog (Sallen-Key) or Ladder model itself (vital_sk.h), 12 or 24 dB
         cut = filter_cutoff_note(s, fi, voice_shift)
         P[f"{pre}_freq"] = pot(cut - 8.0)
         if mdl == 6:

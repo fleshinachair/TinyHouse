@@ -189,4 +189,89 @@ struct VitalLadder {
     }
 };
 
+/* Vital's Dirty model (filters/dirty_filter.cpp): two plain one-poles (and two more for 24 dB) in front, then a saturating loop of two tanh one-poles whose feedback is added to the input. Same wiring and
+ * level convention as VitalSK. Note the pre stage of the 24 dB style feeds back the saturated state of a one-pole that is only ever ticked without one, which is always 0: no feedback there. */
+struct VitalDirty {
+    static constexpr float kVitalFull = 0.33650f;
+    bool on = false;
+    bool steep = false;
+    double sr = 44100.0;
+    struct Coefs { float coef = 0, res = 0, drive = 1, boost = 0, lo = 1, bd = 0, hi = 0; };
+    Coefs cur, tgt;
+    bool fresh = true;
+    struct St { float a1 = 0, a2 = 0, b1 = 0, b2 = 0, f3 = 0, s3 = 0, f4 = 0, s4 = 0, p1 = 0, p2 = 0; } st[2];
+
+    void setSampleRate(double v) { sr = v; }
+    void reset() { fresh = true; st[0] = St(); st[1] = St(); }
+    static float quickTanh(float v) { const float sq = v * v; return v / (sq / (3.0f + sq * 0.2f) + 1.0f); }
+
+    void set(float hz, float res, float driveGain, float blend, bool steep24)
+    {
+        steep = steep24;
+        const float f = std::min(std::max(hz, 1.0f), (float) sr * 0.49f);
+        const float sc = f / (float) sr * 3.14159265f;
+        tgt.coef = std::tan(std::min(0.499f * 3.14159265f, sc / (sc + 1.0f)));
+        const float rp = std::min(std::max(res, 0.0f), 1.0f);
+        tgt.res = std::sqrt(rp);
+        tgt.drive = (driveGain - 1.0f) * 2.0f + 1.0f;
+        const float driveDb = 20.0f * std::log10(std::max(driveGain, 1e-6f));
+        tgt.boost = (driveDb / 36.0f) * 0.05f;
+        const float b = std::min(std::max(blend - 1.0f, -1.0f), 1.0f);
+        tgt.bd = std::sqrt(1.0f - b * b);
+        tgt.lo = b < 0.0f ? -b : 0.0f;
+        tgt.hi = b >= 0.0f ? b : 0.0f;
+        if (fresh) cur = tgt;
+    }
+
+    void process(float *l, float *r, int n)
+    {
+        const float inv = 1.0f / (float) std::max(n, 1);
+        Coefs d;
+        d.coef = (tgt.coef - cur.coef) * inv; d.res = (tgt.res - cur.res) * inv; d.drive = (tgt.drive - cur.drive) * inv; d.boost = (tgt.boost - cur.boost) * inv;
+        d.lo = (tgt.lo - cur.lo) * inv; d.bd = (tgt.bd - cur.bd) * inv; d.hi = (tgt.hi - cur.hi) * inv;
+        Coefs c = cur;
+        float *io[2] = { l, r };
+        for (int i = 0; i < n; i++) {
+            c.coef += d.coef; c.res += d.res; c.drive += d.drive; c.boost += d.boost; c.lo += d.lo; c.bd += d.bd; c.hi += d.hi;
+            const float k = c.coef, kk = k * k, k2 = 2.0f * k;
+            const float rin = std::min(std::max(c.res / std::max(1.0f, k2 * 0.25f + 0.97f), 0.0f), 1.0f);
+            const float reso = 0.1f + (2.15f - 0.1f) * rin + c.boost;
+            const float rsq = reso * reso;
+            const float norm = 1.4f / (rsq + 1.0f);
+            const float compute = reso * (kk - k) + 1.0f;
+            const float feedMult = 1.0f / (compute * (k + 1.0f));
+            const float preNorm = 1.0f / ((kk - k) + 1.0f);
+            const float drive = std::max(0.1f, c.drive) / (rsq * 0.5f + 1.0f);
+            for (int ch = 0; ch < 2; ch++) {
+                St &s = st[ch];
+                float x = io[ch][i] * (1.0f / kVitalFull);
+                if (steep) {
+                    const float in1 = x * preNorm;                                          /* no feedback: the state it would read is never set */
+                    float dd = k * (in1 - s.p1); s.p1 += dd; const float o1 = s.p1; s.p1 += dd;
+                    dd = k * (o1 - s.p2); s.p2 += dd; const float o2 = s.p2; s.p2 += dd;
+                    const float bp = o1 - o2, hp = in1 - o1 - bp;
+                    x = c.bd * bp + c.hi * hp + c.lo * o2;
+                }
+                const float in1 = norm * x;
+                float dd = k * (in1 - s.a1); s.a1 += dd; const float o1 = s.a1; s.a1 += dd;
+                dd = k * (o1 - s.a2); s.a2 += dd; const float o2 = s.a2; s.a2 += dd;
+                const float bp = o1 - o2, hp = in1 - o1 - bp;
+                const float pass = c.lo * o2 + c.bd * bp + c.hi * hp;
+                const float feedback = s.s4 + (pass + k * (pass - s.s3));
+                const float loop = vitalTanh(drive * pass + reso * (feedMult * feedback));
+                dd = k * (loop - s.s3); s.f3 += dd; const float o3 = quickTanh(s.f3); s.f3 += dd; s.s3 = quickTanh(s.f3);
+                const float in4 = loop - o3;
+                dd = k * (in4 - s.s4); s.f4 += dd; s.f4 += dd; s.s4 = quickTanh(s.f4);
+                io[ch][i] = loop * (1.0f / 1.4f) * kVitalFull;
+            }
+        }
+        cur = tgt;
+        fresh = false;
+        for (int ch = 0; ch < 2; ch++) {
+            float *v[] = { &st[ch].a1, &st[ch].a2, &st[ch].f3, &st[ch].s3, &st[ch].f4, &st[ch].s4, &st[ch].p1, &st[ch].p2 };
+            for (float *q : v) if (std::fabs(*q) < 1e-15f) *q = 0.0f;
+        }
+    }
+};
+
 } // namespace tb

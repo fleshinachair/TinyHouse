@@ -1416,7 +1416,7 @@ static const char *const tb_opts_37[] = { "Held", "Always" };
 static const char *const tb_opts_38[] = { "Off", "On", "Phaser", "Formant" };
 static const char *const tb_opts_39[] = { "Free", "Host" };
 static const char *const tb_opts_40[] = { "A I U O", "A O I E" };
-static const char *const tb_opts_41[] = { "Off", "Analog", "Ladder" };
+static const char *const tb_opts_41[] = { "Off", "Analog", "Ladder", "Dirty" };
 
 static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "wt1_table", TB_PATH, 0, 0, 0, 0, 0 },
@@ -2768,8 +2768,8 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "eq2_ffine", TB_INT, 0, 127, 64, 0, 0 },
     { "eq3_ffine", TB_INT, 0, 127, 64, 0, 0 },
     { "eq4_ffine", TB_INT, 0, 127, 64, 0, 0 },
-    { "flt_vsk", TB_ENUM, 0, 2, 0, 3, tb_opts_41 },
-    { "flt2_vsk", TB_ENUM, 0, 2, 0, 3, tb_opts_41 },
+    { "flt_vsk", TB_ENUM, 0, 3, 0, 4, tb_opts_41 },
+    { "flt2_vsk", TB_ENUM, 0, 3, 0, 4, tb_opts_41 },
 };
 
 /* chain_params: fully static, served verbatim. It MUST stay cheap —

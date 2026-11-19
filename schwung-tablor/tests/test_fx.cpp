@@ -906,6 +906,41 @@ static void testFxFilter()
     CHECK(lo < -20.0 && std::fabs(hi) < 0.5, "a high-pass does the opposite (%.1f / %.1f dB)", lo, hi);
     const double moved = filterGainDb(1, 8000.0f, 0.7071f, 4000.0);
     CHECK(std::fabs(moved) < 1.0, "the cutoff can be moved from block to block: at 8 kHz the 4 kHz tone passes (%.1f dB)", moved);
+    {   /* Filter FX Drive (Vital's law): an open low-pass with 20 dB of drive saturates a sine, so its third harmonic rises well above the undriven one's; with the drive at 0 the stage is as it was */
+        auto third = [&](float drive01) {
+            Fx fx(SR);
+            fx.set(FxSettings());
+            fx.setFilter(true, 1, 20000.0f, 0.7071f, 1.0f, drive01, 0.5f);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.15 * std::sin(6.283185307 * 440.0 * i / SR));
+            run(fx, L, R);
+            double a1 = 0, b1 = 0, a3 = 0, b3 = 0;
+            for (int i = n / 2; i < n; i++) {
+                const double ph = 6.283185307 * 440.0 * i / SR;
+                a1 += L[(size_t) i] * std::sin(ph); b1 += L[(size_t) i] * std::cos(ph);
+                a3 += L[(size_t) i] * std::sin(3.0 * ph); b3 += L[(size_t) i] * std::cos(3.0 * ph);
+            }
+            return 20.0 * std::log10(std::sqrt(a3 * a3 + b3 * b3) / std::sqrt(a1 * a1 + b1 * b1) + 1e-9);
+        };
+        const double clean = third(0.0f), driven = third(0.67f);
+        CHECK(driven > clean + 25.0, "Filter FX Drive saturates: the third harmonic is %.1f dB against %.1f dB undriven", driven, clean);
+    }
+    {   /* Vital's filter loses passband as its resonance rises, even at 0 dB drive (probe: -5.2 dB at resonance 0.54): the Vital law (last argument) takes a quiet sine down by about that, Serum's leaves it */
+        auto level = [&](bool vitalLaw) {
+            Fx fx(SR);
+            fx.set(FxSettings());
+            fx.setFilter(true, 1, 20000.0f, 0.7071f, 1.0f, 0.0f, 0.54f, vitalLaw);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.01 * std::sin(6.283185307 * 440.0 * i / SR));
+            run(fx, L, R);
+            double e = 0; for (int i = n / 2; i < n; i++) e += (double) L[(size_t) i] * L[(size_t) i];
+            return 10.0 * std::log10(e / (n / 2) + 1e-18);
+        };
+        const double drop = level(false) - level(true);
+        CHECK(drop > 4.0 && drop < 6.5, "the Vital filter law takes the passband down about 5 dB at resonance 0.54 (%.1f dB)", drop);
+    }
 }
 
 /* Chorus, Flanger and Phaser: bypass when off, the wet levels they were measured at, and what each does to a noise burst. */
@@ -1208,6 +1243,32 @@ static void testLfo()
         CHECK(std::fabs(period - 0.2) < 0.045, "at the rate asked for (one cycle %.3f s against 0.200)", period);
     }
 
+    /* LFO Tempo: switched on, the pot is the rate at 120 BPM and the host tempo scales it; switched off the host tempo is ignored; no host tempo (0) counts as 120 */
+    {
+        auto periodAt = [&](bool tempo, float bpm, float pot = 75, int maxLag = 60) {
+            Engine e;
+            setup(e, true, pot); e.pots[TB_P_LFO1_TEMPO] = tempo ? 1.0f : 0.0f; e.setHostBpm(bpm);
+            playChord(e);
+            const auto v = levels(e, 260);
+            std::vector<double> d(v.begin() + 10, v.end());
+            double mean = 0; for (double x : d) mean += x; mean /= (double) d.size();
+            for (double &x : d) x -= mean;
+            int best = 0; double bv = -1e18;
+            for (int lag = 4; lag <= maxLag; lag++) {
+                double a = 0; for (size_t i = 0; i + (size_t) lag < d.size(); i++) a += d[i] * d[i + (size_t) lag];
+                a /= (double) (d.size() - (size_t) lag);                     /* the mean product, so a long lag is not out-voted by a short one */
+                if (a > bv) { bv = a; best = lag; }
+            }
+            return best * 0.0145;
+        };
+        const double p60 = periodAt(true, 60), p120 = periodAt(true, 120), p240 = periodAt(true, 240, 60, 26), pnone = periodAt(true, 0), pfree = periodAt(false, 60);
+        CHECK(std::fabs(p120 - 0.2) < 0.03, "Tempo on at 120 BPM keeps the rate (one cycle %.3f s against 0.200)", p120);
+        CHECK(std::fabs(p60 - 0.4) < 0.05, "Tempo on at 60 BPM halves the rate (one cycle %.3f s against 0.400)", p60);
+        CHECK(std::fabs(p240 - 0.2527) < 0.03, "Tempo on at 240 BPM doubles the rate (one cycle %.3f s against 0.253, a pot-60 LFO is 0.505 s at 120)", p240);
+        CHECK(std::fabs(pnone - 0.2) < 0.03, "Tempo on with no host tempo counts as 120 (one cycle %.3f s against 0.200)", pnone);
+        CHECK(std::fabs(pfree - 0.2) < 0.03, "Tempo off ignores the host tempo (one cycle %.3f s against 0.200)", pfree);
+    }
+
     /* Trig restarts the shape on every note: the same note struck at different times swings the same way. Free joins the
      * running cycle, so it does not. */
     auto struck = [&](float mode, int idle) {
@@ -1298,6 +1359,17 @@ static void testVitalDist()
         int at = n / 2;
         for (int i = n / 2; i < n; i++) if (in[(size_t) i] > in[(size_t) at]) at = i;
         CHECK(std::fabs(L[(size_t) at] - 0.5 * full) < 0.01, "the linear fold turns back at full scale (%.4f at the input's peak, wanted %.4f)", L[(size_t) at], 0.5 * full);
+    }
+    {   /* Bit Crush: drive 0 dB is a step of 0.25 of full scale; a sine of 0.2158 of full scale rounds to 0 or 0.25, every sample a multiple of the step */
+        FxSettings c; c.distVital = true; c.distMix = 1.0f; c.distMode = 6; c.distGain = 1.0f;
+        Fx fx(SR); fx.set(c);
+        const int n = (int) SR / 2;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin(6.283185307 * 220.0 * i / SR));
+        run(fx, L, R);
+        double pk = 0, off = 0;
+        for (int i = n / 2; i < n; i++) { pk = std::max(pk, (double) std::fabs(L[(size_t) i])); const double q = L[(size_t) i] / (0.25 * full); off = std::max(off, std::fabs(q - std::round(q))); }
+        CHECK(std::fabs(pk - 0.25 * full) < 0.003 && off < 0.02, "Bit Crush rounds to a step of ((drive + 30) / 60)^2 of Vital's full scale (peak %.4f, off the grid by %.3f)", pk, off);
     }
     s.distMode = 3; s.distGain = (float) full / 0.1f;
     CHECK(std::fabs(peakOf(s, 0.1) - full) < 0.004, "the sine fold peaks at a quarter turn (%.4f)", peakOf(s, 0.1));

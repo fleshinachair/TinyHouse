@@ -301,7 +301,7 @@ def filter_type(model: int, style: int, blend: float) -> tuple[int, str | None]:
 # Modulation: LFOs, macros, envelope routes, velocity
 # ---------------------------------------------------------------------------
 LR_DST = {"wt1_pos": 1, "wt2_pos": 2, "wt3_pos": 18, "wt1_level": 3, "wt2_level": 4, "wt3_level": 19, "wt1_pan": 11, "wt2_pan": 12,
-          "wt1_pitch": 43, "wt2_pitch": 44, "wt3_pitch": 45, "cutoff": 13, "res": 14}          # the engine's lr_dst / me_dst list (tb_opts_3)
+          "wt1_pitch": 43, "wt2_pitch": 44, "wt3_pitch": 45, "wt1_fine": 61, "wt2_fine": 62, "wt3_fine": 63, "cutoff": 13, "res": 14}          # the engine's lr_dst / me_dst list (tb_opts_3)
 FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("delay_on", "dly_mix"), "chorus_dry_wet": ("chorus_on", "chor_mix"),
                "flanger_dry_wet": ("flanger_on", "flan_mix"), "phaser_dry_wet": ("phaser_on", "phas_mix"), "distortion_mix": ("distortion_on", "dist_mix"),
                "delay_feedback": ("delay_on", "dly_fb")}
@@ -462,14 +462,14 @@ def lfo_period_s(sync: int, tempo: float) -> float:
 LFO_LINE_SMOOTH = True
 
 
-def lfo_shape(lfo: dict) -> list[int]:
-    """Vital's LFO line as the engine's 16 points (0..127) of one cycle: the value is 1 - y, each segment bent by its power."""
+def lfo_shape(lfo: dict, n: int = 16) -> list[int]:
+    """Vital's LFO line as the engine's n points (0..127) of one cycle (16 for the shape table, 64 for its Hi-Res one): the value is 1 - y, each segment bent by its power."""
     pts = lfo.get("points") or [0.0, 1.0, 1.0, 1.0]
     xs, ys = pts[0::2], pts[1::2]
     pw = lfo.get("powers") or [0.0] * len(xs)
     out = []
-    for i in range(16):
-        x = i / 16.0
+    for i in range(n):
+        x = i / float(n)
         y = ys[-1]
         for j in range(len(xs) - 1):
             if xs[j] <= x < xs[j + 1] or (x >= xs[-1] and j == len(xs) - 2):
@@ -506,7 +506,7 @@ def dest_spec(name: str, s: dict, P: dict, main_filter: int) -> dict | None:
             return {"lr": LR_DST.get(f"wt{n}_pan"), "x": 2.0, "key": f"wt{n}_pan", "pot": 126.0, "lo": 0, "hi": 127}
         if what == "transpose":
             return {"lr": LR_DST[f"wt{n}_pitch"], "x": 96.0 / 48.0, "key": f"wt{n}_tune", "pot": 96.0, "lo": -72, "hi": 72}
-        return {"lr": LR_DST[f"wt{n}_pitch"], "x": 2.0 / 48.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}
+        return {"lr": LR_DST[f"wt{n}_fine"], "x": 1.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}            # Vital's osc Tune spans 2 st, the engine's Fine destination moves 2 st per unit: a vibrato of cents keeps its depth
     if name == "sample_level" and s.get("sample_on"):
         return {"lr": 39, "x": 1.0, "key": "smp_level", "pot": 127.0, "lo": 0, "hi": 127}       # the engine's "Smp1 Level" destination
     if s.get("filter_1_on"):
@@ -689,7 +689,8 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         keyflat = False
         if sync in (1, 2, 3):
             hz = 1.0 / lfo_period_s(sync, s.get(f"lfo_{k}_tempo", 4.0))
-            notes.append(f"LFO {k} is tempo-synced: carried at its 120 BPM rate")
+            P[f"lfo{slot}_tempo"] = 1                  # the rate is the one at 120 BPM; the engine scales it by the host tempo
+            notes.append(f"LFO {k} is tempo-synced: it follows the host tempo")
         else:
             hz = 2.0 ** s.get(f"lfo_{k}_frequency", 0.0)
             if sync == 4:
@@ -705,10 +706,15 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         mode = int(s.get(f"lfo_{k}_sync_type", 0))
         P[f"lfo{slot}_mode"] = 1 if mode == 1 else (2 if mode in (2, 3) else 0)
         shape = lfo_shape(lf)
+        hi = lfo_shape(lf, 64)                                                           # the 64-point shape the engine reads instead (a gate's or a step's narrow edges survive it)
         if keyflat:
             shape = [int(round(float(np.mean(shape))))] * len(shape)
+            hi = [int(round(float(np.mean(hi))))] * len(hi)
         for j, v in enumerate(shape):
             P[f"lfo{slot}_s{j}"] = v
+        P[f"lfo{slot}_hr"] = 1
+        for j, v in enumerate(hi):
+            P[f"lfo{slot}_h{j}"] = v
         P[f"lfo{slot}_smooth"] = 0
         # Vital's LFO Smooth (synth_lfo.cpp: a one-pole low-pass with half life 0.2 * 2^smooth_time seconds, so a time constant of 0.2885 * 2^smooth_time), Delay, Fade In and Phase. Fade In is
         # skipped by Vital while Smooth is on (the one-pole replaces the fade blend); the engine's smoother has the same law as Serum's, 2 ms to 0.7 s.
@@ -1077,6 +1083,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P[f"{k}_upow"] = round(float(CLAMP(s[f"osc_{o}_detune_power"], -8.0, 8.0)), 3)
         P[f"{k}_ublend"] = round(100.0 * CLAMP(s.get(f"osc_{o}_unison_blend", 0.8), 0.0, 1.0), 2)
         P[f"{k}_ustack"] = int(CLAMP(s.get(f"osc_{o}_stack_style", 0), 0, 10)) if voices > 1 else 0
+        # a voice starts at random x Random Phase of a cycle, plus the Phase knob as a constant offset (synth_oscillator.cpp reset / process): carried as the engine's Osc Phase
+        P[f"{k}_rph"] = pot(127 * CLAMP(s.get(f"osc_{o}_random_phase", 1.0), 0.0, 1.0))
+        P[f"{k}_phs"] = pot(127 * (s.get(f"osc_{o}_phase", 0.0) % 1.0))
         P[f"{k}_spread"] = pot(127 * s[f"osc_{o}_stereo_spread"])
         dest = int(s[f"osc_{o}_destination"])
         P[f"{k}_post"] = {3: 1, 4: 3}.get(dest, 0)                                            # Effects: past the filters, into the effects; Direct Out: past the effects as well
@@ -1126,6 +1135,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             continue
         mdl, sty, bl = int(s[f"filter_{fi}_model"]), int(s[f"filter_{fi}_style"]), s[f"filter_{fi}_blend"]
         P[f"{pre}_type"], why = filter_type(mdl, sty, bl)
+        P["flt_vdl"] = 1                                                                        # Vital's filter drive law (the engine's Filter Drive Law switch is shared by both filters)
         if why:
             notes.append(f"filter {fi}: {why}")
         if VITAL_PHASER and mdl == 7:
@@ -1176,6 +1186,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         # Vital's Filter FX is a third filter with its own model, cutoff (MIDI note), resonance, drive and mix: the engine's Filter FX stage, same cutoff space as the voice filters
         mdl, sty, bl = int(s["filter_fx_model"]), int(s["filter_fx_style"]), s["filter_fx_blend"]
         P["fxf_on"] = 1
+        P["flt_vdl"] = 1                                                                        # the same saturating stage as the voice filters, at every drive
         P["fxf_type"], why = filter_type(mdl, sty, bl)
         if why:
             notes.append(f"filter FX: {why}")
@@ -1185,8 +1196,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         carried.append("filter FX")
         if abs(s.get("filter_fx_keytrack", 0)) > 1e-3:
             P["fxf_key"] = pot(64 + 63 * CLAMP(float(s["filter_fx_keytrack"]), -1.0, 1.0))             # measured (calibration/vital_fxkey_probe.py): the cutoff moves by keytrack x (the last note - 60) semitones
-        if s.get("filter_fx_drive", 0) > 0.5:
-            notes.append("filter FX drive not carried")
+        if s.get("filter_fx_drive", 0) > 0.0:
+            P["fxf_drive"] = pot(127 * CLAMP(s["filter_fx_drive"], 0.0, 30.0) / 30.0)                  # Vital's drive law (the same stage as the voice filters')
 
     # --- voice
     poly = int(s.get("polyphony", 8))
@@ -1310,11 +1321,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         # Vital's measured law (calibration/vital_dist_probe.py, vital_distfilt_probe.py), the engine's Distortion Calibrated = Vital: drive in dB -30..30 over the pot's 0..127, the mix a linear crossfade,
         # the curve one of tanh / hard clip / triangle fold / sin(pi/2 x) / hold, and the filter a Q 0.5..14 state-variable before (order 1) or after (order 2) the curve, on the wet part only
         P["dist_cal"] = 2
-        P["dist_mode"] = {0: 0, 1: 2, 2: 5, 3: 3, 4: 0, 5: 4}[ty]
+        P["dist_mode"] = {0: 0, 1: 2, 2: 5, 3: 3, 4: 6, 5: 4}[ty]
         P["dist_drive"] = pot((s["distortion_drive"] + 30.0) * 127.0 / 60.0)
         P["dist_mix"] = pot(127 * s["distortion_mix"])
-        if ty == 4:
-            notes.append("distortion Bit Crush not carried: read as Soft (approximate)")
         if ty == 5:
             notes.append("distortion Down Sample: a plain hold of the measured length (Vital's own output past ~12 dB drive is a ping-pong that is not reproduced)")
         order = int(s.get("distortion_filter_order", 0))

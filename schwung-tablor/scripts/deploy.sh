@@ -49,12 +49,6 @@ ssh "$HOST" "cd $DEST && \
     rm -f ui_chain.js && \
     chmod 755 dsp.so && ls -l dsp.so module.json"
 
-# Loader test binary (run it on the device: cd $DEST && ./tablor_loadtest ./dsp.so)
-if [ -f "$SRC/build/tablor_loadtest" ]; then
-    scp -q "$SRC/build/tablor_loadtest" "$HOST:$DEST/tablor_loadtest.new"
-    ssh "$HOST" "cd $DEST && mv -f tablor_loadtest.new tablor_loadtest && chmod 755 tablor_loadtest"
-fi
-
 # Factory wavetables, if present locally
 if command -v rsync >/dev/null && [ -d "$SRC/src/wavetables" ] && [ -n "$(ls -A "$SRC/src/wavetables" 2>/dev/null)" ]; then
     rsync -az -e ssh "$SRC/src/wavetables/" "$HOST:$DEST/wavetables/"

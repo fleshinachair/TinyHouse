@@ -760,7 +760,7 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.hydDetune = pot01(pots[TB_P_HYD_DET]);
     s.hydRate = pot01(pots[TB_P_HYD_RATE]);
     s.hydWet = all ? pot01(pots[TB_P_HYD_WET]) : 0.0f;
-    s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 5);
+    s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 6);
     s.distHold = 1 + (int) pots[TB_P_DIST_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one (1..128 samples; calibration/dev/probe_dist_downsample.py) */
     s.distVital = pots[TB_P_DIST_CAL] >= 2.0f;
     s.distCal = pots[TB_P_DIST_CAL] >= 1.0f && !s.distVital;
@@ -1097,7 +1097,7 @@ void Engine::renderBlock(int16_t *out, int frames)
                 v.render(c, L, R, n);
 
         for (int l = 0; l < kLfos; l++) {               /* the Free LFOs run on whether or not a note is down */
-            lfoFree[l] += potLfoHz(pots[TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE)]) * (float) n / 44100.0f;
+            lfoFree[l] += lfoHz(pots, l, hostBpm) * (float) n / 44100.0f;
             lfoFree[l] -= std::floor(lfoFree[l]);
         }
 
@@ -1118,7 +1118,7 @@ void Engine::renderBlock(int16_t *out, int frames)
             const float note = potFilterNote(pots[TB_P_FXF_FREQ]) + env * potBipolar(pots[TB_P_FXF_ENV]) * filterWidth + fxfMod * filterWidth + fxfKey;
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
-            fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f), pots[TB_P_FXF_WET] / 127.0f + fxfWet);
+            fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f), pots[TB_P_FXF_WET] / 127.0f + fxfWet, pots[TB_P_FXF_DRIVE] / 127.0f, res, pots[TB_P_FLT_VDL] >= 0.5f);
             {                                           /* an envelope / LFO route to the Distortion's Wet: the newest voice's, like the Filter FX cutoff above */
                 float dm = 0.0f;
                 uint32_t newestD = 0;
@@ -1155,7 +1155,7 @@ void Engine::renderBlock(int16_t *out, int frames)
                 if (!bon && !fxBus[b].filterOn()) continue;
                 const float bnote = potFilterNote(bp[TB_P_FXF_FREQ]) + env * potBipolar(bp[TB_P_FXF_ENV]) * filterWidth;
                 const float bres = std::clamp(bp[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
-                fxBus[b].setFilter(bon, (int) bp[TB_P_FXF_TYPE], std::clamp(midiNoteToHz(bnote), 4.0f, 20000.0f), kFilterQ / (1.0f - bres * 0.99f), bp[TB_P_FXF_WET] / 127.0f);
+                fxBus[b].setFilter(bon, (int) bp[TB_P_FXF_TYPE], std::clamp(midiNoteToHz(bnote), 4.0f, 20000.0f), kFilterQ / (1.0f - bres * 0.99f), bp[TB_P_FXF_WET] / 127.0f, bp[TB_P_FXF_DRIVE] / 127.0f, bres, bp[TB_P_FLT_VDL] >= 0.5f);
             }
         }
         for (int b = 0; b < 2; b++) {                   /* the buses' racks: their output joins the main path ahead of the main rack (probe: a Filter FX in the main rack filters what a bus returns) */

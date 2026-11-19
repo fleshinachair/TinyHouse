@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.1"
+VERSION = "0.9.6"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being
@@ -394,7 +394,9 @@ MOD_DST = ["None",
            # The master EQ bands' Freq and Gain knobs, moved by an LFO / envelope route (fx.h setEqMod).
            "EQ1 Freq", "EQ1 Gain", "EQ2 Freq", "EQ2 Gain", "EQ3 Freq", "EQ3 Gain", "EQ4 Freq", "EQ4 Gain",
            # The Vital distortion's Drive (a fraction of its 60 dB range), and its filter's Cutoff (a fraction of 128 notes), Res and Blend (a fraction of 0..2), moved by an LFO / envelope route (fx.h setVitalDistMod).
-           "Dist Drive", "Dist Flt Cut", "Dist Flt Res", "Dist Flt Blend"]
+           "Dist Drive", "Dist Flt Cut", "Dist Flt Res", "Dist Flt Blend",
+           # An oscillator's pitch in semitones at 2 per unit of the route (a vibrato of a few cents: the 48-per-unit WT Pitch destination steps by 0.76 st over a 127-step amount).
+           "WT1 Fine", "WT2 Fine", "WT3 Fine"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -536,7 +538,7 @@ TONE = dict(
     # tanh, Asym adds a bias (even harmonics, the diode/tube/overdrive family), Hard clips. No page on the device:
     # the converter sets it from a Serum Distortion effect and fits it.
     ddrive = pot("dist_drive", "DDRV", "Distortion Drive", 0),
-    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine", "Hold", "Fold"], 0),
+    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine", "Hold", "Fold", "Crush"], 0),
     dmix   = pot("dist_mix",   "DMIX", "Distortion Mix",   127),
     # Calibrated distortion = Vital (2): Vital's measured law (calibration/vital_dist_probe.py): Drive is the gain in dB (-30..+30), Mode the curve (Soft tanh, Hard clip, Fold = a triangle fold, Sine = sin(pi/2 x), Hold),
     # Mix a LINEAR crossfade of the dry and the curve's output, and the curve works on the signal against Vital's own full scale (the engine's pre-master level is 6.7 dB under it). The filter (below the FX Order bank) is Vital's.
@@ -813,6 +815,20 @@ BANKS = [
     ("Vital Filter Blend", False, [row(enum("flt_vb", "VB1", "Filter Blend Mode", ["Off", "On", "Phaser"], 0), num("flt_blend", "VBL", "Filter Blend", 0, 127, 0),
                                        enum("flt2_vb", "VB2", "Filter 2 Blend Mode", ["Off", "On", "Phaser"], 0), num("flt2_blend", "VBM", "Filter 2 Blend", 0, 127, 0),
                                        num("flt_vbg", "VD1", "Filter Passband Drop", 0, 127, 0), num("flt2_vbg", "VD2", "Filter 2 Passband Drop", 0, 127, 0))]),
+    # After Vital Filter Blend, for the same reason. LFO Tempo: a synced LFO of the source preset (Serum's BeatSync, Vital's Tempo / Dotted / Triplets) plays its Rate pot as the rate at 120 BPM and the host
+    # tempo scales it (rate x BPM / 120); Free leaves the rate a fixed Hz, as every LFO was before. No host tempo (0) counts as 120.
+    ("LFO Tempo", False, [row(*[enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host"], 0) for n in (1, 2, 3, 4)])]),
+    # After LFO Tempo, for the same reason. Filter Drive Law: Serum saturates before and after the filter (tanh in, tanh out); Vital saturates the filter's input with a gain of drive / (1 + 2 resonance) and takes the output down by
+    # 1 / sqrt(drive) (filters/sallen_key_filter.cpp setupFilter, calibration/vital_vfilter_probe.py --drive). Serum (0) leaves every preset as it was.
+    ("Filter Drive Law", False, [row(enum("flt_vdl", "VDL", "Filter Drive Law", ["Serum", "Vital"], 0), num("fxf_drive", "VXD", "FX Filter Drive", 0, 127, 0))]),
+    # After Filter Drive Law, for the same reason. LFO Hi-Res: a second shape of 64 points per LFO (0..127 over one cycle, linear between points), read instead of the 16 points when LFO Hi-Res is on. Vital's lines have steps and
+    # narrow pulses (a gate is a few percent of a cycle) that 16 points smear. Off (0) leaves every preset as it was. Each LFO's 65 parameters are consecutive: the switch, then the 64 points.
+    ("LFO Hi-Res", False, [row(*c) for n in (1, 2, 3, 4) for c in (lambda L: [L[i:i + 8] for i in range(0, len(L), 8)])(
+        [enum(f"lfo{n}_hr", f"H{n}R", f"LFO{n} Hi-Res", ["Off", "On"], 0)] + [num(f"lfo{n}_h{k}", f"H{n}{k:02X}", f"LFO{n} Hi-Res {k}", 0, 127, 64) for k in range(64)])]),
+    # After LFO Hi-Res, for the same reason. Osc Phase (modulators / synth_oscillator.cpp: a voice starts at random x Random Phase of a cycle, and the Phase knob is added as a constant offset): Random Phase 127 (the default) is the engine's
+    # free-running start, 0 starts every voice at the Phase offset (0..127 over one cycle). Two oscillators at the same pitch then keep a fixed phase to each other, so their harmonics add or cancel the same way on every note.
+    ("Osc Phase", False, [row(num("wt1_rph", "RP1", "Osc A Random Phase", 0, 127, 127), num("wt2_rph", "RP2", "Osc B Random Phase", 0, 127, 127), num("wt3_rph", "RP3", "Osc C Random Phase", 0, 127, 127)),
+                          row(num("wt1_phs", "PS1", "Osc A Phase", 0, 127, 0), num("wt2_phs", "PS2", "Osc B Phase", 0, 127, 0), num("wt3_phs", "PS3", "Osc C Phase", 0, 127, 0))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.6
+
+**Fixed: synced LFOs now follow the Move's tempo.** A tempo-synced LFO (Serum BeatSync, Vital Tempo / Dotted / Triplets) used to run at its 120 BPM rate whatever the tempo; it now scales with the Move's BPM. Vital's tempo-synced chorus, flanger and phaser still run at 120 BPM.
+
+**Vital imports sound closer.** The engine gained, all off in Serum presets:
+- Vital's filter drive law (its drive saturates even at 0 dB and costs passband with resonance), also on the Filter FX.
+- Bit Crush (it was read as Soft).
+- A fine pitch route, so a Vital oscillator Tune vibrato of a few cents is no longer rounded away.
+- 64-point LFO shapes, so Vital's stepped and gated LFOs keep their edges.
+- The oscillator start phase and random phase (a preset with fixed phases, such as Phatt_Bass, no longer starts from a random phase).
+
+**Reimport your Vital presets** to get these; presets saved with 0.9.5 still load and sound as they did, because every new setting defaults to the old behaviour. Serum presets need no reimport, except ones with a synced LFO if the Move's tempo is not 120 BPM.
+
+**Update**: replace the `tinyhouse` folder on the Move with the one in `tinyhouse-module.tar.gz` and restart the Move, so the new engine is loaded.
+
 ## 0.9.5
 
 **New: Vital presets import.** TinyHouse now accepts [Vital](https://vital.audio) presets (`.vital` files, loose or zipped, and `.vitalbank`) the same way as Serum ones, in the remote page's Import or with the scripts. They carry their own wavetables and samples. Expect a similar sound, not an identical one; Vital imports are not level-matched, so set the volume by ear.

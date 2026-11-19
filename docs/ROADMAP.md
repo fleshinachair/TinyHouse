@@ -1,6 +1,6 @@
 # Roadmap
 
-State on 2026-11-19. The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
+State on 2026-11-20. The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
 put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of
@@ -18,7 +18,7 @@ Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 
 | Release | Content |
 |---|---|
-| 0.9.6 | Tempo-following LFOs; drop `tablor_loadtest` from `deploy.sh`; clean-install and upgrade test |
+| 0.9.6 | Done: tempo-following LFOs, Vital fixes (filter drive law, Filter FX drive, Bit Crush, fine-pitch routes, 64-point LFO shapes, oscillator start phase), `tablor_loadtest` dropped from `deploy.sh`. Clean-install test on a fresh Move still to do before 1.0 |
 | 0.9.7 | State-format changes (macro min / max, wavetable paging), then freeze the format |
 | 0.9.8 | Formant voice filter; the cheap Vital leads (Phaser regression, `lfo_N_stereo`, attack power) |
 | 0.9.9 | Release candidate: performance pass, docs, outside testers on their own Move and presets (Serum testing so far is positive; Vital testers are being sought) |
@@ -38,9 +38,10 @@ browser, Osc / Sample / Macros / FX tabs, macros you assign yourself); the Move'
 
 The Vital front end (`converter/vital_import.py`) runs on the same engine; 85 presets from the development folder convert with no errors and sound close. Measured laws and the A/B method are in `docs/VITAL_COVERAGE.md`. Still open:
 
+- Phatt_Bass: the multiband compressor's per-band boost differs from Vital's (top end 3 to 6 dB under) and the delay's side signal is about 5 dB low. KEYS - The House: more reverb and delay in Vital. Space Melody: envelope routes into reverb / delay wet are not carried. PD type 9 (FM from the sample) on Faded Chords / Haven Chords. The Diode filter's drive is still about 22 dB hot.
 - The Phaser filter scores worse than before on Thumpus and KEYS - LoFi Trap (1 to 2 dB); Thumpus also has a Filter FX wet-level lead.
 - Unison morph spread, frame / distortion spread with unison, and Space Station's comb 2 path and dry oscillators.
-- Filter FX steepness and drive, `lfo_N_stereo`, attack power, the spare-envelope route limit, the delay-time route (Whipple), Diode and other model blends.
+- Filter FX steepness, `lfo_N_stereo`, attack power, the spare-envelope route limit, the delay-time route (Whipple), Diode and other model blends.
 - Waterfall card legibility when waves nest (the scrolled-to frame is highlighted; fewer rows or dotted back rows are options).
 
 ## Next, biggest effect first
@@ -48,7 +49,7 @@ The Vital front end (`converter/vital_import.py`) runs on the same engine; 85 pr
 | # | Item | What it takes |
 |---|---|---|
 | 1 | **Formant voice filter** (FormantONE / TWO / TWB): about 10 of 626 factory presets, and Lead - Kisaya | Measured (`calibration/dev/probe_formant.py`, peak tables in TRANSLATION_RULES); needs an engine filter with three moving formants, key tracked. The importer drops these presets today |
-| 2 | **Tempo-following LFOs.** A synced LFO runs at its 120 BPM rate, not at the Move's tempo | An LFO sync option in the engine that follows the host BPM (the delay already does); `map_lfos` sets it only where the file says synced |
+| 2 | **Tempo-following mod effects.** A Vital tempo-synced chorus, flanger or phaser runs at its 120 BPM rate (synced LFOs now follow the Move's tempo) | The same switch for the mod effects' rates, set by the converter where the file says synced |
 | 3 | **Granular gaps**: a warp on the grains (11 of 58 granular presets), a route into Random Pitch / Warp / Position, Random Start, key and velocity zones, a fourth sample slot | probes P8 and the rest in [GRANULAR_PROBE_NOTES.md](GRANULAR_PROBE_NOTES.md); 38 of the 58 have no granular gap left, 32 no gap at all |
 | 4 | **Effects**: a second distortion, compressor or delay stage; a filter before the distortion; HyperD, Delay, Comp or Bode in a Split branch; Bode; sends moved by an LFO or envelope | extend `fx.h` and `fxmap.py`. A preset whose only gap is a Bode already imports without it |
 | 5 | **Noise- and Filter-1-driven warps**, DLM, spectral tables, Sync Var; the `Comb2` / `Combs` / `L6` comb variants, Diffuser, Reverb and RM filter models | the largest groups among the factory presets the importer drops; each needs a probe first (`census.py` lists what blocks what) |

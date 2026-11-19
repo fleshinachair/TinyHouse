@@ -90,6 +90,7 @@ enum ModDst {
     MD_WT1_WARP, MD_WT2_WARP, MD_WT3_WARP,     /* an oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob 0..1, added to wtN_xa), moved by an LFO / envelope route */
     MD_EQ1_FREQ, MD_EQ1_GAIN, MD_EQ2_FREQ, MD_EQ2_GAIN, MD_EQ3_FREQ, MD_EQ3_GAIN, MD_EQ4_FREQ, MD_EQ4_GAIN,     /* the master EQ's band Freq (a fraction of the log scale) and Gain (a fraction of 48 dB): read by the engine from the newest voice (eqMod) */
     MD_DISTV_DRIVE, MD_DISTV_CUT, MD_DISTV_RES, MD_DISTV_BLEND,     /* the Vital distortion's Drive and filter Cutoff, Res and Blend, each a fraction of the control's range: read by the engine from the newest voice (distVMod) */
+    MD_WT1_FINE, MD_WT2_FINE, MD_WT3_FINE,     /* an oscillator's pitch in semitones, 2 per unit of the route: a vibrato of a few cents (Vital's osc Tune knob spans 2 st), which the 48-per-unit Pitch destination cannot hold in a 127-step amount */
     MD_COUNT
 };
 
@@ -117,17 +118,28 @@ struct VoiceContext {
     float *dry[2] = {};                     /* the sources routed Out: past the filter and the effects, added to the output after them (null: nowhere to put them) */
 };
 
-inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16;
+inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16, kLfoHi = 64;
 /* The strides the code below walks the parameter table with: if the generator ever reorders them this stops the build. */
 static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 == TB_P_LFO1_RATE + 2 &&
               TB_P_LFO1_MODE == TB_P_LFO1_RATE + 1 && TB_P_LFO1_SMOOTH == TB_P_LFO1_S15 + 1 &&
               TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH == 3 + kLfoShape, "LFO parameters must be consecutive: rate, mode, 16 shape points, smooth");
+static_assert(TB_P_LFO2_TEMPO == TB_P_LFO1_TEMPO + 1 && TB_P_LFO4_TEMPO == TB_P_LFO1_TEMPO + 3, "the LFO Tempo switches are consecutive");
+static_assert(TB_P_LFO1_H0 == TB_P_LFO1_HR + 1 && TB_P_LFO1_H63 - TB_P_LFO1_H0 == kLfoHi - 1 && TB_P_LFO2_HR - TB_P_LFO1_HR == 1 + kLfoHi, "the LFO Hi-Res switch and its 64 points are consecutive");
 static_assert(TB_P_LFO1_S15 - TB_P_LFO1_S0 == kLfoShape - 1, "LFO shape points must be consecutive");
 static_assert(TB_P_LR2_SRC - TB_P_LR1_SRC == 4 && TB_P_LR1_DST == TB_P_LR1_SRC + 1 && TB_P_LR1_AMT == TB_P_LR1_SRC + 2 &&
               TB_P_LR1_BIP == TB_P_LR1_SRC + 3, "LFO route parameters must be src, dst, amt, bip, consecutive");
 
 /* An LFO's rate pot in Hz: 0.05 to 120, logarithmic. */
 inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
+
+/* LFO l's rate in Hz as it plays: with its Tempo switch on (a synced LFO of the source preset) the pot is the rate at 120 BPM and the host tempo scales it; off, the pot's Hz as it always was.
+ * No host tempo (0) counts as 120, the same clamp the delay and the granular oscillator use. */
+inline float lfoHz(const float *P, int l, float bpm)
+{
+    const float hz = potLfoHz(P[TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE)]);
+    if (P[TB_P_LFO1_TEMPO + l] < 0.5f) return hz;
+    return hz * (bpm >= 20.0f ? std::clamp(bpm, 40.0f, 300.0f) : 120.0f) / 120.0f;
+}
 
 /* An LFO's Smooth pot as the time constant of a one-pole low-pass on its output: 2 ms to 0.7 s, logarithmic; 0 is off. Serum's Smooth was measured
  * as such a filter, of the same absolute time constant at any LFO rate (calibration/dev/probe_lfo_smooth.py). */
@@ -144,9 +156,17 @@ inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[TB_P_
 inline bool lfoIsFree(const float *P, int lfo) { return lfoModeOf(P, lfo) == 1; }          /* 0 Trig, 1 Free, 2 Env */
 inline bool lfoIsOneShot(const float *P, int lfo) { return lfoModeOf(P, lfo) == 2; }
 
-/* The shape: 16 points of one cycle, 0..127 for 0..1, read round the loop with linear interpolation. */
+/* The shape: 16 points of one cycle, 0..127 for 0..1, read round the loop with linear interpolation; or, with the LFO's Hi-Res switch on, its 64 points read the same way. */
 inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = false)
 {
+    if (P[TB_P_LFO1_HR + lfo * (TB_P_LFO2_HR - TB_P_LFO1_HR)] >= 0.5f) {
+        const float x = oneShot ? std::min(phase, 1.0f) * (float) (kLfoHi - 1) : phase * (float) kLfoHi;
+        const int i0 = oneShot ? std::min((int) x, kLfoHi - 1) : ((int) x) & (kLfoHi - 1);
+        const float fr = x - std::floor(x);
+        const int base = TB_P_LFO1_H0 + lfo * (TB_P_LFO2_H0 - TB_P_LFO1_H0);
+        const float a = P[base + i0], b = P[base + (oneShot ? std::min(i0 + 1, kLfoHi - 1) : ((i0 + 1) & (kLfoHi - 1)))];
+        return pot01(a + (b - a) * fr);
+    }
     /* a one-shot (Env) LFO runs the table from its first point to its last once: the last point is the held end value */
     const float x = oneShot ? std::min(phase, 1.0f) * (float) (kLfoShape - 1) : phase * (float) kLfoShape;
     const int i0 = oneShot ? std::min((int) x, kLfoShape - 1) : ((int) x) & (kLfoShape - 1);
@@ -249,11 +269,16 @@ public:
 
         /* oscillator phases: free-running (the old retrig-off default —
          * the retrig switch was cut from the surface) */
-        for (auto &o : osc) {
+        static_assert(TB_P_WT2_RPH == TB_P_WT1_RPH + 1 && TB_P_WT3_RPH == TB_P_WT1_RPH + 2 && TB_P_WT1_PHS == TB_P_WT1_RPH + 3 && TB_P_WT3_PHS == TB_P_WT1_PHS + 2, "Osc Phase layout");
+        /* Vital: a voice starts at random x Random Phase of a cycle plus the Phase offset; Random Phase 127 and Phase 0 are the free-running start above */
+        for (int oi = 0; oi < kOscs; oi++) {
             float phases[kMaxUnison];
-            for (auto &ph : phases)
-                ph = (float) rand() / (float) RAND_MAX;
-            o.noteOn(phases, kMaxUnison);
+            const float rph = pot01(P[TB_P_WT1_RPH + oi]), phs = pot01(P[TB_P_WT1_PHS + oi]);
+            for (auto &ph : phases) {
+                ph = (float) rand() / (float) RAND_MAX * rph + phs;
+                ph -= std::floor(ph);
+            }
+            osc[oi].noteOn(phases, kMaxUnison);
         }
         for (auto &m : modOsc) m.noteOn(0.0f);
         sub.noteOn(0.0f);
@@ -586,20 +611,21 @@ public:
          * step would otherwise be a level step. */
         /* Filter 2 in series into Filter 1 (Serum's routing slot 6 sent to the other filter): Filter 2 runs first and its output is added to Filter 1's input. */
         const bool f2First = (int) P[TB_P_FLT2_OUT] == 3;
+        const bool vDriveLaw = P[TB_P_FLT_VDL] >= 0.5f;
         float dryAL[kBlock], dryAR[kBlock], dryBL[kBlock], dryBR[kBlock];        /* a voice filter's input, kept when its Mix (Vital's, hidden) is below 100 % */
         const float mixA = P[TB_P_FLT1_MIX] * (1.0f / 127.0f), mixB = P[TB_P_FLT2_MIX] * (1.0f / 127.0f);
         auto runF2 = [&]() {
             const bool mixing2 = mixB < 0.999f;
             if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
             const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
-            if (driving2) driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget);
+            if (driving2) { if (vDriveLaw) vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES]))); else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
             if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
             else if (combType2 && vcMode2) comb2.processVital(pre2L, pre2R, n, combType2 <= 2 ? 0 : combType2 - 2, combRes2, fltTarget2, vcBlend2, vcTrans2, vcMode2 == 2);
             else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
             else if (vb2.on) runBlend(vb2, fltTarget2, fltQ2, pre2L, pre2R, n);
             else runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
-            if (driving2) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
+            if (driving2 && !vDriveLaw) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
             if (P[TB_P_FLT2_GAIN] > 0.0f) {
                 const float g = std::pow(10.0f, P[TB_P_FLT2_GAIN] / 127.0f * 24.0f / 20.0f);
                 for (int i = 0; i < n; i++) { pre2L[i] *= g; pre2R[i] *= g; }
@@ -614,14 +640,14 @@ public:
         const bool mixing = mixA < 0.999f;
         if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
         const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
-        if (driving) driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget);
+        if (driving) { if (vDriveLaw) vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES]))); else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
         if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
         else if (combType && vcMode) comb.processVital(preL, preR, n, combType <= 2 ? 0 : combType - 2, combRes, fltTarget, vcBlend, vcTrans, vcMode == 2);
         else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
         else if (vb1.on) runBlend(vb1, fltTarget, fltQ, preL, preR, n);
         else runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
-        if (driving) driveOut(preL, preR, n, driveMix, driveMixTarget);
+        if (driving && !vDriveLaw) driveOut(preL, preR, n, driveMix, driveMixTarget);
         if (P[TB_P_FLT_GAIN] > 0.0f) {                                  /* Serum's filter Drive as the gain it is */
             const float g = std::pow(10.0f, P[TB_P_FLT_GAIN] / 127.0f * 24.0f / 20.0f);
             for (int i = 0; i < n; i++) { preL[i] *= g; preR[i] *= g; }
@@ -744,14 +770,13 @@ private:
         {
             float lfoOut[kLfos];
             for (int l = 0; l < kLfos; l++) {
-                const int rate = TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE);
                 /* Vital's Delay holds the LFO where it started until the time is up; the time that is left over in this block moves it (synth_lfo.cpp processControlRate) */
                 const float full = blockSize > 0 ? (float) blockSize / (float) sampleRate : 0.0f;
                 float adv = full;
                 if (lfoDelayLeft[l] > 0.0f) { const float used = std::min(adv, lfoDelayLeft[l]); lfoDelayLeft[l] -= used; adv -= used; }
                 if (blockSize > 0) {
                     /* with no Delay running the step is written the way it always was, so Serum presets stay bit-identical */
-                    lfoPhase[l] += adv == full ? potLfoHz(P[rate]) * (float) blockSize / (float) sampleRate : potLfoHz(P[rate]) * adv;
+                    lfoPhase[l] += adv == full ? lfoHz(P, l, c.bpm) * (float) blockSize / (float) sampleRate : lfoHz(P, l, c.bpm) * adv;
                     if (lfoIsOneShot(P, l)) lfoPhase[l] = std::min(lfoPhase[l], 1.0f);        /* Env: plays once, then holds its end */
                     else lfoPhase[l] -= std::floor(lfoPhase[l]);
                 }
@@ -834,7 +859,7 @@ private:
             /* tune modulation reads as an octave at full amount */
             static const int kFixed[kOscs] = { TB_P_WT1_FIXED, TB_P_WT2_FIXED, TB_P_WT3_FIXED };
             /* a fixed oscillator ignores the key (Serum's Pitch Track off): its pitch is MIDI note 0 plus the tune (measured: DR - Kick Minimal) */
-            oscNote[o] = (P[kFixed[o]] >= 0.5f ? 0.0f : baseNote) + P[k.tune] + modOff[k.dTun] * 12.0f + modOff[k.dPit] * 48.0f;
+            oscNote[o] = (P[kFixed[o]] >= 0.5f ? 0.0f : baseNote) + P[k.tune] + modOff[k.dTun] * 12.0f + modOff[k.dPit] * 48.0f + modOff[MD_WT1_FINE + o] * 2.0f;
 
             v.position = std::clamp(pot01(P[k.pos]) + modOff[k.dPos], 0.0f, 1.0f);
             {
@@ -964,6 +989,7 @@ private:
             float res = std::clamp(pot01(P[TB_P_FLT_RES]) + modOff[MD_FLT_RES],
                                    0.0f, 1.0f);
             float q = kFilterQ / (1.0f - res * 0.99f);
+            if (P[TB_P_FLT_VDL] >= 0.5f) q = vitalFilterDriveQ(q, pot01(P[TB_P_FLT_DRIVE]));
 
             static const Filter::Type kTypes[8] = {
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
@@ -991,6 +1017,7 @@ private:
             combRes2 = std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f);
             vcMode2 = (int) P[TB_P_VCOMB2]; vcBlend2 = P[TB_P_CBLEND2] * (2.0f / 127.0f); vcTrans2 = (P[TB_P_CTRANS2] - 64.0f) * 0.75f;
             fltQ2 = kFilterQ / (1.0f - std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f) * 0.99f);
+            if (P[TB_P_FLT_VDL] >= 0.5f) fltQ2 = vitalFilterDriveQ(fltQ2, pot01(P[TB_P_FLT2_DRIVE]));
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
             filter2.setType(kTypes[t2]);
             filter2.setSlope((t2 & 1) ? Filter::db24 : Filter::db12);

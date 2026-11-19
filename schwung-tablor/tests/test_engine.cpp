@@ -298,6 +298,19 @@ static void testTuneRange()
         const double hz = heardHz(render(e, 2000));
         CHECK(hz > 425.0 && hz < 455.0, "a spare envelope into WT1 Pitch moves it 24 st (%.1f Hz for 440)", hz);
     }
+    {   /* a spare envelope into WT1 Fine: 2 semitones at full amount, in steps of about 3 cents (the Pitch destination's step is 0.76 st) */
+        Engine e;
+        e.setTable(0, sine);
+        e.pots[TB_P_VCA_A] = 0;
+        e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_ME1_DST] = 61;
+        e.pots[TB_P_ME1_AMT] = 127;              /* +1 unit = 2 semitones */
+        e.pots[TB_P_ME1_A] = 0;
+        e.pots[TB_P_ME1_S] = 127;
+        note(e, 45);                             /* 110 Hz, up two semitones = 123.5 */
+        const double hz = heardHz(render(e, 2000));
+        CHECK(hz > 119.0 && hz < 128.0, "a spare envelope into WT1 Fine moves it 2 st (%.1f Hz for 123.5)", hz);
+    }
     {   /* a spare envelope into WT1 Warp: an FM warp from the Noise at amount 0 is the plain sine until the route lifts the amount, then it is not */
         auto make = [&](bool routed) {
             auto e = std::make_unique<Engine>();
@@ -378,6 +391,21 @@ static void testSoftClipper()
     CHECK(flat == 0, "a chord over the knee has no flat tops (%d flat samples)", flat);
 }
 
+static void testLfoHiRes()
+{
+    printf("== LFO hi-res shape ==\n");
+    static float P[TB_PARAM_COUNT];
+    for (int i = 0; i < TB_PARAM_COUNT; i++) P[i] = 0.0f;
+    for (int k = 0; k < kLfoShape; k++) P[TB_P_LFO1_S0 + k] = 127.0f;                    /* the 16-point shape: all high */
+    for (int k = 20; k <= 21; k++) P[TB_P_LFO2_H0 + k] = 127.0f;                           /* LFO 2's 64 points: a pulse two points wide (about 3 % of the cycle), low elsewhere */
+    CHECK(lfoShapeAt(P, 0, 0.5f) > 0.99f, "Hi-Res off: the 16 points are read");
+    P[TB_P_LFO1_HR] = 1.0f;
+    CHECK(lfoShapeAt(P, 0, 0.5f) < 0.01f, "Hi-Res on: the 64 points are read instead (a low shape, %.3f)", lfoShapeAt(P, 0, 0.5f));
+    P[TB_P_LFO2_HR] = 1.0f;
+    CHECK(lfoShapeAt(P, 1, 20.5f / 64.0f) > 0.99f && lfoShapeAt(P, 1, 30.0f / 64.0f) < 0.01f && lfoShapeAt(P, 1, 10.0f / 64.0f) < 0.01f,
+          "a narrow pulse keeps its height and its width (%.2f on the pulse, %.2f either side)", lfoShapeAt(P, 1, 20.5f / 64.0f), lfoShapeAt(P, 1, 30.0f / 64.0f));
+}
+
 /* Drive at 0 leaves a note untouched; turned up it adds level and harmonics. */
 static void testFilterDrive()
 {
@@ -396,6 +424,18 @@ static void testFilterDrive()
     srand(3); note(off, 57); auto a = render(off, 700);
     srand(3); note(on, 57); auto b = render(on, 700);
     CHECK(rms(b) > rms(a) * 1.5, "drive adds level (rms %.0f -> %.0f)", rms(a), rms(b));
+
+    {   /* Vital's drive law: the filter's output is taken down by 1 / sqrt(drive), so a strongly driven sound is far quieter than Serum's tanh-in, tanh-out drive; at drive 0 the law changes nothing */
+        Engine serum, vital, vital0, plain0;
+        setup(serum, 106); setup(vital, 106); setup(vital0, 0); setup(plain0, 0);
+        vital.pots[TB_P_FLT_VDL] = 1; vital0.pots[TB_P_FLT_VDL] = 1;
+        srand(3); note(serum, 57); auto s1 = render(serum, 700);
+        srand(3); note(vital, 57); auto v1 = render(vital, 700);
+        srand(3); note(vital0, 57); auto v0 = render(vital0, 700);
+        srand(3); note(plain0, 57); auto p0 = render(plain0, 700);
+        CHECK(rms(v1) < rms(s1) * 0.7, "Vital's drive law keeps a strongly driven level under Serum's (rms %.0f against %.0f)", rms(v1), rms(s1));
+        CHECK(std::fabs(rms(v0) - rms(p0)) < 1.0, "at drive 0 the law changes nothing (rms %.0f against %.0f)", rms(v0), rms(p0));
+    }
 
     /* The note was fully rendered through the driven path if a knob ever left 0. */
     Engine zero;
@@ -1152,6 +1192,25 @@ static void testVitalEnvelopeAndLfoDelay()
     }
 }
 
+/* Osc Phase (Vital): Random Phase 0 starts every voice at the same place, so two notes render the same samples; the default (127) is the free-running start, where they differ; the Phase offset moves the start */
+static void testOscPhase()
+{
+    auto first = [](int rph, int phs) {
+        Engine e; soloWt3(e);
+        e.pots[TB_P_WT3_RPH] = (float) rph; e.pots[TB_P_WT3_PHS] = (float) phs;
+        note(e, 57, 100);
+        return render(e, 8);
+    };
+    auto maxDiff = [](const std::vector<int16_t> &a, const std::vector<int16_t> &b) {
+        int m = 0; for (size_t i = 0; i < a.size() && i < b.size(); i++) m = std::max(m, std::abs((int) a[i] - (int) b[i]));
+        return m;
+    };
+    const auto f0a = first(0, 0), f0b = first(0, 0), r1 = first(127, 0), r2 = first(127, 0), p32 = first(0, 32);
+    CHECK(maxDiff(f0a, f0b) == 0, "Random Phase 0 with Phase 0 starts every note the same (max diff %d)", maxDiff(f0a, f0b));
+    CHECK(maxDiff(r1, r2) > 200, "the default start is random per note (max diff %d)", maxDiff(r1, r2));
+    CHECK(maxDiff(f0a, p32) > 200, "a Phase offset moves the start (max diff %d)", maxDiff(f0a, p32));
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1436,6 +1495,7 @@ int main()
     testTuneRange();
     testSoftClipper();
     testFilterDrive();
+    testLfoHiRes();
     testUnisonWidth();
     testSyncThroughAVoice();
     testSecondFilter();
@@ -1446,6 +1506,7 @@ int main()
     testFxBuses();
     testFxFilterLfo();
     testVitalEnvelopeAndLfoDelay();
+    testOscPhase();
     testUtilOutLfo();
     testNoteOnset();
     testMonoTakeover();

@@ -1453,7 +1453,10 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         if d.get("rate") is not None:
             hz = d["rate"]
             if d.get("sync") is None or d.get("sync"):         # an unwritten BeatSync is ON: the Rate picks a note division (LFO_SYNC_BANDS)
-                hz = lfo_sync_hz(d["rate"], bool(d.get("triplets"))) or hz
+                sync_hz = lfo_sync_hz(d["rate"], bool(d.get("triplets")))
+                if sync_hz:
+                    hz = sync_hz
+                    P[f"lfo{n}_tempo"] = 1                     # that is the rate at 120 BPM; the engine scales it by the host tempo
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
         P[f"lfo{n}_mode"] = 2 if d.get("env") else 0 if d.get("mode") in (None, 0, 0.0) else 1          # Envelope: plays the shape once and holds its end (calibration/dev/probe_lfo_env.py)
         P[f"lfo{n}_smooth"] = lfo_smooth_pot(d.get("smooth"))

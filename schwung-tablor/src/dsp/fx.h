@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "param_map.h"
+#include "saturate.h"
 #include "conv.h"
 #include "../ported/filter.h"
 
@@ -934,9 +935,16 @@ public:
     }
 
     /* wet: the Filter FX's Wet knob as a fraction of 0..100 %. Serum mixes it as a smoothstep s with the dry part kept, (1 - s^2) dry + s filtered (calibration/dev/probe_fxfilter_wet.py). */
-    void setFilter(bool on, int type, float hz, float q, float wet = 1.0f)
+    /* drive01: the Filter FX's Drive as a fraction of its 30 dB (Vital's law, saturate.h vitalFilterDriveIn; 0 is off); res01 is its Resonance knob. */
+    void setFilter(bool on, int type, float hz, float q, float wet = 1.0f, float drive01 = 0.0f, float res01 = 0.0f, bool vitalLaw = false)
     {
         xfWetKnob = std::min(std::max(wet, 0.0f), 1.0f);
+        xfDriveT = std::pow(10.0f, drive01 * 30.0f / 20.0f);
+        /* Vital's filter saturates at every drive, 0 dB included, and its input gain 1 / (1 + 2 res) costs the passband about a ^ 0.8 (calibration probe: -5.2 dB at res 0.54, -2.1 at 0.2, -7.6 at 0.8) */
+        xfDriveOn = vitalLaw || drive01 > 0.0f;
+        xfDriveA = 1.0f / (1.0f + 2.0f * res01);
+        xfPass = vitalLaw ? std::pow(xfDriveA, 0.8f) : 1.0f;
+        if (xfDriveOn) q = vitalFilterDriveQ(q, drive01);
         if (on) {
             if (!xfOn) xfS = xfWetKnob * xfWetKnob * (3.0f - 2.0f * xfWetKnob);
             static const Filter::Type kTypes[8] = {
@@ -957,12 +965,18 @@ public:
     void processFilterFx(float *L, float *R, int n)
     {
         const float tgt = xfWetKnob * xfWetKnob * (3.0f - 2.0f * xfWetKnob);
-        if (tgt >= 0.9999f && xfS >= 0.9999f) { xfS = 1.0f; xf.process(L, R, n); return; }
+        if (tgt >= 0.9999f && xfS >= 0.9999f) {
+            xfS = 1.0f;
+            if (xfDriveOn) { vitalFilterDriveIn(L, R, n, xfDriveG, xfDriveT, xfDriveA, xfPass); xfDriveG = xfDriveT; }
+            xf.process(L, R, n);
+            return;
+        }
         float dL[128], dR[128];
         for (int o = 0; o < n; o += 128) {
             const int m = std::min(128, n - o);
             std::copy(L + o, L + o + m, dL);
             std::copy(R + o, R + o + m, dR);
+            if (xfDriveOn) { const float g1 = xfDriveG + (xfDriveT - xfDriveG) * (float) m / (float) (n - o); vitalFilterDriveIn(L + o, R + o, m, xfDriveG, g1, xfDriveA, xfPass); xfDriveG = g1; }
             xf.process(L + o, R + o, m);
             for (int i = 0; i < m; i++) {
                 xfS += (tgt - xfS) * 0.002f;
@@ -1319,6 +1333,9 @@ private:
          * output past that is a ping-pong of two held values that this plain hold does not reproduce, so the length is capped at 12 */
         const float vdsLen = std::min(std::max(4.0f * std::pow(2.0f, st.distDriveDb / 8.9f), 2.0f), 12.0f);
         float g = distGainNow / kVitalFull;
+        /* Bit Crush (distortion.h bitCrush / bitCrushScale): the signal in Vital's own full scale is rounded to a step of ((drive + 30) / 60)^2, from 1 at +30 dB down to nothing at -30 dB; Drive is not a gain here */
+        auto crushStep = [&]() { const float db = 20.0f * std::log10(std::max(distGainNow, 1e-6f)); const float d = std::min(std::max((db + 30.0f) / 60.0f, 0.0f), 1.0f); return std::min(std::max(d * d, 1.49e-8f), 1.0f); };
+        float cs = st.distMode == 6 ? crushStep() : 1.0f;
         const float m = std::min(std::max(st.distMix, 0.0f), 1.0f);
         const float dw = (distTarget - distCur) / (float) n;
         for (int i = 0; i < n; i++) {
@@ -1333,6 +1350,7 @@ private:
                 for (int k = 0; k < 4; k++) mm[k] = distVModSeen[k] + st.distAudioAmt[k] * u;
                 applyVitalDist(mm, st.distAudioAmt[0] != 0.0f, st.distAudioAmt[1] != 0.0f || st.distAudioAmt[2] != 0.0f || st.distAudioAmt[3] != 0.0f);      /* only what the LFO moves is redone */
                 g = distGainNow / kVitalFull;
+                if (st.distMode == 6) cs = crushStep();
             }
             distCur += dw;
             const float w = distCur;
@@ -1349,6 +1367,7 @@ private:
                          if (vdsNew) dsHold[c] = vf;
                          f = dsHold[c] / kVitalFull; break;
                 case 5:  { float p = std::fmod(t + 1.0f, 4.0f); if (p < 0.0f) p += 4.0f; f = p < 2.0f ? p - 1.0f : 3.0f - p; break; }
+                case 6:  f = std::round(vf / kVitalFull / cs) * cs; break;
                 default: f = std::tanh(t); break;
                 }
                 float wet = f * kVitalFull;
@@ -1712,6 +1731,8 @@ private:
     float sr;
     FxSettings st;
     bool anyActive = false, baseActive = false, xfOn = false;
+    bool xfDriveOn = false;                                   /* the Filter FX's Vital drive */
+    float xfDriveG = 1.0f, xfDriveT = 1.0f, xfDriveA = 1.0f, xfPass = 1.0f;  /* its gain as it was, as it is set to be, and its a = 1 / (1 + 2 resonance) */
     float xfWetKnob = 1.0f, xfS = 1.0f;                       /* the Filter FX Wet knob (0..1) and the smoothstep weight it has reached */
     Filter xf;
     ModFx mod;

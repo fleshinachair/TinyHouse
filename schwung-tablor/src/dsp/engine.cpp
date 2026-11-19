@@ -690,6 +690,7 @@ void Engine::onMidi(const uint8_t *msg, int len)
     switch (status) {
     case 0x90:
         if (len >= 3 && msg[2] > 0) {
+            aftertouch = 0.0f;                  /* a new press starts with no pressure; the pads send it as they are pushed */
             if (arpActive() && arpInZone(msg[1])) arpKeyDown(msg[1], msg[2]);
             else if (clipActive()) clipKeyDown(msg[1]); else noteOn(msg[1], (float) msg[2] / 127.0f);
             break;
@@ -727,6 +728,9 @@ void Engine::onMidi(const uint8_t *msg, int len)
         break;
     case 0xD0:
         aftertouch = (float) msg[1] / 127.0f;
+        break;
+    case 0xA0:                                  /* a pad's own pressure: the newest one stands for the channel */
+        if (len >= 3) aftertouch = (float) msg[2] / 127.0f;
         break;
     case 0xE0:
         if (len >= 3) {

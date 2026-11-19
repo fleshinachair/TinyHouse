@@ -153,7 +153,7 @@ Read these before you rely on it for a gig. TinyHouse is an early release (0.9).
 - **It sounds similar to the Serum 2 or Vital original, not identical.** Levels, filters, effects and the stereo image are matched against Serum (and, for Vital presets, measured against Vital), but some presets land closer than others. Reverb tails run 1 to 3 dB quieter than Serum's and the wet signal builds up a little faster.
 - **Not every preset comes across.** Of Serum 2's 626 factory presets, 363 import well enough to install. The rest use something listed under "Not carried yet" (Bode and some Filter FX models are the biggest groups) and are skipped, or import with that part left out. The import report says which.
 - **Tempo-synced chorus, flanger and phaser (Vital) do not follow the Move's tempo.** They run at their rate at 120 BPM. Synced LFOs do follow it.
-- **Heavy presets use a lot of CPU.** A dense granular preset is the most demanding thing it plays. If a set with several heavy slots crackles, use fewer of them or lighter presets.
+- **Heavy presets use a lot of CPU.** Measured on a Move over 720 installed presets, each held steady: the typical preset uses about a tenth of the Move's 2.9 ms audio block, the heaviest (Crescendo Bells) about 40 %, and about 40 presets have a block over half of it. One slot is fine; a set with several heavy slots can crackle, so use fewer of them or lighter presets. A dense granular preset is the most demanding thing it plays.
 - **The Move's wavetable list stops at 128 tables.** The WT1 to WT3 Table knobs list the first 128 tables of the library, or of the pack you pick with the WT Pack knob. A pack with more than 128 tables shows only its first 128 there.
 - **Macros: eight per slot, and the mapping is yours to keep tidy.** Assigning a macro never changes the sound, but if you move a control by hand afterwards the knob and the control drift apart until you press **Match knob**.
 - **You need your own Serum 2 files.** Nothing from Xfer or the preset authors is in this repository, and Serum 1 presets are not supported.
@@ -186,18 +186,23 @@ options and rules.
 
 ## Installing
 
-TinyHouse is not in Schwung's module catalogue yet, so install it from this repo. You need Windows, macOS or Linux, a Move running Schwung that you can reach over
-SSH, and [zig](https://ziglang.org) to build the ARM module.
+TinyHouse is not in Schwung's module catalogue yet. You need a Move running Schwung that you can reach over SSH (the `ableton` user), on the same network as your computer.
+
+**The easy way (no tools to build):**
+1. Download `tinyhouse-module.tar.gz` from the [Releases](https://github.com/fleshinachair/TinyHouse/releases) page and unpack it. You get one folder, `tinyhouse`.
+2. Copy that folder to the Move: `scp -r tinyhouse ableton@move.local:/data/UserData/schwung/modules/sound_generators/`
+3. Reload the slot, or restart the Shadow UI, so the module loads. Then follow [The workflow](#the-workflow) from step 2.
+
+**To upgrade** a module that is already loaded, do not copy over its `dsp.so`: the Move is running it. Upload the new `dsp.so` under another name and rename it into place on the Move
+(`mv dsp.so.new dsp.so`), copy the other files, then reload the slot.
+
+**Building it yourself** (you want to change the code): you also need [zig](https://ziglang.org) to build the ARM module.
 
 ```
 bash schwung-tablor/scripts/zig-build.sh arm           # builds schwung-tablor/build/dsp.so
 python schwung-tablor/tools/build_import_bundle.py     # the converter the remote UI's Import runs
 bash schwung-tablor/scripts/deploy.sh ableton@move.local
 ```
-
-**Without zig:** download `tinyhouse-module.tar.gz` from the [Releases](https://github.com/fleshinachair/TinyHouse/releases) page, unpack it on your computer, and copy the
-`tinyhouse` folder to `/data/UserData/schwung/modules/sound_generators/` on the Move with `scp -r`, as the `ableton` user. That is for a first install. To upgrade a module
-that is already loaded, upload `dsp.so` under another name and rename it into place (or use `deploy.sh`): never copy over a `dsp.so` the Move is running.
 
 Then reload the slot (or restart the Shadow UI) so the new module loads. `deploy.sh` replaces the module safely while the Move is running, and first checks that
 the Move's `/` and `/data` are still root-owned (`scripts/move_check_owner.sh`).

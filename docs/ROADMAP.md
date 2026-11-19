@@ -1,6 +1,6 @@
 # Roadmap
 
-State on 2026-11-20 (0.9.8 released). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
+State on 2026-11-20 (0.9.9 is the release candidate, 0.9.8 the last release). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
 put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of
@@ -12,7 +12,7 @@ Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 
 1. **Saved state keeps loading.** From 1.0 a format change only adds keys (their defaults keep the old sound) and keeps reading the old ones; nothing already saved changes meaning. Macro min / max (#8 below) and wavetable paging past 128 (#9) fit that rule, so they no longer block 1.0: a `mac` route converts on load, a page key defaults to page 0. Each release is checked by loading saved presets from earlier ones.
 2. **Correct at any tempo.** A synced LFO follows the Move's BPM (#2), not 120.
-3. **Safe to upgrade and to run.** An upgrade from 0.9.1 and 0.9.5 with old saved presets still loading, and the heaviest preset profiled with a CPU ceiling (#7). A fresh install from the release tarball is not tested here: outside beta testers do that.
+3. **Safe to upgrade and to run.** An upgrade from 0.9.1 and 0.9.5 with old saved presets still loading, and the heaviest preset profiled with a CPU ceiling (#7). The release tarball is unpacked and listed before it is published; the CPU ceiling is in the README's Known limits.
 4. **The importer is honest.** A dropped preset or feature is reported with its reason; the formant filter (#1) closes the largest group of silent drops.
 5. **Docs and licence.** README, in-module help and a how-to-import walkthrough with screenshots; the GPL text and THIRD-PARTY.md stay in the package.
 
@@ -21,8 +21,8 @@ Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 | 0.9.6 | Done: tempo-following LFOs, Vital fixes (filter drive law, Filter FX drive, Bit Crush, fine-pitch routes, 64-point LFO shapes, oscillator start phase), `tablor_loadtest` dropped from `deploy.sh` |
 | 0.9.7 | Done, shipped inside 0.9.8: formant voice filter, Vital and Serum models (new filter types and params only, so old presets load unchanged) |
 | 0.9.8 | Done: the cheap Vital leads: attack power, live filter Blend routes and random modulators as live sources (it also carries the 0.9.7 formant filters); the Phaser "regression" is not the filter (see below); `lfo_N_stereo` is not cheap (left and right need separate oscillator renders). The importer lists every dropped preset and feature: the browser report now lists Vital's small details too |
-| 0.9.9 | Release candidate: performance pass, docs, outside beta testers on their own Move (fresh installs included) and presets (Serum testing so far is positive; Vital testers are being sought) |
-| 1.0 | The release candidate has no new bug reports for about a week |
+| 0.9.9 | Release candidate. Already in it: Vital voice-pitch routes, Key and Key-in-octave route sources, live comb blend transpose, an oscillator's Key Track switch (moved up from 1.1: they were the largest measured Vital gaps). Also done: Velocity and Aftertouch as live route sources, the CPU note in the README, a plainer Installing section, the import screenshot. 1.0 follows when nothing in the gates above is open |
+| 1.0 | Every gate above holds |
 
 After 1.0: the plan below, until every row of [UNLOCK_TABLES.md](UNLOCK_TABLES.md) is closed or marked not worth it.
 
@@ -32,7 +32,7 @@ Each release takes the top rows of [UNLOCK_TABLES.md](UNLOCK_TABLES.md) it can b
 
 | Release | Theme | Table rows |
 |---|---|---|
-| 1.1 | **Vital modulation.** Random sources are done (0.9.8); live routes in place of baked values: the spectral morph amount, phase-distortion amount, unison detune, filter drive and blend transpose; a route that scales another route; more than two envelope routes | Vital 1 to 5, 8, 9, 11 to 14 |
+| 1.1 | **Vital modulation, in the order the measured error gives** (the table's "error with / without"): a route that scales another route, effect-mix and EQ routes, then the rest. Random sources, voice pitch, the Key and Key-in-octave sources and live blend transpose are done (0.9.8 and 0.9.9); the spectral morph amount is not worth building yet (a trial changed nothing) | Vital 4 to 10 |
 | 1.2 | **Serum filters and warps.** Voice filter models still unsupported (Reverb1, LPH24, FlangePhase), the warps driven by noise or Filter 1 (DLM, AM_NOISE), the single warp types; a probe each | Serum 3, 4, 15 |
 | 1.3 | **Effects.** Filter FX models that are not a magnitude response (a probe each), Diffuser, Filter FX moved by an LFO or velocity, the distortion filter morph, a second Distortion / Comp / Delay, Utils moved by a modulator, more effect types inside a Split band; for Vital the chorus / flanger / phaser order and routes to an effect mix or EQ cutoff; tempo-following mod effects | Serum 1, 5, 8, 9, 10, 11, 13, 14; Vital 6, 10 |
 | 1.4 | **Sample and space.** Convolution / Space reverb, a fourth sample slot (MultiSample), the granular gaps (warp on the grains, routes into Warp / Pitch / Position), reverb build-up | Serum 6, 7, 12 |

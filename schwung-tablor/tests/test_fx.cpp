@@ -1255,12 +1255,17 @@ static void testLfo()
             std::vector<double> d(v.begin() + 10, v.end());
             double mean = 0; for (double x : d) mean += x; mean /= (double) d.size();
             for (double &x : d) x -= mean;
-            int best = 0; double bv = -1e18;
+            std::vector<double> ac((size_t) maxLag + 1, 0.0);
+            double bv = -1e18;
             for (int lag = 4; lag <= maxLag; lag++) {
                 double a = 0; for (size_t i = 0; i + (size_t) lag < d.size(); i++) a += d[i] * d[i + (size_t) lag];
                 a /= (double) (d.size() - (size_t) lag);                     /* the mean product, so a long lag is not out-voted by a short one */
-                if (a > bv) { bv = a; best = lag; }
+                ac[(size_t) lag] = a; bv = std::max(bv, a);
             }
+            /* the first local peak that reaches 90 % of the best: a cycle and two cycles correlate almost equally, and which of them wins by a hair differs between machines (60 BPM read 0.812 s on the Move's ARM) */
+            int best = 0;
+            for (int lag = 5; lag < maxLag; lag++)
+                if (ac[(size_t) lag] >= 0.9 * bv && ac[(size_t) lag] >= ac[(size_t) lag - 1] && ac[(size_t) lag] >= ac[(size_t) lag + 1]) { best = lag; break; }
             return best * 0.0145;
         };
         const double p60 = periodAt(true, 60), p120 = periodAt(true, 120), p240 = periodAt(true, 240, 60, 26), pnone = periodAt(true, 0), pfree = periodAt(false, 60);

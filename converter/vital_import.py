@@ -307,6 +307,7 @@ FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("de
                "delay_feedback": ("delay_on", "dly_fb")}
 # The stored range (min, max) of the effect controls that a macro or velocity route can move (src/common/synth_parameters.cpp). Vital adds a route in the control's own stored units (a fraction of this range), so a macro at its saved value is a fixed offset that can be added to the control before the effect is mapped.
 FX_FOLD_RANGE = {
+    "filter_1_blend_transpose": (0.0, 84.0), "filter_2_blend_transpose": (0.0, 84.0),                # a comb filter's Blend Transpose: a route adds amount x 84 semitones
     "filter_1_blend": (0.0, 2.0), "filter_2_blend": (0.0, 2.0),                                    # the voice filters' Blend knob: a route adds amount x 2 x the source
     "reverb_pre_low_cutoff": (0.0, 128.0), "reverb_pre_high_cutoff": (0.0, 128.0), "reverb_low_shelf_cutoff": (0.0, 128.0), "reverb_low_shelf_gain": (-6.0, 0.0), "reverb_high_shelf_cutoff": (0.0, 128.0),
     "reverb_high_shelf_gain": (-6.0, 0.0), "reverb_delay": (0.0, 0.3), "reverb_decay_time": (-6.0, 6.0), "reverb_size": (0.0, 1.0), "reverb_chorus_amount": (0.0, 1.0), "reverb_chorus_frequency": (-8.0, 3.0),
@@ -384,7 +385,13 @@ FILTER_BLEND_MODELS = (0, 1, 2, 3)
 VITAL_FORMANT = True                                                                         # Vital's Formant voice filter (model 5, styles 0 and 1) as its own engine filter (formant.h) instead of a low-pass
 VITAL_PHASER = True                                                                          # Vital's Phaser voice filter (model 7) as its own engine filter (comb.h VitalPhaserFilter) instead of 'Phase 24 +'
 RANDOM_LIVE = True                                                                     # a random modulator (Perlin, Sample and Hold, Sine, Lorenz) is a live route source in the engine (rn1..rn4, sources 5..8); False keeps it out
+VOICE_PITCH_LIVE = True                                                                 # an LFO / envelope route to voice_transpose or voice_tune moves the whole voice live (engine destinations Voice Pitch / Voice Fine)
 VITAL_BLEND_LIVE = True                                                                 # a route to a voice filter's Blend knob moves it live (engine destinations Filter Blend / Filter 2 Blend) instead of at its mean
+KEY_LIVE = True                                                                         # a Key / Key-in-octave route source is a live lookup of the note (an engine LFO in mode Key / Key Oct whose Hi-Res table is the route's curve) instead of being dropped
+VELOCITY_LIVE = True                                                                    # a velocity route to a control the engine can route moves with the pad's velocity (route source Velocity) while route slots last, instead of being folded in at velocity 100
+AFTERTOUCH_LIVE = True                                                                  # an aftertouch route is a live route source (Aftertouch) instead of being dropped
+OSC_KEY_TRACK_OFF = True                                                                 # an oscillator with Key Track off plays a fixed pitch (the engine's Pitch: Fixed) instead of following the key
+CTRANS_LIVE = True                                                                      # a route to a comb filter's Blend Transpose moves it live (engine destinations Filter Comb Trans / Filter 2 Comb Trans)
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
 FILTER_BLEND_DROP_DB = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}                                  # how far the low-pass / high-pass passband falls at full resonance (engine flt_vbg). Measured per model (Analog 10 dB, Dirty 7.4, Ladder 11, Digital 2: calibration/vital_vfilter_probe.py at res 0.5, taken as res^0.9) but it made the A/B scores worse overall (92 presets: 7.42 without, 7.46 with half, 7.55 with all of it), so it is off
 ROUTE_CURVES = True
@@ -512,11 +519,19 @@ def dest_spec(name: str, s: dict, P: dict, main_filter: int) -> dict | None:
         return {"lr": LR_DST[f"wt{n}_fine"], "x": 1.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}            # Vital's osc Tune spans 2 st, the engine's Fine destination moves 2 st per unit: a vibrato of cents keeps its depth
     if name == "sample_level" and s.get("sample_on"):
         return {"lr": 39, "x": 1.0, "key": "smp_level", "pot": 127.0, "lo": 0, "hi": 127}       # the engine's "Smp1 Level" destination
+    if name == "voice_transpose" and VOICE_PITCH_LIVE:
+        return {"lr": 66, "x": 96.0 / 48.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}          # the engine's Voice Pitch destination: Vital's range is +-48 semitones (96 wide), the engine's unit is 48
+    if name == "voice_tune" and VOICE_PITCH_LIVE:
+        return {"lr": 67, "x": 1.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}                  # Voice Fine: Vital's range is +-1 semitone, the engine's unit is 2
     mb = re.fullmatch(r"filter_([12])_blend", name)
     if mb and VITAL_BLEND_LIVE and s.get(f"filter_{mb.group(1)}_on") and int(s.get(f"filter_{mb.group(1)}_model", 0)) in FILTER_BLEND_MODELS + (6, 7):
         fi, mdl = int(mb.group(1)), int(s[f"filter_{mb.group(1)}_model"])
         key = ("cblend" if fi == 1 else "cblend2") if mdl == 6 else ("flt_blend" if fi == 1 else "flt2_blend")
         return {"lr": 63 + fi, "x": 1.0, "key": key, "pot": 127.0, "lo": 0, "hi": 127}                 # the engine's Filter Blend / Filter 2 Blend destinations: a fraction of the knob's 0..2 range
+    mt = re.fullmatch(r"filter_([12])_blend_transpose", name)
+    if mt and CTRANS_LIVE and s.get(f"filter_{mt.group(1)}_on") and int(s.get(f"filter_{mt.group(1)}_model", 0)) == 6:
+        fi = int(mt.group(1))
+        return {"lr": 67 + fi, "x": 1.0, "key": "ctrans" if fi == 1 else "ctrans2", "pot": 84.0 / VCOMB_TRANS_STEP, "lo": 0, "hi": 127}       # the engine's Filter Comb Trans destinations: a fraction of Vital's 0..84 semitone range
     if s.get("filter_1_on"):
         if name == "filter_1_cutoff":
             return {"lr": LR_DST["cutoff"], "x": 128.0 / d2m.FILTER_WIDTH, "key": "flt_freq", "pot": 128.0, "lo": 0, "hi": 127}
@@ -598,6 +613,15 @@ ENV_CUTOFF_WEIGHT = 2.0
 LAST_DROPPED_ENV: list = []                 # (vital envelope, engine destination index) of the routes the last map_modulation left out for want of a spare envelope (diagnostics: work/ceil_env.py)
 
 
+def key_table(s: dict, i: int, what: str) -> list[int]:
+    """Route i's curve (and power) over the note as the engine's 64-point Key table: Key reads point note / 2 (the curve at that pair's middle), Key in octave reads point 0..11 for the pitch class (the curve at class / 12)."""
+    out = []
+    for j in range(64):
+        x = (2 * j + 0.5) / 127.0 if what == "note" else (j / 12.0 if j < 12 else 0.0)
+        out.append(pot(127.0 * CLAMP(route_static_value(s, i, CLAMP(x, 0.0, 1.0)), 0.0, 1.0)))
+    return out
+
+
 def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list[str]) -> dict:
     """The routes that are not the cutoff envelope: LFOs into the engine's four LFOs and eight routes, envelopes 1-6 into the two spare
     envelopes, macros into the engine's macros (moving the same pots, fixed offsets folded into the base), velocity folded at velocity 100."""
@@ -613,6 +637,10 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         if dest.startswith("macro_control_") and (v := static_source_value(s, src)) is not None:
             k = int(dest[len("macro_control_"):]) - 1
             macro_vals[k] = CLAMP(macro_vals[k] + a * ((v - 0.5) if bip else v), 0.0, 1.0)
+    key_units: dict[tuple, int] = {}                                    # (source, 64-point table) -> unit id (100 + n): a Key / Key Oct lookup, which takes one of the engine's four LFOs
+    key_tables: list[tuple[str, list[int]]] = []
+    ex: list[tuple[float, int, int, float, bool]] = []                  # (|x|, engine source 9 velocity / 10 aftertouch, dst, x, bipolar)
+    vel_live: list[tuple] = []                                          # velocity routes that may go live: (|x|, dst, x, bip, fold key, fold amount, lo, hi)
     audio: dict[int, list[float]] = {}                                  # audio-rate keytracked LFO k -> its four distortion route amounts (Drive, Cutoff, Res, Blend)
 
     def drop(why: str) -> None:
@@ -625,11 +653,30 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             continue                                                    # baked into the oscillator's table at the saved value (static_route_offset)
         spec = dest_spec(dest, s, P, main_filter)
         if spec is None:
-            drop(f"{src.rstrip('0123456789_')}->{dest}")
+            drop(f"{src.split(':')[1] if src.startswith('key:') else src.rstrip('0123456789_')}->{dest}")
             continue
         x = a * spec["x"] * (0.5 if bip else 1.0)                        # measured (calibration/vital_route_probe.py): a bipolar route adds amount * (value - 0.5), the engine's bipolar flag gives amount * (2 * value - 1)
         if src.startswith("random_") and RANDOM_LIVE and spec["lr"] is not None and not dest.endswith("_tempo"):
             rn.append((abs(a * spec["x"] * (0.5 if bip else 1.0)), int(src[7:]), spec["lr"], a * spec["x"] * (0.5 if bip else 1.0), bip))        # a live route (a modulation destination the engine has): not folded in at its mean
+            continue
+        if src == "aftertouch" and AFTERTOUCH_LIVE and spec["lr"] is not None:
+            ex.append((abs(x), 10, spec["lr"], x, bip))
+            continue
+        if src == "velocity" and VELOCITY_LIVE and spec["lr"] is not None:
+            v = static_source_value(s, src)
+            fold_amt = a * spec["pot"] * ((v - 0.5) if bip else v) if spec["key"] else 0.0
+            vel_live.append((abs(x), spec["lr"], x, bip, spec["key"], fold_amt, spec["lo"], spec["hi"]))
+            continue
+        if src.startswith("key:"):
+            if spec["lr"] is None:
+                drop(f"{src.split(':')[1]}->{dest}")
+                continue
+            _, what, ri = src.split(":")
+            table = key_table(s, int(ri), what)
+            kid = key_units.setdefault((what, tuple(table)), 100 + len(key_units))
+            if kid - 100 == len(key_tables):
+                key_tables.append((what, table))
+            lr.append((abs(x), kid, spec["lr"], x, bip))
             continue
         if src.startswith("lfo_") and spec["key"] in AUDIO_DIST_DST and keytrack_audio_hz(s, int(src[4:])) > 30.0:
             # a keyboard-following LFO is at audio rate, which only the distortion's own audio-rate LFO can follow: the route goes there (a bipolar one as twice the amount on the unipolar value, less a fixed half)
@@ -696,6 +743,13 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         strength[k] = strength.get(k, 0.0) + w
     chosen = sorted(strength, key=lambda k: -strength[k])[:4]
     for slot, k in enumerate(chosen, 1):
+        if k >= 100:                                                                         # a Key / Key Oct lookup: the engine LFO's mode, and the route's curve as its Hi-Res table
+            what, table = key_tables[k - 100]
+            P[f"lfo{slot}_mode"] = 3 if what == "note" else 4
+            P[f"lfo{slot}_hr"] = 1
+            for j, v in enumerate(table):
+                P[f"lfo{slot}_h{j}"] = v
+            continue
         lf = s["lfos"][k - 1]
         sync = int(s.get(f"lfo_{k}_sync", 0))
         keyflat = False
@@ -746,7 +800,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     slot_of = {k: i for i, k in enumerate(chosen, 1)}
     for w, k, dst, x, bip in lr:
         if k not in slot_of:
-            drop("lfo routes past the engine's four LFOs")
+            drop("lfo routes past the engine's four LFOs" if k < 100 else "key routes past the engine's four LFOs")
     # Vital's random modulators: a generator each (style, rate, tempo), a new value for every note, carried as route sources 5..8
     for k in sorted({r[1] for r in rn}):
         P[f"rn{k}_style"] = int(CLAMP(int(s.get(f"random_{k}_style", 0)), 0, 3))
@@ -762,6 +816,17 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         if int(s.get(f"random_{k}_sync_type", 0)):
             notes.append(f"random {k} is synced to the song position: it draws a new value per note instead")
     combined = [(w, slot_of[k], dst, x, bip) for w, k, dst, x, bip in lr if k in slot_of] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
+    combined += ex
+    # velocity routes go live while the eight route slots last (the rest, and any with a control to fold into, are added at velocity 100 as before)
+    vel_live.sort(key=lambda r: -r[0])
+    room = max(0, 8 - len(combined))
+    for w, dst, x, bip, key, fold_amt, lo, hi in vel_live[:room]:
+        combined.append((w * 0.5, 9, dst, x, bip))            # ranked below the same-sized LFO route: a slot lost here loses a live route, not a fixed offset
+    for w, dst, x, bip, key, fold_amt, lo, hi in vel_live[room:]:
+        if key:
+            P[key] = int(round(CLAMP(P.get(key, 0) + fold_amt, lo, hi)))
+        else:
+            drop("velocity routes past the engine's 8")
     combined.sort(key=lambda r: -r[0])
     for n, (w, src_slot, dst, x, bip) in enumerate(combined[:8], 1):
         P[f"lr{n}_src"] = src_slot
@@ -1037,6 +1102,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             src = m["source"]
             if ROUTE_CURVES and route_shaped(s, i) and (v := static_source_value(s, src)) is not None:
                 src = f"const:{route_static_value(s, i, v):.6f}"           # a static source through the route's own curve / power: a fixed value
+            if KEY_LIVE and src in ("note", "note_in_octave"):
+                src = f"key:{src}:{i}"                                         # resolved in map_modulation: the route's curve becomes a table over the note
             routes.append((src, m["destination"], amounts[i], bool(s.get(f"modulation_{i + 1}_bipolar"))))
     # macros and velocity aimed at an envelope's attack / decay / release / sustain: added to the stored value (a fraction of its range; times are the value to the 4th) at the macro's saved value and velocity 100
     s = dict(s)
@@ -1050,7 +1117,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             routes.remove(r)
             env_folded += 1
     fx_folded = fold_fx_routes(s, routes)
-    routed = {r[1] for r in routes if static_source_value(s, r[0]) is None}          # destinations an LFO / envelope still moves: an effect they can raise from zero stays on
+    routed = {r[1] for r in routes if static_source_value(s, r[0]) is None or (r[0] == "velocity" and VELOCITY_LIVE)}          # destinations an LFO / envelope still moves: an effect they can raise from zero stays on
     if fx_folded:
         notes.append(f"{fx_folded} macro / velocity route(s) to an effect control are added at the saved macro value and velocity {int(VELOCITY_NOMINAL * 127)}, so they do not move live")
     if env_folded:
@@ -1114,7 +1181,12 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P[f"{k}_pos"] = sweep_pos[o] if o in sweep_pos else pot(s[f"osc_{o}_wave_frame"] / 255.0 * 127)
         P[f"{k}_level"] = pot(127 * s[f"osc_{o}_level"])                                     # GUESS: Vital's level is also squared before the mix
         P[f"{k}_pan"] = pot(64 + 63 * s[f"osc_{o}_pan"])
-        P[f"{k}_tune"] = round(float(CLAMP(s[f"osc_{o}_transpose"] + s[f"osc_{o}_tune"] + voice_shift, -72, 72)), 3)      # semitones, fractional (the loader keeps the fraction: a fine tune is -1..1 st); Vital adds the voice's transpose and tune to the note itself
+        if s.get(f"osc_{o}_midi_track", 1.0) or not OSC_KEY_TRACK_OFF:
+            P[f"{k}_tune"] = round(float(CLAMP(s[f"osc_{o}_transpose"] + s[f"osc_{o}_tune"] + voice_shift, -72, 72)), 3)      # semitones, fractional (the loader keeps the fraction: a fine tune is -1..1 st); Vital adds the voice's transpose and tune to the note itself
+        else:
+            # Key Track off (synth_oscillator.cpp: the oscillator's note is the constant 48 whatever is played, and the voice's own transpose does not reach it): the engine's fixed pitch is MIDI note 0 plus the tune
+            P[f"{k}_fixed"] = 1
+            P[f"{k}_tune"] = round(float(CLAMP(48.0 + s[f"osc_{o}_transpose"] + s[f"osc_{o}_tune"], -72, 72)), 3)
         voices = int(s[f"osc_{o}_unison_voices"])
         P[f"{k}_uni"] = int(CLAMP(voices, 1, 16))
         # measured (calibration/vital_stack_probe.py): the stack's half-width in semitones is range * (detune / 10)^2, whatever the power; the power shapes the spacing of the voices, (e^(p|x|) - 1) / (e^p - 1).

@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.8"
+VERSION = "0.9.9"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being
@@ -398,7 +398,9 @@ MOD_DST = ["None",
            # An oscillator's pitch in semitones at 2 per unit of the route (a vibrato of a few cents: the 48-per-unit WT Pitch destination steps by 0.76 st over a 127-step amount).
            "WT1 Fine", "WT2 Fine", "WT3 Fine",
            # The voice filters' Blend knob (a fraction of its 0..2 range) of the Blend, Phaser and Comb filters, moved by an LFO / envelope route.
-           "Filter Blend", "Filter 2 Blend"]
+           "Filter Blend", "Filter 2 Blend",
+           # The whole voice's pitch (Vital voice_transpose, 48 semitones per unit of the route) and fine tune (voice_tune, 2 per unit).
+           "Voice Pitch", "Voice Fine", "Filter Comb Trans", "Filter 2 Comb Trans"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -410,13 +412,13 @@ N_LFO, N_ROUTE, N_SHAPE = 4, 8, 16
 LFO_SHAPE_DEFAULT = [round(127 * (0.5 + 0.5 * _m.sin(2 * _m.pi * k / N_SHAPE))) for k in range(N_SHAPE)]
 LFOS = [dict(
     rate = pot(f"lfo{n}_rate", f"L{n}RT", f"LFO{n} Rate", 60),
-    mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free", "Env"], 0),
+    mode = enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free", "Env", "Key", "Key Oct"], 0),
     shape = [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)],
     # Serum's LFO Smooth: a one-pole low-pass on the LFO's output, 2 ms to 0.7 s (log), 0 = off (calibration/dev/probe_lfo_smooth.py)
     smooth = pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0),
 ) for n in range(1, N_LFO + 1)]
 LROUTES = [dict(
-    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4", "Rnd1", "Rnd2", "Rnd3", "Rnd4"], 0),
+    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4", "Rnd1", "Rnd2", "Rnd3", "Rnd4", "Velocity", "Aftertouch"], 0),
     dst = enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),
     amt = pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64),
     # Serum stores the polarity per route (kParamBipolar): Uni adds lfo * amount (the LFO swings 0..1), Bi adds (2 lfo - 1) * amount

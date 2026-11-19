@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.9
+
+Every new parameter defaults to the old behaviour; saved presets load and sound the same, and a Vital preset gains the new behaviour when it is imported again.
+
+**Vital's Key and Key-in-octave sources are live.** A route from `note` or `note_in_octave` (13 of the 100 local presets) used to be dropped. An LFO now has two more modes, Key and Key Oct: instead of running, it looks the note up in its Hi-Res table, so a route keeps its own curve (Touch Tone's twelve-step pitch tables, a cutoff that opens with the key). They take an LFO each, ranked with the real LFOs by the strength of their routes. Against the plugin over 100 presets the mean band error went from 11.02 to 10.84 dB: 8 presets better (Touch Tone 42.9 to 31.9, FM Mode 19.7 to 16.1), 2 slightly worse.
+
+**Velocity and Aftertouch are live route sources.** Two more sources on the eight routes: the note's velocity (0 to 1, fixed for the note) and the pad pressure (the Move's channel pressure or a pad's own, 0 when nothing is sent; a new note starts it at 0). Vital routes from either (29 of 100 local presets use velocity, one uses aftertouch) now follow the pad while route slots last; before, velocity was added at a fixed 100 and aftertouch was dropped. Against the plugin, a velocity route to the cutoff follows the same curve across velocities 25, 64 and 127 (centroid 563 / 887 / 2244 Hz against 446 / 764 / 1860) and one to the oscillator level is linear in velocity as in the plugin. Routes that do not fit in the eight slots, or whose control has no live destination, are still added at velocity 100.
+
+**Vital's comb filter Blend Transpose moves live** (destinations Filter Comb Trans and Filter 2 Comb Trans, appended; a fraction of Vital's 0..84 semitone range, held to it as Vital does). A macro or velocity on it is added to the stored transpose. On a saw through a comb with an LFO on the transpose: 17.4 to 9.7 dB.
+
+**An oscillator with Key Track off plays one pitch** (Vital's constant note 48 plus its transpose and tune) instead of following the key: Touch Tone, Kick Drum 1, Squish Clicker.
+
+**Vital's voice transpose and voice tune are live routes** (Voice Pitch, Voice Fine): the whole voice moves, the plugin's pitch is matched to 0.3 semitones.
+
 ## 0.9.8
 
 The formant filters planned as 0.9.7 and the Vital leads planned as 0.9.8 ship together. Saved presets from earlier versions load and sound the same: of 112 presets rendered with the 0.9.6 engine and this one, 64 are bit-identical and the other 48 (noise and random phases make them differ on every render) differ by no more than their own run-to-run noise. Every new parameter defaults to the old behaviour, so a Serum preset is unchanged; a Vital preset gains the new behaviour when it is imported again.

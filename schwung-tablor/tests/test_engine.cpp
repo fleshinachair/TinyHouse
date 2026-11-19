@@ -1238,6 +1238,72 @@ static void testRandomModulators()
     CHECK(off > 0.0 && plain >= 0.0, "with the route off or on an LFO the oscillator is unchanged by the random settings (%.0f, %.0f)", off, plain);
 }
 
+/* Vital's voice_transpose / voice_tune routes (Voice Pitch = destination 66, 48 semitones per unit; Voice Fine = 67, 2 per unit) move the whole voice: a constant LFO at 1 with a Uni route of pot 80 (16/63 of the unit) raises the note by 12.2 semitones */
+static void testVoicePitchRoute()
+{
+    auto hz = [](int dst, int amt) {
+        Engine e; soloWt3(e);
+        for (int k = 0; k < 16; k++) e.pots[TB_P_LFO1_S0 + k] = 127;
+        e.pots[TB_P_LFO1_HR] = 0; e.pots[TB_P_LFO1_RATE] = 0;
+        e.pots[TB_P_LR1_SRC] = 1; e.pots[TB_P_LR1_DST] = (float) dst; e.pots[TB_P_LR1_AMT] = (float) amt; e.pots[TB_P_LR1_BIP] = 0;
+        note(e, 69, 100);
+        return heardHz(render(e, 400));
+    };
+    const double plain = hz(0, 64), up = hz(66, 80), fine = hz(67, 127);
+    const double semis = 12.0 * std::log2(up / plain), fineSemis = 12.0 * std::log2(fine / plain);
+    CHECK(std::fabs(semis - 48.0 * 16.0 / 63.0) < 0.5, "a Voice Pitch route of pot 80 raises the voice %.2f semitones (expected 12.19)", semis);
+    CHECK(std::fabs(fineSemis - 2.0) < 0.25, "a full Voice Fine route raises the voice %.2f semitones (expected 2.00)", fineSemis);
+}
+
+/* Vital's Key and Key-in-octave sources: an LFO in mode 3 / 4 is a lookup of the note in its Hi-Res table (point note / 2, or note mod 12), so a route from it moves the voice by what the table says for the note played.
+ * Here Key Oct holds 1 at pitch class 9 only and the route is Voice Pitch pot 80 (12.19 semitones): A (69, class 9) is raised, A# (70) is not. A Comb Transpose route (destination 68) changes a Vital comb's sound. */
+static void testKeyLfo()
+{
+    auto hz = [](int note_, int mode, int dst, int amt) {
+        Engine e; soloWt3(e);
+        for (int i = 0; i < 64; i++) e.pots[TB_P_LFO1_H0 + i] = (mode == 4 && i == 9) ? 127.0f : 0.0f;
+        e.pots[TB_P_LFO1_MODE] = (float) mode; e.pots[TB_P_LFO1_RATE] = 0;
+        e.pots[TB_P_LR1_SRC] = 1; e.pots[TB_P_LR1_DST] = (float) dst; e.pots[TB_P_LR1_AMT] = (float) amt; e.pots[TB_P_LR1_BIP] = 0;
+        note(e, note_, 100);
+        return heardHz(render(e, 400));
+    };
+    const double a0 = hz(69, 0, 0, 64), a1 = hz(69, 4, 66, 80), b0 = hz(70, 0, 0, 64), b1 = hz(70, 4, 66, 80), a3 = hz(69, 3, 66, 80);
+    CHECK(std::fabs(12.0 * std::log2(a1 / a0) - 48.0 * 16.0 / 63.0) < 0.5, "Key Oct at pitch class 9 carries the route to the note A (%.2f semitones)", 12.0 * std::log2(a1 / a0));
+    CHECK(std::fabs(12.0 * std::log2(b1 / b0)) < 0.2, "Key Oct at pitch class 10 reads 0: the note A# is not moved (%.2f semitones)", 12.0 * std::log2(b1 / b0));
+    CHECK(std::fabs(12.0 * std::log2(a3 / a0)) < 0.2, "Key (mode 3) reads point note / 2 = 34, which is 0 here (%.2f semitones)", 12.0 * std::log2(a3 / a0));
+    auto comb = [](bool route) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 100; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_FLT_TYPE] = 8; e.pots[TB_P_VCOMB] = 1; e.pots[TB_P_FLT_FREQ] = 60; e.pots[TB_P_FLT_RES] = 100; e.pots[TB_P_CBLEND] = 64; e.pots[TB_P_CTRANS] = 64;
+        for (int k = 0; k < 16; k++) e.pots[TB_P_LFO1_S0 + k] = 127;
+        e.pots[TB_P_LFO1_RATE] = 0;
+        if (route) { e.pots[TB_P_LR1_SRC] = 1; e.pots[TB_P_LR1_DST] = 68; e.pots[TB_P_LR1_AMT] = 100; e.pots[TB_P_LR1_BIP] = 0; }
+        note(e, 57, 100);
+        return render(e, 100);
+    };
+    const auto x = comb(false), y = comb(true);
+    double d = 0, s = 0;
+    for (size_t i = x.size() / 2; i < x.size(); i++) { d += std::fabs((double) x[i] - y[i]); s += std::fabs((double) x[i]); }
+    CHECK(s > 0.0 && d > 0.2 * s, "a Comb Transpose route changes the Vital comb (relative change %.2f)", s > 0.0 ? d / s : 0.0);
+}
+
+/* Velocity (route source 9) and Aftertouch (10): a Voice Pitch route of pot 80 (12.19 semitones at 1) raises the note in proportion to the velocity, and by the channel pressure once it is sent */
+static void testVelocityAftertouchSources()
+{
+    auto hz = [](int src, int vel, int pressure) {
+        Engine e; soloWt3(e);
+        e.pots[TB_P_LR1_SRC] = (float) src; e.pots[TB_P_LR1_DST] = 66; e.pots[TB_P_LR1_AMT] = 127; e.pots[TB_P_LR1_BIP] = 0;
+        note(e, 57, vel);
+        if (pressure >= 0) { const uint8_t at[] = { 0xD0, (uint8_t) pressure }; e.onMidi(at, 2); }
+        return heardHz(render(e, 400));
+    };
+    const double plain = hz(0, 127, -1);
+    const double v127 = 12.0 * std::log2(hz(9, 127, -1) / plain), v64 = 12.0 * std::log2(hz(9, 64, -1) / plain);
+    CHECK(std::fabs(v127 - 48.0) < 1.0 && std::fabs(v64 - 48.0 * 64.0 / 127.0) < 1.0, "a Velocity route follows the velocity (%.1f st at 127, %.1f at 64; expected 48 and 24.2)", v127, v64);
+    const double a0 = 12.0 * std::log2(hz(10, 100, -1) / plain), a1 = 12.0 * std::log2(hz(10, 100, 127) / plain), ah = 12.0 * std::log2(hz(10, 100, 64) / plain);
+    CHECK(std::fabs(a0) < 0.2 && std::fabs(a1 - 48.0) < 1.0 && std::fabs(ah - 24.2) < 1.0, "an Aftertouch route is silent until pressure arrives (%.1f st), then follows it (%.1f at 127, %.1f at 64)", a0, a1, ah);
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1533,6 +1599,9 @@ int main()
     testFxBuses();
     testFxFilterLfo();
     testVitalEnvelopeAndLfoDelay();
+    testVoicePitchRoute();
+    testKeyLfo();
+    testVelocityAftertouchSources();
     testRandomModulators();
     testOscPhase();
     testUtilOutLfo();

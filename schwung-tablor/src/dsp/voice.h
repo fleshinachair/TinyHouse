@@ -93,8 +93,12 @@ enum ModDst {
     MD_DISTV_DRIVE, MD_DISTV_CUT, MD_DISTV_RES, MD_DISTV_BLEND,     /* the Vital distortion's Drive and filter Cutoff, Res and Blend, each a fraction of the control's range: read by the engine from the newest voice (distVMod) */
     MD_WT1_FINE, MD_WT2_FINE, MD_WT3_FINE,     /* an oscillator's pitch in semitones, 2 per unit of the route: a vibrato of a few cents (Vital's osc Tune knob spans 2 st), which the 48-per-unit Pitch destination cannot hold in a 127-step amount */
     MD_FLT_BLEND, MD_FLT2_BLEND,     /* Vital's voice filter Blend knob (a fraction of its 0..2 range): added to the stored blend of the Blend, Phaser and Comb filters before the block is run */
+    MD_VOICE_PITCH, MD_VOICE_FINE,     /* Vital's voice_transpose (48 semitones per unit of the route) and voice_tune (2 per unit): the whole voice, every oscillator, the sub, the samples and the filters' key tracking */
+    MD_FLT_CTRANS, MD_FLT2_CTRANS,     /* Vital's comb filter Blend Transpose (a fraction of its 0..84 semitone range), added to the stored transpose of the Vital comb law */
     MD_COUNT
 };
+/* Saved presets store the destination INDEX: a new destination goes at the end, never in front of one that has shipped (0.9.8 shipped MD_FLT_BLEND = 64). */
+static_assert(MD_WT1_FINE == 61 && MD_FLT_BLEND == 64 && MD_FLT2_BLEND == 65 && MD_VOICE_PITCH == 66 && MD_VOICE_FINE == 67 && MD_FLT_CTRANS == 68 && MD_FLT2_CTRANS == 69, "a mod destination moved: presets store the index");
 
 /* The destinations whose route is added to a level KNOB, before the knob's taper. */
 inline bool isLevelDst(int d) {
@@ -120,7 +124,7 @@ struct VoiceContext {
     float *dry[2] = {};                     /* the sources routed Out: past the filter and the effects, added to the output after them (null: nowhere to put them) */
 };
 
-inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16, kLfoHi = 64, kRnds = 4;       /* kRnds: Vital's random modulators, route sources kLfos + 1 ... */
+inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16, kLfoHi = 64, kRnds = 4, kRouteSrcs = kLfos + kRnds + 2;      /* sources 1..4 LFOs, 5..8 random, 9 velocity, 10 aftertouch */       /* kRnds: Vital's random modulators, route sources kLfos + 1 ... */
 /* The strides the code below walks the parameter table with: if the generator ever reorders them this stops the build. */
 static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 == TB_P_LFO1_RATE + 2 &&
               TB_P_LFO1_MODE == TB_P_LFO1_RATE + 1 && TB_P_LFO1_SMOOTH == TB_P_LFO1_S15 + 1 &&
@@ -158,6 +162,15 @@ inline float potEnvStage(float v) { const float x = pot01(v), x2 = x * x; return
 inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[TB_P_LFO1_MODE + lfo * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)]); }
 inline bool lfoIsFree(const float *P, int lfo) { return lfoModeOf(P, lfo) == 1; }          /* 0 Trig, 1 Free, 2 Env */
 inline bool lfoIsOneShot(const float *P, int lfo) { return lfoModeOf(P, lfo) == 2; }
+/* Modes 3 and 4 are not oscillators: the LFO is a lookup of the note being played in its Hi-Res table (Vital's Key and Key-in-octave route sources, which a route can bend with a curve of its own).
+ * Mode 3 (Key) reads point note / 2, 0..63; mode 4 (Key Oct) reads point (note mod 12), 0..11. */
+inline bool lfoIsKey(const float *P, int lfo) { return lfoModeOf(P, lfo) >= 3; }
+inline float lfoKeyValue(const float *P, int lfo, float note)
+{
+    const int n = std::clamp((int) std::lround(note), 0, 127);
+    const int i = lfoModeOf(P, lfo) == 3 ? std::min(n / 2, kLfoHi - 1) : n % 12;
+    return pot01(P[TB_P_LFO1_H0 + lfo * (TB_P_LFO2_H0 - TB_P_LFO1_H0) + i]);
+}
 
 /* The shape: 16 points of one cycle, 0..127 for 0..1, read round the loop with linear interpolation; or, with the LFO's Hi-Res switch on, its 64 points read the same way. */
 inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = false)
@@ -523,21 +536,21 @@ public:
         if (smp.on && knobL > 0.0f) {                  /* the sample oscillator: its level knob is squared, as the wavetables' are */
             const float knob = knobL;
             const bool fixedPitch = P[TB_P_SMP_FIXED] >= 0.5f;                 /* a sample that does not follow the keyboard (Serum's noise slot samples) */
-            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp.r->root) + c.pitchBendSemis) + P[TB_P_SMP_TUNE] + P[TB_P_SMP_FINE] / 100.0f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp.r->root) + c.pitchBendSemis + voicePitchMod()) + P[TB_P_SMP_TUNE] + P[TB_P_SMP_FINE] / 100.0f;
             addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP_PAN], l, r, [&](float *a, float *b) { smp.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP_DET]), pot01(P[TB_P_SMP_SPREAD])); }); });
         }
         const float knob2L = std::clamp(pot01(P[TB_P_SMP2_LEVEL]) + lfoLvl[MD_SMP2_LEVEL], 0.0f, 1.0f);
         if (smp2.on && knob2L > 0.0f) {                /* the second sample oscillator: the same, with its own controls */
             const float knob = knob2L;
             const bool fixedPitch = P[TB_P_SMP2_FIXED] >= 0.5f;
-            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp2.r->root) + c.pitchBendSemis) + P[TB_P_SMP2_TUNE] + P[TB_P_SMP2_FINE] / 100.0f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp2.r->root) + c.pitchBendSemis + voicePitchMod()) + P[TB_P_SMP2_TUNE] + P[TB_P_SMP2_FINE] / 100.0f;
             addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP2_PAN], l, r, [&](float *a, float *b) { smp2.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP2_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP2_DET]), pot01(P[TB_P_SMP2_SPREAD])); }); });
         }
         const float knob3L = std::clamp(pot01(P[TB_P_SMP3_LEVEL]) + lfoLvl[MD_SMP3_LEVEL], 0.0f, 1.0f);
         if (smp3.on && knob3L > 0.0f) {                /* the third (Serum has three oscillators, any of them a sample) */
             const float knob = knob3L;
             const bool fixedPitch = P[TB_P_SMP3_FIXED] >= 0.5f;
-            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp3.r->root) + c.pitchBendSemis) + P[TB_P_SMP3_TUNE] + P[TB_P_SMP3_FINE] / 100.0f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp3.r->root) + c.pitchBendSemis + voicePitchMod()) + P[TB_P_SMP3_TUNE] + P[TB_P_SMP3_FINE] / 100.0f;
             addSource(P[TB_P_SMP3_POST], TB_P_SMP3_BAL, TB_P_SMP3_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP3_PAN], l, r, [&](float *a, float *b) { smp3.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP3_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP3_DET]), pot01(P[TB_P_SMP3_SPREAD])); }); });
         }
 
@@ -546,7 +559,7 @@ public:
             const float knob = std::clamp(pot01(P[levelP]) + lfoLvl[mLvl], 0.0f, 1.0f);
             if (!gc.on || !(knob > 0.0f)) return;
             const bool fixedPitch = P[fixedP] >= 0.5f;
-            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - gc.r->root) + c.pitchBendSemis) + P[tuneP] + P[fineP] / 100.0f;
+            const float semis = (fixedPitch ? 0.0f : (float) (midiNote - gc.r->root) + c.pitchBendSemis + voicePitchMod()) + P[tuneP] + P[fineP] / 100.0f;
             GrainParams gp;
             gp.kd = std::clamp(pot01(P[densP]) + modOff[mDens], 0.0f, 1.0f);
             const float kl = std::clamp(pot01(P[lenP]) + modOff[mDens + 1], 0.0f, 1.0f);
@@ -782,8 +795,9 @@ private:
          * Each runs at the block rate. A route adds lfo * amount to its destination: Uni with the LFO swinging 0..1, Bi with it
          * swinging -1..+1 (the polarity is the route's own, as Serum stores it). */
         {
-            float lfoOut[kLfos + kRnds] = {};
+            float lfoOut[kRouteSrcs] = {};
             for (int l = 0; l < kLfos; l++) {
+                if (lfoIsKey(P, l)) { lfoOut[l] = lfoKeyValue(P, l, noteSmoother.getCurrentValue() * 127.0f); lfoSmInit[l] = false; continue; }
                 /* Vital's Delay holds the LFO where it started until the time is up; the time that is left over in this block moves it (synth_lfo.cpp processControlRate) */
                 const float full = blockSize > 0 ? (float) blockSize / (float) sampleRate : 0.0f;
                 float adv = full;
@@ -816,11 +830,13 @@ private:
                 } else lfoSmInit[l] = false;
             }
             stepRandoms(P, c.bpm, blockSize, lfoOut + kLfos);
+            lfoOut[kLfos + kRnds] = std::clamp(velocity, 0.0f, 1.0f);              /* Velocity: the note's, 0..1, fixed for the note */
+            lfoOut[kLfos + kRnds + 1] = std::clamp(c.aftertouch, 0.0f, 1.0f);     /* Aftertouch: the channel pressure now (0 when the pads do not send it) */
             const int stride = TB_P_LR2_SRC - TB_P_LR1_SRC;
             for (int r = 0; r < kLfoRoutes; r++) {
                 const int src = (int) P[TB_P_LR1_SRC + r * stride];
                 const int dst = (int) P[TB_P_LR1_DST + r * stride];
-                if (src >= 1 && src <= kLfos + kRnds && dst > MD_NONE && dst < MD_COUNT) {
+                if (src >= 1 && src <= kRouteSrcs && dst > MD_NONE && dst < MD_COUNT) {
                     const float u = lfoOut[src - 1];
                     const float v = P[TB_P_LR1_BIP + r * stride] >= 1.0f ? 2.0f * u - 1.0f : u;
                     const float amt = v * potBipolar(P[TB_P_LR1_AMT + r * stride]);
@@ -842,7 +858,7 @@ private:
         /* ---- oscillators ---- */
         float baseNote = noteSmoother.getCurrentValue() * 127.0f;
         if (glissando) baseNote = (float) (int) (baseNote + 0.5f);
-        baseNote += c.pitchBendSemis;
+        baseNote += c.pitchBendSemis + voicePitchMod();                       /* Vital's voice transpose / tune routes move the whole voice */
 
         /* WT3 is the plain one: no bend or formant pots, and only position,
          * level and sync can be modulated. MD_NONE's offset is always zero,
@@ -1010,7 +1026,7 @@ private:
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
                 Filter::bandpass, Filter::bandpass, Filter::notch, Filter::notch };
             combRes = res;
-            vcMode = (int) P[TB_P_VCOMB]; vcBlend = blendOf(P[TB_P_CBLEND], MD_FLT_BLEND); vcTrans = (P[TB_P_CTRANS] - 64.0f) * 0.75f;   /* the Vital comb's blend and transpose (comb.h processVital) */
+            vcMode = (int) P[TB_P_VCOMB]; vcBlend = blendOf(P[TB_P_CBLEND], MD_FLT_BLEND); vcTrans = ctransOf(P[TB_P_CTRANS], MD_FLT_CTRANS);   /* the Vital comb's blend and transpose (comb.h processVital) */
             int t = ft >= 8 ? 1 : ft & 7;
             filter.setType(kTypes[t]);
             filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
@@ -1034,7 +1050,7 @@ private:
             if (combType2 || ft2 >= 16) n2 += (P[TB_P_FLT2_CFINE] - 64.0f) * 0.01f;
             fltTarget2 = std::clamp(midiNoteToHz(n2), combType2 ? 3.0f : 4.0f, maxFreq);
             combRes2 = std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f);
-            vcMode2 = (int) P[TB_P_VCOMB2]; vcBlend2 = blendOf(P[TB_P_CBLEND2], MD_FLT2_BLEND); vcTrans2 = (P[TB_P_CTRANS2] - 64.0f) * 0.75f;
+            vcMode2 = (int) P[TB_P_VCOMB2]; vcBlend2 = blendOf(P[TB_P_CBLEND2], MD_FLT2_BLEND); vcTrans2 = ctransOf(P[TB_P_CTRANS2], MD_FLT2_CTRANS);
             fltQ2 = kFilterQ / (1.0f - std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f) * 0.99f);
             if (P[TB_P_FLT_VDL] >= 0.5f) fltQ2 = vitalFilterDriveQ(fltQ2, pot01(P[TB_P_FLT2_DRIVE]));
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
@@ -1193,6 +1209,9 @@ private:
     AnalogADSR filterADSR, adsr;
     AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
     /* a voice filter's Blend knob (a 0..127 pot = 0..2) with the routes into it (a fraction of the 0..2 range) added */
+    float voicePitchMod() const { return modOff[MD_VOICE_PITCH] * 48.0f + modOff[MD_VOICE_FINE] * 2.0f; }
+    /* the Vital comb's Blend Transpose in semitones: the pot's, and a route's fraction of Vital's 0..84 range added (held to that range as Vital does, only while a route moves it) */
+    float ctransOf(float potV, int dst) const { const float t = (potV - 64.0f) * 0.75f; return modOff[dst] != 0.0f ? std::clamp(t + modOff[dst] * 84.0f, 0.0f, 84.0f) : t; }
     float blendOf(float potV, int dst) const { return std::clamp(potV * (1.0f / 127.0f) + modOff[dst], 0.0f, 1.0f) * 2.0f; }
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */
     /* Vital's random modulators (random_lfo.cpp), one set per voice: a new random value is drawn for every note. Perlin and Sine glide from the last value to the next over each cycle; Sample and Hold

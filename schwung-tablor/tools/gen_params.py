@@ -442,6 +442,7 @@ def modenv(n):
         amt = pot(f"me{n}_amt", f"E{n}AMT", f"EG{n} Amt", 64),
     )
 ME1, ME2 = modenv(1), modenv(2)
+ME3, ME4 = modenv(3), modenv(4)       # two more routable envelopes for Vital presets (hidden: set by the Vital converter, no page shows them)
 
 # Presets are Schwung's, not ours. Its browser (shadow_ui_presets.mjs) is
 # reached from the slot, works for every module, auditions as you scroll, and
@@ -769,6 +770,12 @@ BANKS = [
                               row(*[num(f"vdl_s{i}", f"VS{i}", f"Dist Audio LFO Shape {i + 1}", 0, 127, 0) for i in range(8, 16)])]),
     # After Vital Dist LFO, for the same reason. Vital's amplitude-envelope decay curve: 0 keeps the analog decay, 1..127 is a curve power of (pot - 64) * 10 / 63 (a positive power holds the level and
     # then plunges, as Vital's Kick Drum 1 does; the analog decay only falls fast first). Set by the Vital converter.
+    # Vital's envelopes 3 and 4 as routable envelopes too (the converter ranks a preset's envelope routes onto four instead of two): the same knobs as the first two, plus the Vital extras.
+    ("Vital Mod Env", False, [row(ME3["a"], ME3["d"], ME3["s"], ME3["r"], ME3["dst"], ME3["amt"]),
+                              row(ME4["a"], ME4["d"], ME4["s"], ME4["r"], ME4["dst"], ME4["amt"]),
+                              row(num("me3_apow", "M3P", "Vital Mod Env 3 Attack Curve", 0, 127, 0), num("me4_apow", "M4P", "Vital Mod Env 4 Attack Curve", 0, 127, 0),
+                                  num("me3_delay", "VM5", "Env 3 Delay", 0, 127, 0), num("me3_hold", "VM6", "Env 3 Hold", 0, 127, 0),
+                                  num("me4_delay", "VM7", "Env 4 Delay", 0, 127, 0), num("me4_hold", "VM8", "Env 4 Hold", 0, 127, 0))]),
     ("Vital Env", False, [row(num("vca_dpow", "VDP", "Vital Amp Decay Curve", 0, 127, 0)),
                          row(num("vca_apow", "VAP", "Vital Amp Attack Curve", 0, 127, 0), num("flt_apow", "FAP", "Vital Filter Attack Curve", 0, 127, 0),
                              num("me1_apow", "M1P", "Vital Mod Env 1 Attack Curve", 0, 127, 0), num("me2_apow", "M2P", "Vital Mod Env 2 Attack Curve", 0, 127, 0))]),

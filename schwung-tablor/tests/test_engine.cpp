@@ -1304,6 +1304,23 @@ static void testVelocityAftertouchSources()
     CHECK(std::fabs(a0) < 0.2 && std::fabs(a1 - 48.0) < 1.0 && std::fabs(ah - 24.2) < 1.0, "an Aftertouch route is silent until pressure arrives (%.1f st), then follows it (%.1f at 127, %.1f at 64)", a0, a1, ah);
 }
 
+/* The hidden envelopes 3 and 4 (Vital presets) route like the first two: each pointed at Voice Pitch with a pot of 80 and a held sustain raises the note 12.19 semitones; an envelope pointed nowhere does nothing */
+static void testHiddenModEnvelopes()
+{
+    auto hz = [](int which) {
+        Engine e; soloWt3(e);
+        const int dst[] = { TB_P_ME3_DST, TB_P_ME4_DST }, amt[] = { TB_P_ME3_AMT, TB_P_ME4_AMT }, sus[] = { TB_P_ME3_S, TB_P_ME4_S }, atk[] = { TB_P_ME3_A, TB_P_ME4_A };
+        if (which >= 0) { e.pots[dst[which]] = 66; e.pots[amt[which]] = 80; e.pots[sus[which]] = 127; e.pots[atk[which]] = 0; }
+        note(e, 69, 100);
+        return heardHz(render(e, 400));
+    };
+    const double plain = hz(-1);
+    for (int w = 0; w < 2; w++) {
+        const double s = 12.0 * std::log2(hz(w) / plain);
+        CHECK(std::fabs(s - 48.0 * 16.0 / 63.0) < 0.6, "envelope %d routed to Voice Pitch raises the voice %.2f semitones (expected 12.19)", w + 3, s);
+    }
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1602,6 +1619,7 @@ int main()
     testVoicePitchRoute();
     testKeyLfo();
     testVelocityAftertouchSources();
+    testHiddenModEnvelopes();
     testRandomModulators();
     testOscPhase();
     testUtilOutLfo();

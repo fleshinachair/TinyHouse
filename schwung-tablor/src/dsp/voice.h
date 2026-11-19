@@ -105,7 +105,7 @@ inline bool isLevelDst(int d) {
     return d == MD_WT1_LEVEL || d == MD_WT2_LEVEL || d == MD_WT3_LEVEL || d == MD_SUB_LEVEL || d == MD_NOISE_LEVEL || (d >= MD_SMP1_LEVEL && d <= MD_SMP3_LEVEL);
 }
 
-inline constexpr int kModEnvs = 2;
+inline constexpr int kModEnvs = 4;      /* the routable envelopes: 1 and 2 are on the pages, 3 and 4 (Vital presets) are hidden */
 
 struct VoiceContext {
     const float *pots = nullptr;            /* TB_PARAM_COUNT raw values   */
@@ -765,17 +765,18 @@ private:
          * wavetable read as a struck instrument. */
         for (int i = 0; i < MD_COUNT; i++) modOff[i] = lfoLvl[i] = 0.0f;
         {
-            static const struct { int a, d, s, r, dst, amt; } k[kModEnvs] = {
-                { TB_P_ME1_A, TB_P_ME1_D, TB_P_ME1_S, TB_P_ME1_R,
-                  TB_P_ME1_DST, TB_P_ME1_AMT },
-                { TB_P_ME2_A, TB_P_ME2_D, TB_P_ME2_S, TB_P_ME2_R,
-                  TB_P_ME2_DST, TB_P_ME2_AMT },
+            static const struct { int a, d, s, r, dst, amt, apow, delay, hold; } k[kModEnvs] = {
+                { TB_P_ME1_A, TB_P_ME1_D, TB_P_ME1_S, TB_P_ME1_R, TB_P_ME1_DST, TB_P_ME1_AMT, TB_P_ME1_APOW, TB_P_ME1_DELAY, TB_P_ME1_HOLD },
+                { TB_P_ME2_A, TB_P_ME2_D, TB_P_ME2_S, TB_P_ME2_R, TB_P_ME2_DST, TB_P_ME2_AMT, TB_P_ME2_APOW, TB_P_ME2_DELAY, TB_P_ME2_HOLD },
+                { TB_P_ME3_A, TB_P_ME3_D, TB_P_ME3_S, TB_P_ME3_R, TB_P_ME3_DST, TB_P_ME3_AMT, TB_P_ME3_APOW, TB_P_ME3_DELAY, TB_P_ME3_HOLD },
+                { TB_P_ME4_A, TB_P_ME4_D, TB_P_ME4_S, TB_P_ME4_R, TB_P_ME4_DST, TB_P_ME4_AMT, TB_P_ME4_APOW, TB_P_ME4_DELAY, TB_P_ME4_HOLD },
             };
             for (int i = 0; i < kModEnvs; i++) {
-                modEnv[i].setDelay(potEnvStage(P[TB_P_ME1_DELAY + 2 * i]));
-                modEnv[i].setHold(potEnvStage(P[TB_P_ME1_HOLD + 2 * i]));
+                if (i >= 2 && (int) P[k[i].dst] == MD_NONE) continue;           /* the hidden envelopes cost nothing unless a preset points them somewhere */
+                modEnv[i].setDelay(potEnvStage(P[k[i].delay]));
+                modEnv[i].setHold(potEnvStage(P[k[i].hold]));
                 modEnv[i].setAttack(potAttackTime(P[k[i].a]));
-                modEnv[i].setAttackPower(attackPower(P[TB_P_ME1_APOW + (TB_P_ME2_APOW - TB_P_ME1_APOW) * i]), P[TB_P_ME1_APOW + (TB_P_ME2_APOW - TB_P_ME1_APOW) * i] >= 0.5f, false);
+                modEnv[i].setAttackPower(attackPower(P[k[i].apow]), P[k[i].apow] >= 0.5f, false);
                 modEnv[i].setDecay(potEnvTime(P[k[i].d]));
                 modEnv[i].setSustainLevel(pot01(P[k[i].s]));
                 modEnv[i].setRelease(potEnvTime(P[k[i].r]));
@@ -931,7 +932,9 @@ private:
             /* An oscillator counts from its pot and its routing, not its live
              * gain: an envelope crossing zero must not move anyone's unison. */
             bool on = P[k.level] > 0.0f || (int) P[TB_P_ME1_DST] == k.dLvl
-                                        || (int) P[TB_P_ME2_DST] == k.dLvl;
+                                        || (int) P[TB_P_ME2_DST] == k.dLvl
+                                        || (int) P[TB_P_ME3_DST] == k.dLvl
+                                        || (int) P[TB_P_ME4_DST] == k.dLvl;
             for (int r = 0; r < kLfoRoutes && !on; r++)
                 on = P[TB_P_LR1_SRC + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)] >= 1.0f &&
                      (int) P[TB_P_LR1_DST + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)] == k.dLvl;
@@ -1207,7 +1210,7 @@ private:
     SamplePlayer smp, smp2, smp3;
     GrainCloud gran, gran2, gran3;      /* the same slots in their Granular kind */
     AnalogADSR filterADSR, adsr;
-    AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
+    AnalogADSR modEnv[kModEnvs];        /* the spare, routable envelopes */
     /* a voice filter's Blend knob (a 0..127 pot = 0..2) with the routes into it (a fraction of the 0..2 range) added */
     float voicePitchMod() const { return modOff[MD_VOICE_PITCH] * 48.0f + modOff[MD_VOICE_FINE] * 2.0f; }
     /* the Vital comb's Blend Transpose in semitones: the pot's, and a route's fraction of Vital's 0..84 range added (held to that range as Vital does, only while a route moves it) */

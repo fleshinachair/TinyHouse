@@ -390,6 +390,7 @@ VITAL_BLEND_LIVE = True                                                         
 KEY_LIVE = True                                                                         # a Key / Key-in-octave route source is a live lookup of the note (an engine LFO in mode Key / Key Oct whose Hi-Res table is the route's curve) instead of being dropped
 VELOCITY_LIVE = True                                                                    # a velocity route to a control the engine can route moves with the pad's velocity (route source Velocity) while route slots last, instead of being folded in at velocity 100
 AFTERTOUCH_LIVE = True                                                                  # an aftertouch route is a live route source (Aftertouch) instead of being dropped
+MOD_ENVS = 4                                                                            # the engine's routable envelopes (two on its pages, two hidden ones for Vital presets)
 OSC_KEY_TRACK_OFF = True                                                                 # an oscillator with Key Track off plays a fixed pitch (the engine's Pitch: Fixed) instead of following the key
 CTRANS_LIVE = True                                                                      # a route to a comb filter's Blend Transpose moves it live (engine destinations Filter Comb Trans / Filter 2 Comb Trans)
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
@@ -837,9 +838,9 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             notes.append(f"LFO route amount {x:.2f} is past the engine's full range: limited")
     for w, src_slot, dst, x, bip in combined[8:]:
         drop("lfo routes past the engine's 8")
-    # envelope routes: the two strongest onto the engine's spare envelopes
+    # envelope routes: the four strongest onto the engine's spare envelopes (1 and 2 are on its pages, 3 and 4 hidden)
     me.sort(key=lambda r: -r[0])
-    for n, (w, k, dst, x, _dn) in enumerate(me[:2], 1):
+    for n, (w, k, dst, x, _dn) in enumerate(me[:MOD_ENVS], 1):
         P[f"me{n}_dst"] = dst
         P[f"me{n}_amt"] = pot(64 + 63 * CLAMP(x, -1, 1))
         t4 = lambda key: env_seconds(s, key)
@@ -851,8 +852,8 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"me{n}_s"] = pot(127 * CLAMP(s[f"env_{k}_sustain"], 0, 1))
         P[f"me{n}_r"] = d2m.pot_time(t4(f"env_{k}_release"))
         P[f"me{n}_delay"], P[f"me{n}_hold"] = env_stage_pot(s, k, "delay"), hp
-    for w, k, dst, x, dn in me[2:]:
-        drop("envelope routes past the engine's 2")
+    for w, k, dst, x, dn in me[MOD_ENVS:]:
+        drop(f"envelope routes past the engine's {MOD_ENVS}")
         LAST_DROPPED_ENV.append((k, dn))
     # macros: the engine's macro knobs hold the saved positions and move the same pots
     for k in range(4):
@@ -1522,12 +1523,12 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     for o in (1, 2, 3):                                                                       # an oscillator at level 0 is only audible if a route (LFO, envelope, macro) raises it
         if s.get(f"osc_{o}_on") and P[f"wt{o}_level"] == 0:
             lvl_dst = {1: 3, 2: 4, 3: 19}[o]
-            moved = (any(P[f"lr{r}_dst"] == lvl_dst and P[f"lr{r}_src"] for r in range(1, 9)) or any(P[f"me{e}_dst"] == lvl_dst for e in (1, 2))
+            moved = (any(P[f"lr{r}_dst"] == lvl_dst and P[f"lr{r}_src"] for r in range(1, 9)) or any(P.get(f"me{e}_dst", 0) == lvl_dst for e in range(1, MOD_ENVS + 1))
                      or any(key == f"wt{o}_level" for _, key, _ in macro["routes"]))
             if not moved:
                 notes.append(f"osc {o}: level 0 with nothing carried to raise it")
     if not P.get("smp_set") and not any(P[f"wt{o}_level"] > 0 or any(P[f"lr{r}_dst"] == {1: 3, 2: 4, 3: 19}[o] and P[f"lr{r}_src"] for r in range(1, 9))
-               or any(P[f"me{e}_dst"] == {1: 3, 2: 4, 3: 19}[o] for e in (1, 2)) for o in (1, 2, 3)):
+               or any(P.get(f"me{e}_dst", 0) == {1: 3, 2: 4, 3: 19}[o] for e in range(1, MOD_ENVS + 1)) for o in (1, 2, 3)):
         notes.append("SILENT: no oscillator is audible (the sound comes from a route that is not carried)")
     return {"name": name, "params": P, "paths": paths, "carried_fx": carried, "notes": notes, "macro": macro,
             "fx_in_preset": [fx for fx in ("reverb", "delay", "chorus", "flanger", "phaser", "distortion", "compressor", "eq", "filter_fx") if s.get(f"{fx}_on")]}

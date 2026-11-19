@@ -237,7 +237,7 @@ The converter, the importer that matches loudness, reverb and width against Seru
 ## Licences and what is not here
 
 The engine is a fork of [Tablor](https://github.com/athousanddetails/schwung-tablor), itself a port of FigBug's [Wavetable](https://github.com/FigBug/Wavetable),
-under BSD-3-Clause (see `schwung-tablor/LICENSE`). The rest of TinyHouse (the converter, the remote page, the scripts and the docs) is also BSD-3-Clause: see [LICENSE](LICENSE), **except the Vital import** (`converter/vital_*.py`), which is derived from [Vital](https://github.com/mtytel/vital) and is GPL-3.0-or-later: see [THIRD-PARTY.md](THIRD-PARTY.md) and [LICENSE-GPL-3.0](LICENSE-GPL-3.0).
+under BSD-3-Clause (see `schwung-tablor/LICENSE`). The rest of TinyHouse (the converter, the remote page, the scripts and the docs) is also BSD-3-Clause: see [LICENSE](LICENSE), **except the Vital import** (`converter/vital_*.py`), which is derived from [Vital](https://github.com/mtytel/vital) and is GPL-3.0-or-later: see [THIRD-PARTY.md](THIRD-PARTY.md) and [LICENSE-GPL-3.0](LICENSE-GPL-3.0). Parts of the engine are also ports of Vital's algorithms, so the **built engine (`dsp.so`) in a release is GPL-3.0-or-later as a whole**; the source files keep their own licences.
 
 This repository contains **no Serum presets, packs, wavetables, samples or renders**, and no presets converted from them: those belong to Xfer and the preset
 authors. You convert your own. Check a pack's licence before sharing presets you converted from it.

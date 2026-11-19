@@ -24,6 +24,7 @@ cp "$SRC/src/module.json" "$SRC/src/ui_pages.json" "$SRC/src/help.json" "$SRC/sr
 cp "$SRC/build/import_bundle.zip" "$D/import_bundle.zip"
 cp "$ROOT/LICENSE" "$D/LICENSE"
 cp "$SRC/LICENSE" "$D/LICENSE-engine"
+cp "$ROOT/LICENSE-GPL-3.0" "$ROOT/THIRD-PARTY.md" "$D/"
 chmod 755 "$D/dsp.so"
 
 mkdir -p "$SRC/dist"

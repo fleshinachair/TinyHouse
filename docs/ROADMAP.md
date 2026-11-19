@@ -1,6 +1,6 @@
 # Roadmap
 
-State on 2026-11-17. The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
+State on 2026-11-19. The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
 put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of
@@ -13,6 +13,15 @@ FM / PD / RM / AM warps and static warps; comb, flange and phase voice filters; 
 LFO and envelope routes into warps, EQ bands and sample levels; a synced LFO's rate (a 16-beat period at 120 BPM); the arpeggiator's transpose shape; the remote UI (import in the
 browser, Osc / Sample / Macros / FX tabs, macros you assign yourself); the Move's Main, Tone, Macros, Effects, Mod FX, Voice and Grain pages; and a long performance pass
 (NEON oscillators, grains and convolver, idle racks asleep, a glitch harness).
+
+## Vital import (0.9.5): open leads
+
+The Vital front end (`converter/vital_import.py`) runs on the same engine; 85 presets from the development folder convert with no errors and sound close. Measured laws and the A/B method are in `docs/VITAL_COVERAGE.md`. Still open:
+
+- The Phaser filter scores worse than before on Thumpus and KEYS - LoFi Trap (1 to 2 dB); Thumpus also has a Filter FX wet-level lead.
+- Unison morph spread, frame / distortion spread with unison, and Space Station's comb 2 path and dry oscillators.
+- Filter FX steepness and drive, `lfo_N_stereo`, attack power, the spare-envelope route limit, the delay-time route (Whipple), Diode and other model blends.
+- Waterfall card legibility when waves nest (the scrolled-to frame is highlighted; fewer rows or dotted back rows are options).
 
 ## Next, biggest effect first
 

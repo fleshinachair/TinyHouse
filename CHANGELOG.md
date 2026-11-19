@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.5
+
+**New: Vital presets import.** TinyHouse now accepts [Vital](https://vital.audio) presets (`.vital` files, loose or zipped, and `.vitalbank`) the same way as Serum ones, in the remote page's Import or with the scripts. They carry their own wavetables and samples. Expect a similar sound, not an identical one; Vital imports are not level-matched, so set the volume by ear.
+
+**Engine changed.** It gained Vital's filter Blend, Phaser filter, comb filter, compressor, chorus, flanger, phaser and reverb behaviour (all off in Serum presets), plus a wavetable card on the Move's screen while you hold a Tone-page position knob.
+
+**Licence**: the Vital import and the engine parts derived from Vital are GPL-3.0-or-later, so this release's `dsp.so` and the remote page's import bundle are GPL as a whole (the licence texts are in the package). The rest of the source stays BSD-3-Clause.
+
+**Update**: replace the `tinyhouse` folder on the Move with the one in `tinyhouse-module.tar.gz` and restart the Move, so the new engine is loaded.
+
 ## 0.9.1
 
 **Fixed**

@@ -65,6 +65,7 @@
      * It is worked out into a bitmap here once per (digest, frame, size), then covered with as few rectangles as it can be, because
      * every rectangle is one bridge call: the plan steps down to fewer rows and wider steps until it fits RECT_BUDGET.
      */
+    const FAINT = [3, 1];                                                         /* the frames that are not the chosen one are drawn faint, dotted: FAINT[1] columns on in every FAINT[0] (the display is one bit, so fainter means sparser) */
     const RECT_BUDGET = 130, TIERS = [[8, 1], [7, 2], [6, 2], [5, 3], [4, 4], [3, 6]];
 
     function rowPlan(F, frame, R) {
@@ -76,7 +77,7 @@
         return idx.filter((v, k) => idx.indexOf(v) === k);
     }
 
-    function waterfallBitmap(d, frame, w, h, R, step) {
+    function waterfallBitmap(d, frame, w, h, R, step, faint) {
         const F = d.frames, S = d.samples, rows = rowPlan(F, frame, R);
         const dx = Math.round(w * 0.2), dy = Math.round(h * 0.34), fw = w - dx - 1, fh = h - dy - 1, amp = fh * 0.46;
         const bm = new Uint8Array(w * h), hor = new Int16Array(w).fill(h + 8), ys = new Int16Array(fw);
@@ -92,7 +93,7 @@
             for (let x = 0; x < fw; x++) {
                 const X = x0 + x, y0 = x > 0 && (step === 1 || x % step === 0) ? Math.min(ys[x], ys[x - 1]) : ys[x], y1 = x > 0 && (step === 1 || x % step === 0) ? Math.max(ys[x], ys[x - 1]) : ys[x];
                 if (cur) { span.push([X, y0, y1]); continue; }                      /* the chosen frame is drawn after the others, whole, over them */
-                for (let y = y0; y <= y1; y++) if (y >= 0 && y < h && y < hor[X]) bm[y * w + X] = 1;
+                if (!faint || X % faint[0] < faint[1]) for (let y = y0; y <= y1; y++) if (y >= 0 && y < h && y < hor[X]) bm[y * w + X] = 1;
                 top[x] = y0;
             }
             if (cur) {                                                              /* a frame behind others stays whole: a 1 px moat cleared round it, then the line drawn 2 px thick on top */
@@ -128,7 +129,7 @@
         d.tiers = d.tiers || {};
         let r = null, tier = d.tiers[w] || 0;                                    /* a table that needed a coarser plan once starts there: one pass per frame, not six */
         for (; tier < TIERS.length; tier++) {
-            r = bitmapRects(waterfallBitmap(d, frame, w, h, TIERS[tier][0], TIERS[tier][1]), w, h);
+            r = bitmapRects(waterfallBitmap(d, frame, w, h, TIERS[tier][0], TIERS[tier][1], FAINT), w, h);
             if (r.length <= budget) break;
         }
         d.tiers[w] = Math.min(tier, TIERS.length - 1);
@@ -214,5 +215,5 @@
     globalThis.tinyhouse_wave_card_2 = (ctx, o) => draw(ctx, o, 1);
     globalThis.tinyhouse_wave_card_3 = (ctx, o) => draw(ctx, o, 2);
     /* test seam (tests/cards_test.mjs) */
-    globalThis.TINYHOUSE_CARDS_FOR_TEST = { draw, parseDigest, reset: () => { active = [false, false, false]; lastPos = [null, null, null]; lastMs = -1e12; } };
+    globalThis.TINYHOUSE_CARDS_FOR_TEST = { draw, waterfallBitmap, bitmapRects, TIERS, FAINT, parseDigest, reset: () => { active = [false, false, false]; lastPos = [null, null, null]; lastMs = -1e12; } };
 })();

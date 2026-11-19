@@ -77,7 +77,7 @@ public:
     }
     /* Vital's own decay shape for the amplitude envelope: when `p` is not 0 the decay stage is the curve Vital draws, 1 - (1 - sustain_gain) * (exp(p x) - 1) / (exp(p) - 1) over x = 0..1 of
      * the decay time, squared into the gain as Vital squares its amplitude envelope (the sustain level is the gain, so the curve ends on it). 0 keeps the analog one-pole stage. */
-    void setDecayPower(float p) { decayPow = p; }
+    void setDecayPower(float p, bool squared = true) { decayPow = p; decaySq = squared; }          /* squared: the amplitude envelope's gain (Vital squares it); a modulation envelope is not */
 
     /* Vital's own attack shape: when on, the attack stage is the curve Vital draws, (exp(-p x) - 1) / (exp(-p) - 1) over x = 0..1 of the attack time (a negative p starts slowly, a positive one
      * rises at once, 0 is a straight line), squared into the gain for the amplitude envelope as Vital squares it. Off keeps the analog one-pole stage. */
@@ -121,9 +121,9 @@ public:
                 decayPos += decayStep;
                 if (decayPos >= 1.0f) { output = sustain; state = State::sustain; }
                 else {
-                    const float sl = std::sqrt(sustain);
+                    const float sl = decaySq ? std::sqrt(sustain) : sustain;
                     const float v = sl + (1.0f - sl) * (1.0f - (std::exp(decayPow * decayPos) - 1.0f) / (std::exp(decayPow) - 1.0f));
-                    output = v * v;
+                    output = decaySq ? v * v : v;
                 }
                 break;
             }
@@ -211,6 +211,7 @@ private:
     float attackOffset = 0.0f, decayOffset = 0.0f, releaseOffset = 0.0f;
     float output = 0.0f;
     float decayPow = 0.0f, decayPos = 0.0f, decayStep = 1.0f;
+    bool decaySq = true;
     float attackPow = 0.0f, attackPos = 0.0f, attackStep = 1.0f;
     bool attackOn = false, attackSq = false;
     float delaySec = 0.0f, holdSec = 0.0f, stageLeft = 0.0f;

@@ -867,6 +867,8 @@ BANKS = [
         [enum(f"lfo{n}_hr", f"H{n}R", f"LFO{n} Hi-Res", ["Off", "On"], 0)] + [num(f"lfo{n}_h{k}", f"H{n}{k:02X}", f"LFO{n} Hi-Res {k}", 0, 127, 64) for k in range(64)] +
         [num(f"lfo{n}_delay", f"VD{n}", f"LFO{n} Delay", 0, 127, 0), num(f"lfo{n}_fade", f"VE{n}", f"LFO{n} Fade In", 0, 127, 0), num(f"lfo{n}_phase", f"VH{n}", f"LFO{n} Phase", 0, 127, 0),
          enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host"], 0)])]),
+    # After Vital LFO Routes, for the same reason. Vital's own decay curve on the filter envelope and the four spare envelopes (the amplitude envelope has Vital Amp Decay Curve): 0 keeps the analog fall, 1..127 draws the curve of power (pot - 64) * 20 / 63 over the stage's time, not squared. Set by the Vital converter.
+    ("Vital Env Curves", False, [row(num("flt_dpow", "FDP", "Vital Filter Decay Curve", 0, 127, 0), *[num(f"me{n}_dpow", f"M{n}D", f"Vital Mod Env {n} Decay Curve", 0, 127, 0) for n in (1, 2, 3, 4)])]),
     ("Vital LFO Routes 9-16", False, [row(enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", LR_SRC, 0), enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),
                                           pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64), enum(f"lr{r}_bip", f"R{r}BP", f"LFO Route {r} Polarity", ["Uni", "Bi"], 0)) for r in range(9, 17)]),
 ]
@@ -1002,7 +1004,7 @@ def chain_param(p):
 # The sample slots' Kind and grain keys are NOT hidden: the remote UI draws its Sample tab from chain_params, and a key missing here is a knob that never appears.
 # The 0.9.8 additions that only the Vital converter sets (random modulators, attack curves, the formant filters' own knobs) stay out of it too: the contract was 800 bytes under the host's 64 KB
 # limit (it refuses to load the synth past it) and these put it over (loadtest, 2026-11-20).
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
 # The Vital banks (comp, distortion LFO, unison, envelope, ...) have no control on any page or in the remote UI: only the Vital converter and a preset load set them, as for the LFOs above. The
 # one exception is Vital Reverb, which the remote UI names. Together with the keys above this takes the contract from 64.9 KB to about 55 KB, well inside the host's 64 KB.
 HIDDEN_BANK_KEYS = {s["key"] for name, _, rws in BANKS if name.startswith("Vital ") and name != "Vital Reverb" for r in rws for s in r if s}

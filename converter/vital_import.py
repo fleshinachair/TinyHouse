@@ -921,6 +921,9 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         if attack_curve_pot(s, k):
             P[f"me{n}_apow"] = attack_curve_pot(s, k)
         hp, dsec = env_hold_decay(s, k)
+        dpot, dtime = env_curve(s, k)
+        if dpot:
+            P[f"me{n}_dpow"], dsec, hp = dpot, dtime, env_stage_pot(s, k, "hold")
         P[f"me{n}_d"] = d2m.pot_time(dsec)
         P[f"me{n}_s"] = pot(127 * CLAMP(s[f"env_{k}_sustain"], 0, 1))
         P[f"me{n}_r"] = d2m.pot_time(t4(f"env_{k}_release"))
@@ -1080,6 +1083,18 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
         sustain = float(s.get(f"env_{n}_sustain", 0.0)) if key.endswith("_decay") else 0.0
         sec *= env_fall_factor(float(s.get(key + "_power", 0.0)), CLAMP(sustain, 0.0, 1.0), squared)
     return sec
+
+
+ENV_DECAY_CURVE = True                                                  # the filter and spare envelopes draw Vital's own decay curve (engine flt_dpow / meN_dpow) instead of fitting the analog fall to it
+
+
+def env_curve(s: dict, k: int) -> tuple[int, float | None]:
+    """Vital envelope k's decay as the engine's exact curve: (the dpow pot, the stage's seconds), or (0, None) for a straight / absent power, which keeps the analog fall. Measured through the plugin with an
+    envelope on an oscillator's level: the analog fit was 7 to 10 dB under Vital's own curve in the first 50 ms of a short decay."""
+    p = float(s.get(f"env_{k}_decay_power", 0.0))
+    if not ENV_DECAY_CURVE or abs(p) < 0.05:
+        return 0, None
+    return max(1, pot(64 + CLAMP(p, -20.0, 20.0) * 63.0 / 20.0)), max(float(s[f"env_{k}_decay"]), 0.0) ** 4
 
 
 ATTACK_CURVE = True
@@ -1395,6 +1410,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             if attack_curve_pot(s, 2):
                 P["flt_apow"] = attack_curve_pot(s, 2)
             hp2, dsec2 = env_hold_decay(s, 2)
+            dpot2, dtime2 = env_curve(s, 2)
+            if dpot2:
+                P["flt_dpow"], dsec2, hp2 = dpot2, dtime2, env_stage_pot(s, 2, "hold")
             P["flt_d"] = d2m.pot_time(dsec2)
             P["flt_s"] = pot(127 * CLAMP(s["env_2_sustain"], 0, 1))
             P["flt_r"] = d2m.pot_time(t("env_2_release"))

@@ -216,6 +216,16 @@ inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = fal
     return pot01(a + (b - a) * fr);
 }
 
+/* Vital's level law, for a Vital preset (the Vital Unison switch marks one). Measured through the plugin with a sine on an oscillator or a sample slot: the level knob a route adds to is not capped at 1 (a knob of 1 and
+ * a route of 1 plays 12 dB up, 2 squared), and the knob's own part does not start where it will sit: a note begins with it at about 0.78 and it glides to its value in some 100 ms (a static level of 0.5 starts
+ * 8 dB up, a level of 1 starts 4 dB down, and an envelope route on a level of 0 adds to that 0.78 at the note's start). The glide is two exponentials, 4 ms and 32 ms. */
+inline float vitalLevelBase(float base, float age)
+{
+    if (age > 0.3f) return base;
+    const float g = 0.35f * std::exp(-age * 250.0f) + 0.65f * std::exp(-age * (1.0f / 0.032f));
+    return base + (0.78f - base) * g;
+}
+
 class Voice {
 public:
     explicit Voice(AnalogTables &analog) : sub(analog), noise(analog) {}
@@ -358,6 +368,7 @@ public:
             for (int l = 0; l < kLfos; l++)
                 if (!lfoIsFree(P, l)) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
             resetRandoms(P);
+            levelAge = 0.0f;
             filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
             adsr.noteOn();
@@ -556,21 +567,25 @@ public:
             src(tl, tr);
             for (int i = 0; i < n; i++) { l[i] += gl * tl[i]; r[i] += gr * tr[i]; }
         };
-        const float knobL = std::clamp(pot01(P[TB_P_SMP_LEVEL]) + lfoLvl[MD_SMP1_LEVEL], 0.0f, 1.0f);
+        const bool vitalLevel = P[TB_P_UNI_VITAL] >= 0.5f;
+        const auto sampleKnob = [&](float base, float routed) {                      /* the level knob of a sample slot (squared by the caller): Vital's law above, or the 0..1 clamp it always had */
+            return vitalLevel ? std::min(std::max(vitalLevelBase(base, levelAge) + routed, 0.0f), 4.0f) : std::clamp(base + routed, 0.0f, 1.0f);
+        };
+        const float knobL = sampleKnob(pot01(P[TB_P_SMP_LEVEL]), lfoLvl[MD_SMP1_LEVEL]);
         if (smp.on && knobL > 0.0f) {                  /* the sample oscillator: its level knob is squared, as the wavetables' are */
             const float knob = knobL;
             const bool fixedPitch = P[TB_P_SMP_FIXED] >= 0.5f;                 /* a sample that does not follow the keyboard (Serum's noise slot samples) */
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp.r->root) + c.pitchBendSemis + voicePitchMod()) + P[TB_P_SMP_TUNE] + P[TB_P_SMP_FINE] / 100.0f;
             addSource(P[TB_P_SMP_POST], TB_P_SMP_BAL, TB_P_SMP_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP_PAN], l, r, [&](float *a, float *b) { smp.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP_DET]), pot01(P[TB_P_SMP_SPREAD])); }); });
         }
-        const float knob2L = std::clamp(pot01(P[TB_P_SMP2_LEVEL]) + lfoLvl[MD_SMP2_LEVEL], 0.0f, 1.0f);
+        const float knob2L = sampleKnob(pot01(P[TB_P_SMP2_LEVEL]), lfoLvl[MD_SMP2_LEVEL]);
         if (smp2.on && knob2L > 0.0f) {                /* the second sample oscillator: the same, with its own controls */
             const float knob = knob2L;
             const bool fixedPitch = P[TB_P_SMP2_FIXED] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - smp2.r->root) + c.pitchBendSemis + voicePitchMod()) + P[TB_P_SMP2_TUNE] + P[TB_P_SMP2_FINE] / 100.0f;
             addSource(P[TB_P_SMP2_POST], TB_P_SMP2_BAL, TB_P_SMP2_BUS1, [&](float *l, float *r) { smpPan(P[TB_P_SMP2_PAN], l, r, [&](float *a, float *b) { smp2.processAdding(semis, knob * knob, (float) sampleRate, a, b, n, std::min((int) P[TB_P_SMP2_UNI], (int) P[TB_P_UNI_CAP]), potDetune(P[TB_P_SMP2_DET]), pot01(P[TB_P_SMP2_SPREAD])); }); });
         }
-        const float knob3L = std::clamp(pot01(P[TB_P_SMP3_LEVEL]) + lfoLvl[MD_SMP3_LEVEL], 0.0f, 1.0f);
+        const float knob3L = sampleKnob(pot01(P[TB_P_SMP3_LEVEL]), lfoLvl[MD_SMP3_LEVEL]);
         if (smp3.on && knob3L > 0.0f) {                /* the third (Serum has three oscillators, any of them a sample) */
             const float knob = knob3L;
             const bool fixedPitch = P[TB_P_SMP3_FIXED] >= 0.5f;
@@ -580,7 +595,7 @@ public:
 
         /* The granular kind of each sample slot (granular.h): Density / Grain Length are knobs that a route adds to, Scan Rate is a percent (a route of a adds 4a). */
         const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb, int xc, int uniP, int detP, int spreadP, int mLvl, int panP) {
-            const float knob = std::clamp(pot01(P[levelP]) + lfoLvl[mLvl], 0.0f, 1.0f);
+            const float knob = sampleKnob(pot01(P[levelP]), lfoLvl[mLvl]);
             if (!gc.on || !(knob > 0.0f)) return;
             const bool fixedPitch = P[fixedP] >= 0.5f;
             const float semis = (fixedPitch ? 0.0f : (float) (midiNote - gc.r->root) + c.pitchBendSemis + voicePitchMod()) + P[tuneP] + P[fineP] / 100.0f;
@@ -663,8 +678,9 @@ public:
         auto runF2 = [&]() {
             const bool mixing2 = mixB < 0.999f;
             if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
-            const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f || (vDriveLaw && P[TB_P_FLT2_RES] > 0.0f);          /* Vital's analog filter takes 1 / (1 + 2 res) off the passband whatever its drive */
-            if (driving2) { if (vDriveLaw) { const float a2 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES])); vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, a2, a2); } else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
+            const bool plain2 = !(fmOn2 || vph2.on || combType2);                                                   /* Vital's analog filter takes 1 / (1 + 2 res) off the passband whatever its drive; a comb, phaser or formant filter does not */
+            const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f || (vDriveLaw && plain2 && P[TB_P_FLT2_RES] > 0.0f);
+            if (driving2) { if (vDriveLaw) { const float a2 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES])); vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, a2, plain2 ? a2 : 1.0f); } else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
             if (fmOn2) fm2.process(pre2L, pre2R, n, fmSet2);
             else if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
@@ -686,8 +702,9 @@ public:
         }
         const bool mixing = mixA < 0.999f;
         if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
-        const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f || (vDriveLaw && P[TB_P_FLT_RES] > 0.0f);
-        if (driving) { if (vDriveLaw) { const float a1 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES])); vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, a1, a1); } else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
+        const bool plain1 = !(fmOn1 || vph1.on || combType);
+        const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f || (vDriveLaw && plain1 && P[TB_P_FLT_RES] > 0.0f);
+        if (driving) { if (vDriveLaw) { const float a1 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES])); vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, a1, plain1 ? a1 : 1.0f); } else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
         if (fmOn1) fm1.process(preL, preR, n, fmSet1);
         else if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
@@ -759,6 +776,7 @@ private:
         void updateParams(const VoiceContext &c, int blockSize)
     {
         const float *P = c.pots;
+        if (blockSize == 0) levelAge = 0.0f; else levelAge += (float) blockSize / (float) sampleRate;       /* seconds since the note began, for Vital's level glide */
 
         /* ---- envelopes ---- */
         /* The Decay macro moves both decays by the same number of pot steps (64 is neutral): a step is
@@ -770,6 +788,7 @@ private:
         filterADSR.setAttack(potAttackTime(P[TB_P_FLT_A]));
         filterADSR.setAttackPower(attackPower(P[TB_P_FLT_APOW]), P[TB_P_FLT_APOW] >= 0.5f, false);
         filterADSR.setDecay(potEnvTime(decayPot(P[TB_P_FLT_D])));
+        filterADSR.setDecayPower(P[TB_P_FLT_DPOW] >= 0.5f ? (P[TB_P_FLT_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);      /* Vital's decay curve on the filter envelope (0 keeps the analog fall) */
         filterADSR.setSustainLevel(pot01(P[TB_P_FLT_S]));
         filterADSR.setRelease(potEnvTime(P[TB_P_FLT_R]));
         if (blockSize > 0) filterADSR.process(blockSize);
@@ -789,11 +808,11 @@ private:
          * wavetable read as a struck instrument. */
         for (int i = 0; i < MD_COUNT; i++) modOff[i] = lfoLvl[i] = 0.0f;
         {
-            static const struct { int a, d, s, r, dst, amt, apow, delay, hold; } k[kModEnvs] = {
-                { TB_P_ME1_A, TB_P_ME1_D, TB_P_ME1_S, TB_P_ME1_R, TB_P_ME1_DST, TB_P_ME1_AMT, TB_P_ME1_APOW, TB_P_ME1_DELAY, TB_P_ME1_HOLD },
-                { TB_P_ME2_A, TB_P_ME2_D, TB_P_ME2_S, TB_P_ME2_R, TB_P_ME2_DST, TB_P_ME2_AMT, TB_P_ME2_APOW, TB_P_ME2_DELAY, TB_P_ME2_HOLD },
-                { TB_P_ME3_A, TB_P_ME3_D, TB_P_ME3_S, TB_P_ME3_R, TB_P_ME3_DST, TB_P_ME3_AMT, TB_P_ME3_APOW, TB_P_ME3_DELAY, TB_P_ME3_HOLD },
-                { TB_P_ME4_A, TB_P_ME4_D, TB_P_ME4_S, TB_P_ME4_R, TB_P_ME4_DST, TB_P_ME4_AMT, TB_P_ME4_APOW, TB_P_ME4_DELAY, TB_P_ME4_HOLD },
+            static const struct { int a, d, s, r, dst, amt, apow, delay, hold, dpow; } k[kModEnvs] = {
+                { TB_P_ME1_A, TB_P_ME1_D, TB_P_ME1_S, TB_P_ME1_R, TB_P_ME1_DST, TB_P_ME1_AMT, TB_P_ME1_APOW, TB_P_ME1_DELAY, TB_P_ME1_HOLD, TB_P_ME1_DPOW },
+                { TB_P_ME2_A, TB_P_ME2_D, TB_P_ME2_S, TB_P_ME2_R, TB_P_ME2_DST, TB_P_ME2_AMT, TB_P_ME2_APOW, TB_P_ME2_DELAY, TB_P_ME2_HOLD, TB_P_ME2_DPOW },
+                { TB_P_ME3_A, TB_P_ME3_D, TB_P_ME3_S, TB_P_ME3_R, TB_P_ME3_DST, TB_P_ME3_AMT, TB_P_ME3_APOW, TB_P_ME3_DELAY, TB_P_ME3_HOLD, TB_P_ME3_DPOW },
+                { TB_P_ME4_A, TB_P_ME4_D, TB_P_ME4_S, TB_P_ME4_R, TB_P_ME4_DST, TB_P_ME4_AMT, TB_P_ME4_APOW, TB_P_ME4_DELAY, TB_P_ME4_HOLD, TB_P_ME4_DPOW },
             };
             for (int i = 0; i < kModEnvs; i++) {
                 if (i >= 2 && (int) P[k[i].dst] == MD_NONE) continue;           /* the hidden envelopes cost nothing unless a preset points them somewhere */
@@ -802,6 +821,7 @@ private:
                 modEnv[i].setAttack(potAttackTime(P[k[i].a]));
                 modEnv[i].setAttackPower(attackPower(P[k[i].apow]), P[k[i].apow] >= 0.5f, false);
                 modEnv[i].setDecay(potEnvTime(P[k[i].d]));
+                modEnv[i].setDecayPower(P[k[i].dpow] >= 0.5f ? (P[k[i].dpow] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);
                 modEnv[i].setSustainLevel(pot01(P[k[i].s]));
                 modEnv[i].setRelease(potEnvTime(P[k[i].r]));
                 if (blockSize > 0) modEnv[i].process(blockSize);
@@ -924,8 +944,13 @@ private:
 
             v.position = std::clamp(pot01(P[k.pos]) + modOff[k.dPos], 0.0f, 1.0f);
             {
-                const float knob = std::clamp(pot01(P[k.level]) + lfoLvl[k.dLvl], 0.0f, 1.0f);
-                v.gain = std::clamp(knob * knob + modOff[k.dLvl], 0.0f, 1.0f);
+                if (P[TB_P_UNI_VITAL] >= 0.5f) {
+                    const float knob = std::max(vitalLevelBase(pot01(P[k.level]), levelAge) + lfoLvl[k.dLvl], 0.0f);
+                    v.gain = std::clamp(knob * knob + modOff[k.dLvl], 0.0f, 16.0f);
+                } else {
+                    const float knob = std::clamp(pot01(P[k.level]) + lfoLvl[k.dLvl], 0.0f, 1.0f);
+                    v.gain = std::clamp(knob * knob + modOff[k.dLvl], 0.0f, 1.0f);
+                }
             }
             v.pan      = std::clamp(potBipolar(P[k.pan]) + modOff[k.dPan], -1.0f, 1.0f);
             v.vitalLaw = P[TB_P_UNI_VITAL] >= 0.5f;                    /* Vital's unison: the Detune knob is the stack's half-width, 24 * (pot / 127)^2 semitones, and the stack style applies */
@@ -1297,6 +1322,7 @@ private:
     float lfoFadeAmp[kLfos] = {};
     float lfoSm[kLfos] = {};             /* each LFO's smoothed output, and whether it has started since the note began */
     bool lfoSmInit[kLfos] = {};
+    float levelAge = 0.0f;               /* seconds since the note (or its non-legato retrigger) began */
     float lfoLvl[MD_COUNT] = {};         /* LFO offsets to the level KNOBS (before the taper) */
     ValueSmoother<float> noteSmoother;
     const Wavetable *lastTable[kOscs] = {};

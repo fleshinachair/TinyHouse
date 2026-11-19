@@ -113,3 +113,12 @@ calibration/*.json
 !calibration/probe_phase_saw.json
 # the original Tablor wavetable packs are third-party: never commit wavetables
 schwung-tablor/src/wavetables/
+
+# Measurement probes and A/B scripts: the measured results they produced are in the tracked calibration/*.json tables; the scripts stay local
+calibration/dev/
+calibration/vital_*.py
+calibration/test_vital_import.py
+calibration/census.py
+calibration/glitch_harness.cpp
+calibration/retrig_probe.cpp
+calibration/run_*.sh

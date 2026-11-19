@@ -120,7 +120,7 @@ struct VoiceContext {
     float *dry[2] = {};                     /* the sources routed Out: past the filter and the effects, added to the output after them (null: nowhere to put them) */
 };
 
-inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16, kLfoHi = 64;
+inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16, kLfoHi = 64, kRnds = 4;       /* kRnds: Vital's random modulators, route sources kLfos + 1 ... */
 /* The strides the code below walks the parameter table with: if the generator ever reorders them this stops the build. */
 static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 == TB_P_LFO1_RATE + 2 &&
               TB_P_LFO1_MODE == TB_P_LFO1_RATE + 1 && TB_P_LFO1_SMOOTH == TB_P_LFO1_S15 + 1 &&
@@ -128,6 +128,7 @@ static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 =
 static_assert(TB_P_LFO2_TEMPO == TB_P_LFO1_TEMPO + 1 && TB_P_LFO4_TEMPO == TB_P_LFO1_TEMPO + 3, "the LFO Tempo switches are consecutive");
 static_assert(TB_P_LFO1_H0 == TB_P_LFO1_HR + 1 && TB_P_LFO1_H63 - TB_P_LFO1_H0 == kLfoHi - 1 && TB_P_LFO2_HR - TB_P_LFO1_HR == 1 + kLfoHi, "the LFO Hi-Res switch and its 64 points are consecutive");
 static_assert(TB_P_LFO1_S15 - TB_P_LFO1_S0 == kLfoShape - 1, "LFO shape points must be consecutive");
+static_assert(TB_P_RN2_STYLE - TB_P_RN1_STYLE == 3 && TB_P_RN1_RATE == TB_P_RN1_STYLE + 1 && TB_P_RN1_TEMPO == TB_P_RN1_STYLE + 2, "the random modulators' parameters must be style, rate, tempo, consecutive");
 static_assert(TB_P_LR2_SRC - TB_P_LR1_SRC == 4 && TB_P_LR1_DST == TB_P_LR1_SRC + 1 && TB_P_LR1_AMT == TB_P_LR1_SRC + 2 &&
               TB_P_LR1_BIP == TB_P_LR1_SRC + 3, "LFO route parameters must be src, dst, amt, bip, consecutive");
 
@@ -293,6 +294,7 @@ public:
         noisePan = ((float) rand() / (float) RAND_MAX * 2.0f - 1.0f) * 0.27f;
         for (int l = 0; l < kLfos; l++)             /* Trig restarts at the top of the cycle, Free joins the running one */
             { lfoPhase[l] = lfoIsFree(P, l) ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
+        resetRandoms(P);
 
         filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
@@ -318,6 +320,7 @@ public:
         if (!legato) {              /* env retrig switches cut: always retrig */
             for (int l = 0; l < kLfos; l++)
                 if (!lfoIsFree(P, l)) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
+            resetRandoms(P);
             filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
             adsr.noteOn();
@@ -779,7 +782,7 @@ private:
          * Each runs at the block rate. A route adds lfo * amount to its destination: Uni with the LFO swinging 0..1, Bi with it
          * swinging -1..+1 (the polarity is the route's own, as Serum stores it). */
         {
-            float lfoOut[kLfos];
+            float lfoOut[kLfos + kRnds] = {};
             for (int l = 0; l < kLfos; l++) {
                 /* Vital's Delay holds the LFO where it started until the time is up; the time that is left over in this block moves it (synth_lfo.cpp processControlRate) */
                 const float full = blockSize > 0 ? (float) blockSize / (float) sampleRate : 0.0f;
@@ -812,11 +815,12 @@ private:
                     lfoOut[l] = lfoSm[l];
                 } else lfoSmInit[l] = false;
             }
+            stepRandoms(P, c.bpm, blockSize, lfoOut + kLfos);
             const int stride = TB_P_LR2_SRC - TB_P_LR1_SRC;
             for (int r = 0; r < kLfoRoutes; r++) {
                 const int src = (int) P[TB_P_LR1_SRC + r * stride];
                 const int dst = (int) P[TB_P_LR1_DST + r * stride];
-                if (src >= 1 && src <= kLfos && dst > MD_NONE && dst < MD_COUNT) {
+                if (src >= 1 && src <= kLfos + kRnds && dst > MD_NONE && dst < MD_COUNT) {
                     const float u = lfoOut[src - 1];
                     const float v = P[TB_P_LR1_BIP + r * stride] >= 1.0f ? 2.0f * u - 1.0f : u;
                     const float amt = v * potBipolar(P[TB_P_LR1_AMT + r * stride]);
@@ -1191,6 +1195,53 @@ private:
     /* a voice filter's Blend knob (a 0..127 pot = 0..2) with the routes into it (a fraction of the 0..2 range) added */
     float blendOf(float potV, int dst) const { return std::clamp(potV * (1.0f / 127.0f) + modOff[dst], 0.0f, 1.0f) * 2.0f; }
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */
+    /* Vital's random modulators (random_lfo.cpp), one set per voice: a new random value is drawn for every note. Perlin and Sine glide from the last value to the next over each cycle; Sample and Hold
+     * steps to the next at the end of the cycle; Lorenz runs the attractor (a sample-rate loop, a block at a time). Each reads 0..1, as Vital's do. */
+    uint32_t rnSeed = 12345u;
+    float rnLast[kRnds] = {}, rnNext[kRnds] = {}, rnPhase[kRnds] = {}, rnLor[kRnds][3] = {};
+    float rnDraw() { rnSeed ^= rnSeed << 13; rnSeed ^= rnSeed >> 17; rnSeed ^= rnSeed << 5; return (float) (rnSeed >> 8) * (2.0f / 16777216.0f) - 1.0f; }      /* -1 .. 1 */
+    void resetRandoms(const float *P)
+    {
+        static uint32_t counter = 1u;
+        rnSeed = (counter++ * 2654435761u) ^ 0x9e3779b9u; if (!rnSeed) rnSeed = 1u;
+        for (int i = 0; i < kRnds; i++) {
+            rnPhase[i] = 0.0f; rnLast[i] = rnDraw(); rnNext[i] = rnDraw();
+            rnLor[i][0] = rnDraw(); rnLor[i][1] = rnDraw(); rnLor[i][2] = rnDraw() + 37.6f;
+        }
+        (void) P;
+    }
+    void stepRandoms(const float *P, float bpm, int blockSize, float *out)
+    {
+        bool used[kRnds] = {};
+        for (int r = 0; r < kLfoRoutes; r++) {
+            const int src = (int) P[TB_P_LR1_SRC + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)];
+            if (src > kLfos && src <= kLfos + kRnds && (int) P[TB_P_LR1_DST + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)] > MD_NONE) used[src - kLfos - 1] = true;
+        }
+        for (int i = 0; i < kRnds; i++) {
+            if (!used[i]) { out[i] = 0.5f; continue; }
+            const int base = TB_P_RN1_STYLE + i * (TB_P_RN2_STYLE - TB_P_RN1_STYLE);
+            const int style = std::clamp((int) P[base], 0, 3);
+            float hz = potLfoHz(P[base + 1]);
+            if (P[base + 2] >= 0.5f) hz *= (bpm >= 20.0f ? std::clamp(bpm, 40.0f, 300.0f) : 120.0f) / 120.0f;
+            const float blk = blockSize > 0 ? (float) blockSize : 0.0f;
+            if (style == 3) {                                                           /* Lorenz: dx = a (y - x), dy = (b - z) x - y, dz = x y - c z, scaled to 0..1 (random_lfo.cpp) */
+                const float t = std::min(0.01f, hz * (0.5f / (float) sampleRate));
+                float x = rnLor[i][0], y = rnLor[i][1], z = rnLor[i][2];
+                for (int k = 0; k < blockSize; k++) { const float dx = (y - x) * 10.0f, dy = (-z + 28.0f) * x - y, dz = x * y - z * (8.0f / 3.0f); x += dx * t; y += dy * t; z += dz * t; }
+                rnLor[i][0] = x; rnLor[i][1] = y; rnLor[i][2] = z;
+                out[i] = std::clamp(x * (1.0f / 40.0f) + 0.5f, 0.0f, 1.0f);
+                continue;
+            }
+            rnPhase[i] += hz * blk / (float) sampleRate;
+            while (rnPhase[i] >= 1.0f) { rnPhase[i] -= 1.0f; rnLast[i] = rnNext[i]; rnNext[i] = rnDraw(); }
+            const float t = rnPhase[i];
+            float v;
+            if (style == 1) v = rnLast[i];                                              /* Sample and Hold */
+            else if (style == 0) v = ((rnLast[i] * t) + ((rnNext[i] * (t - 1.0f)) - (rnLast[i] * t)) * (t * t * (3.0f - 2.0f * t))) * 2.0f;      /* Perlin: perlinInterpolate */
+            else v = rnLast[i] + (rnNext[i] - rnLast[i]) * (0.5f + 0.5f * std::sin((t * 0.5f - 0.25f) * 6.2831853f));      /* Sine: sinInterpolate, sin(2 pi (t / 2 - 1 / 4)) */
+            out[i] = std::clamp(v * 0.5f + 0.5f, 0.0f, 1.0f);
+        }
+    }
     float lfoPhase[kLfos] = {};
     float lfoDelayLeft[kLfos] = {};      /* seconds of Vital LFO Delay still to wait, and how far the Fade In has got (0..1) */
     float lfoFadeAmp[kLfos] = {};

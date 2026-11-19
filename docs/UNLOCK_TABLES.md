@@ -13,9 +13,9 @@ A fresh census (`python calibration/census.py "<Serum 2 Factory folder>" --name 
 | # | Missing piece | Presets touched | Unlocks | Cumulative | What it takes |
 |---|---|---:|---:|---:|---|
 | 1 | **Filter FX models that are not a magnitude response** (Comb, Allpass, Phase, RM, SNH, P12, and others) | 62 | 30 | 30 | A probe per model, then engine stages in the FX filter. Some of the voice-filter comb and phase code can be reused. |
-| 2 | **Bode** (frequency shifter): **not worth building.** These presets already install with the Bode left out (see above); measured, it moves the score little. | 64 | 31 | 61 | Nothing |
-| 3 | **Warps driven by noise or Filter 1**, DLM, spectral tables, Sync Var | 42 | 25 | 86 | A probe per warp. |
-| 4 | **Voice filter models still unsupported** (Reverb1, LPH24, FlangePhase, ...) | 41 | 26 | 112 | A probe per model, mapped to existing or new engine filters. |
+| 2 | **Random modulators as a source** (sample-and-hold, perlin): **done in the 0.9.8 work.** 21 of the 33 presets that use one now carry it live (Perlin, Sample and Hold, Sine, Lorenz; a new value per note). What is left of the 33: routes to a baked destination (spectral morph or distortion amount), the Filter FX, and a route into another LFO's tempo | 24 | Closed, bar the baked destinations (row 1) |
+| 3 | **Routes to pitch** (random, note-in-octave): random is live now; note-in-octave is not | 20 | A note-in-octave source |
+| 4 | **Filter cutoff routes** (11 from random, 3 from note): random is live now | 19 | A note source for the remaining 3 |
 | 5 | **Split / Split3 / SplitMS branches** (HyperD, Delay, Comp, Bode, Reverb or Utils inside a band) | 41 | 21 | 133 | Allow more effect types in a band. |
 | 6 | **Convolution / Space reverb** | 40 | 17 | 150 | Measure Space reverb. The convolver already exists. |
 | 7 | **Granular gaps** (warp on the grains, routes into Warp / Pitch / Position) | 19 | 15 | 165 | Probes P8 and the others in [GRANULAR_PROBE_NOTES.md](GRANULAR_PROBE_NOTES.md). |
@@ -25,7 +25,7 @@ A fresh census (`python calibration/census.py "<Serum 2 Factory folder>" --name 
 | 11 | **Filter FX moved by an LFO or velocity** | 17 | 13 | 219 | The engine's FX filter follows the filter envelope only today. |
 | 12 | **MultiSample oscillator** beyond the three sample slots | 10 | 9 | 228 | A fourth sample slot or a different structure. |
 | 13 | **Distortion filter morph before the distortion** | 9 | 9 | 237 | The engine's pre-filter has only the two ends. |
-| 14 | **Filter FX inside a Split branch** | 6 | 6 | 243 | Part of the Split work in row 5. |
+| 14 | **Routes to wave frame** (random, note): random is live now | 8 | A note source |
 | 15 | **Single warp types** (FM_FILT, PD_FILT, DistTapeSat, SelfPD amounts, Flip, ...) | 19 | 19 | 262 | A probe per warp, one or two presets each. |
 
 Rows 1 to 6 clear 150 of the 262 blocked presets. Serum's Formant ONE / TWO / TWB are done and no longer in the list. Tier counts from the same run: A 211, B 328, C 87.

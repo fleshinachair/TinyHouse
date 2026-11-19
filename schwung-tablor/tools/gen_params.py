@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.6"
+VERSION = "0.9.8"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being
@@ -416,7 +416,7 @@ LFOS = [dict(
     smooth = pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0),
 ) for n in range(1, N_LFO + 1)]
 LROUTES = [dict(
-    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4"], 0),
+    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4", "Rnd1", "Rnd2", "Rnd3", "Rnd4"], 0),
     dst = enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),
     amt = pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64),
     # Serum stores the polarity per route (kParamBipolar): Uni adds lfo * amount (the LFO swings 0..1), Bi adds (2 lfo - 1) * amount
@@ -770,6 +770,11 @@ BANKS = [
     ("Vital Env", False, [row(num("vca_dpow", "VDP", "Vital Amp Decay Curve", 0, 127, 0)),
                          row(num("vca_apow", "VAP", "Vital Amp Attack Curve", 0, 127, 0), num("flt_apow", "FAP", "Vital Filter Attack Curve", 0, 127, 0),
                              num("me1_apow", "M1P", "Vital Mod Env 1 Attack Curve", 0, 127, 0), num("me2_apow", "M2P", "Vital Mod Env 2 Attack Curve", 0, 127, 0))]),
+    # Vital's four random modulators (random_lfo.cpp), routed through the same eight LFO routes as sources Rnd1..Rnd4: a style (Perlin, Sample and Hold, Sine, Lorenz), a rate (the LFO rate scale,
+    # 0.05 to 120 Hz) and a Tempo switch (the rate is the one at 120 BPM and the host tempo scales it). A new random value is drawn for every voice at note on. Set by the Vital converter.
+    ("Vital Random", False, [row(enum(f"rn{n}_style", f"RN{n}S", f"Random {n} Style", ["Perlin", "Sample&Hold", "Sine", "Lorenz"], 0),
+                                 pot(f"rn{n}_rate", f"RN{n}R", f"Random {n} Rate", 60),
+                                 enum(f"rn{n}_tempo", f"RN{n}T", f"Random {n} Tempo", ["Off", "On"], 0)) for n in range(1, 5)]),
     # Attack curves (0 keeps the analog attack; 1..127 draws Vital's attack, power (pot - 64) * 20 / 63, 64 a straight line; the amplitude envelope is squared into the gain as Vital does).
     # After Vital Env, for the same reason. Vital's chorus (calibration/vital_chorus_probe.py): Off keeps Serum's. On runs Vital's module: 1-4 voice pairs of two delay lines each (Delay 1 and Delay 2 are log2 seconds over the
     # pot's 0..127 = -10..-5.64), Depth adds up to 30 ms on top of the sweep, Feedback is bipolar (pot 0..127 = -0.95..+0.95) and a band-pass (Cutoff = a MIDI note, pot 0..127 = 8..136, Spread 0..1) sits in the loop. Mix is an equal-power crossfade.
@@ -974,8 +979,13 @@ def chain_param(p):
 # The LFO shapes, rates, modes and routes are hidden and only ever set by the converter or a preset load, so the host has
 # no use for them in chain_params (they would double its size); they stay in the param table, the state blob and set_param.
 # The sample slots' Kind and grain keys are NOT hidden: the remote UI draws its Sample tab from chain_params, and a key missing here is a knob that never appears.
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$)")
-chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"])]
+# The 0.9.8 additions that only the Vital converter sets (random modulators, attack curves, the formant filters' own knobs) stay out of it too: the contract was 800 bytes under the host's 64 KB
+# limit (it refuses to load the synth past it) and these put it over (loadtest, 2026-11-20).
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
+# The Vital banks (comp, distortion LFO, unison, envelope, ...) have no control on any page or in the remote UI: only the Vital converter and a preset load set them, as for the LFOs above. The
+# one exception is Vital Reverb, which the remote UI names. Together with the keys above this takes the contract from 64.9 KB to about 55 KB, well inside the host's 64 KB.
+HIDDEN_BANK_KEYS = {s["key"] for name, _, rws in BANKS if name.startswith("Vital ") and name != "Vital Reverb" for r in rws for s in r if s}
+chain = [chain_param(p) for p in PARAMS if p["key"] != "preset" and not HIDDEN_FROM_CHAIN.match(p["key"]) and p["key"] not in HIDDEN_BANK_KEYS]
 chain_json = json.dumps(chain, separators=(",", ":"))
 assert "%" not in chain_json, "chain_params must be printf-safe (served verbatim)"
 

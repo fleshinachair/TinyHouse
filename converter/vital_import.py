@@ -383,6 +383,7 @@ FILTER_BLEND = True                                                             
 FILTER_BLEND_MODELS = (0, 1, 2, 3)
 VITAL_FORMANT = True                                                                         # Vital's Formant voice filter (model 5, styles 0 and 1) as its own engine filter (formant.h) instead of a low-pass
 VITAL_PHASER = True                                                                          # Vital's Phaser voice filter (model 7) as its own engine filter (comb.h VitalPhaserFilter) instead of 'Phase 24 +'
+RANDOM_LIVE = True                                                                     # a random modulator (Perlin, Sample and Hold, Sine, Lorenz) is a live route source in the engine (rn1..rn4, sources 5..8); False keeps it out
 VITAL_BLEND_LIVE = True                                                                 # a route to a voice filter's Blend knob moves it live (engine destinations Filter Blend / Filter 2 Blend) instead of at its mean
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
 FILTER_BLEND_DROP_DB = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}                                  # how far the low-pass / high-pass passband falls at full resonance (engine flt_vbg). Measured per model (Analog 10 dB, Dirty 7.4, Ladder 11, Digital 2: calibration/vital_vfilter_probe.py at res 0.5, taken as res^0.9) but it made the A/B scores worse overall (92 presets: 7.42 without, 7.46 with half, 7.55 with all of it), so it is off
@@ -604,6 +605,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     fold: dict[str, float] = {}
     lr: list[tuple[float, int, int, float, bool]] = []                  # (|x|, vital lfo, dst, x, bipolar)
     me: list[tuple[float, int, int, float, str]] = []                        # (|x|, vital env, dst, x)
+    rn: list[tuple[float, int, int, float, bool]] = []                  # (|x|, vital random, dst, x, bipolar)
     mac: list[tuple[int, str, float]] = []
     dropped: dict[str, int] = {}
     macro_vals = [float(s.get(f"macro_control_{i}", 0.0)) for i in range(1, 5)]
@@ -626,6 +628,9 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             drop(f"{src.rstrip('0123456789_')}->{dest}")
             continue
         x = a * spec["x"] * (0.5 if bip else 1.0)                        # measured (calibration/vital_route_probe.py): a bipolar route adds amount * (value - 0.5), the engine's bipolar flag gives amount * (2 * value - 1)
+        if src.startswith("random_") and RANDOM_LIVE and spec["lr"] is not None and not dest.endswith("_tempo"):
+            rn.append((abs(a * spec["x"] * (0.5 if bip else 1.0)), int(src[7:]), spec["lr"], a * spec["x"] * (0.5 if bip else 1.0), bip))        # a live route (a modulation destination the engine has): not folded in at its mean
+            continue
         if src.startswith("lfo_") and spec["key"] in AUDIO_DIST_DST and keytrack_audio_hz(s, int(src[4:])) > 30.0:
             # a keyboard-following LFO is at audio rate, which only the distortion's own audio-rate LFO can follow: the route goes there (a bipolar one as twice the amount on the unipolar value, less a fixed half)
             k = int(src[4:])
@@ -739,15 +744,33 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         if abs(s.get(f"lfo_{k}_phase", 0.0)) > 1e-3:
             P[f"lfo{slot}_phase"] = pot(127.0 * CLAMP(s[f"lfo_{k}_phase"], 0.0, 1.0))
     slot_of = {k: i for i, k in enumerate(chosen, 1)}
-    lr = sorted([r for r in lr if r[1] in slot_of], key=lambda r: -r[0])
-    for n, (w, k, dst, x, bip) in enumerate(lr[:8], 1):
-        P[f"lr{n}_src"] = slot_of[k]
+    for w, k, dst, x, bip in lr:
+        if k not in slot_of:
+            drop("lfo routes past the engine's four LFOs")
+    # Vital's random modulators: a generator each (style, rate, tempo), a new value for every note, carried as route sources 5..8
+    for k in sorted({r[1] for r in rn}):
+        P[f"rn{k}_style"] = int(CLAMP(int(s.get(f"random_{k}_style", 0)), 0, 3))
+        sync = int(s.get(f"random_{k}_sync", 0))
+        if sync in (1, 2, 3):
+            hz = 1.0 / lfo_period_s(sync, s.get(f"random_{k}_tempo", 4.0))
+            P[f"rn{k}_tempo"] = 1
+        else:
+            hz = 2.0 ** s.get(f"random_{k}_frequency", 1.0)
+            if sync == 4:
+                notes.append(f"random {k} follows the keyboard: carried at its free rate")
+        P[f"rn{k}_rate"] = pot(127.0 * math.log(CLAMP(hz, 0.05, 120.0) / 0.05) / math.log(2400.0))
+        if int(s.get(f"random_{k}_sync_type", 0)):
+            notes.append(f"random {k} is synced to the song position: it draws a new value per note instead")
+    combined = [(w, slot_of[k], dst, x, bip) for w, k, dst, x, bip in lr if k in slot_of] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
+    combined.sort(key=lambda r: -r[0])
+    for n, (w, src_slot, dst, x, bip) in enumerate(combined[:8], 1):
+        P[f"lr{n}_src"] = src_slot
         P[f"lr{n}_dst"] = dst
         P[f"lr{n}_amt"] = pot(64 + 63 * CLAMP(x, -1, 1))
         P[f"lr{n}_bip"] = 1 if bip else 0
         if abs(x) > 1.0:
             notes.append(f"LFO route amount {x:.2f} is past the engine's full range: limited")
-    for w, k, dst, x, bip in lr[8:]:
+    for w, src_slot, dst, x, bip in combined[8:]:
         drop("lfo routes past the engine's 8")
     # envelope routes: the two strongest onto the engine's spare envelopes
     me.sort(key=lambda r: -r[0])

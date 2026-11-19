@@ -1211,6 +1211,33 @@ static void testOscPhase()
     CHECK(maxDiff(f0a, p32) > 200, "a Phase offset moves the start (max diff %d)", maxDiff(f0a, p32));
 }
 
+/* Vital's random modulators (route sources 5..8): a Sample and Hold held at a slow rate gives every note its own level through a Uni route to the oscillator level; every style makes sound and stays finite */
+static void testRandomModulators()
+{
+    auto segment = [](const std::vector<int16_t> &x, double t0, double t1) {          /* left-channel rms between two times (s) */
+        const int f0 = (int) (t0 * 44100), f1 = std::min((int) (t1 * 44100), (int) x.size() / 2);
+        double acc = 0; for (int i = f0; i < f1; i++) acc += (double) x[(size_t) i * 2] * x[(size_t) i * 2];
+        return std::sqrt(acc / std::max(1, f1 - f0));
+    };
+    auto level = [&](int style, int src) {
+        Engine e; soloWt3(e);
+        e.pots[TB_P_WT3_LEVEL] = 20;
+        e.pots[TB_P_RN1_STYLE] = (float) style; e.pots[TB_P_RN1_RATE] = 0;
+        e.pots[TB_P_LR1_SRC] = (float) src; e.pots[TB_P_LR1_DST] = 19; e.pots[TB_P_LR1_AMT] = 127; e.pots[TB_P_LR1_BIP] = 0;
+        note(e, 69, 100);
+        return segment(render(e, 150), 0.15, 0.25);
+    };
+    double lo = 1e30, hi = 0.0;
+    for (int k = 0; k < 8; k++) { const double v = level(1, 5); lo = std::min(lo, v); hi = std::max(hi, v); }
+    CHECK(hi > 1.4 * lo && lo >= 0.0, "a Sample and Hold route gives every note its own level (%.0f to %.0f over 8 notes)", lo, hi);
+    for (int style = 0; style < 4; style++) {
+        const double v = level(style, 5);
+        CHECK(std::isfinite(v) && v >= 0.0, "random style %d renders (%.0f)", style, v);
+    }
+    const double off = level(1, 0), plain = level(1, 1);
+    CHECK(off > 0.0 && plain >= 0.0, "with the route off or on an LFO the oscillator is unchanged by the random settings (%.0f, %.0f)", off, plain);
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1506,6 +1533,7 @@ int main()
     testFxBuses();
     testFxFilterLfo();
     testVitalEnvelopeAndLfoDelay();
+    testRandomModulators();
     testOscPhase();
     testUtilOutLfo();
     testNoteOnset();

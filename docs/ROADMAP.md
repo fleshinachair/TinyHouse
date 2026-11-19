@@ -1,6 +1,6 @@
 # Roadmap
 
-State on 2026-11-20. The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
+State on 2026-11-20 (0.9.8 released). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
 put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of
@@ -19,12 +19,25 @@ Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 | Release | Content |
 |---|---|
 | 0.9.6 | Done: tempo-following LFOs, Vital fixes (filter drive law, Filter FX drive, Bit Crush, fine-pitch routes, 64-point LFO shapes, oscillator start phase), `tablor_loadtest` dropped from `deploy.sh` |
-| 0.9.7 | Formant voice filter, Vital and Serum models (new filter types and params only, so old presets load unchanged) |
-| 0.9.8 | The cheap Vital leads: attack power and live filter Blend routes done (Unreleased); the Phaser "regression" is not the filter (see below); `lfo_N_stereo` is not cheap (left and right need separate oscillator renders). The importer lists every dropped preset and feature: the browser report now lists Vital's small details too |
+| 0.9.7 | Done, shipped inside 0.9.8: formant voice filter, Vital and Serum models (new filter types and params only, so old presets load unchanged) |
+| 0.9.8 | Done: the cheap Vital leads: attack power, live filter Blend routes and random modulators as live sources (it also carries the 0.9.7 formant filters); the Phaser "regression" is not the filter (see below); `lfo_N_stereo` is not cheap (left and right need separate oscillator renders). The importer lists every dropped preset and feature: the browser report now lists Vital's small details too |
 | 0.9.9 | Release candidate: performance pass, docs, outside beta testers on their own Move (fresh installs included) and presets (Serum testing so far is positive; Vital testers are being sought) |
 | 1.0 | The release candidate has no new bug reports for about a week |
 
-After 1.0: macro min / max and wavetable paging (#8, #9; the current macros work well in use, so the rewrite is not worth its risk before then), granular gaps, extra effect stages, noise-driven warps, reverb build-up and the Deep House leads below.
+After 1.0: the plan below, until every row of [UNLOCK_TABLES.md](UNLOCK_TABLES.md) is closed or marked not worth it.
+
+## After 1.0: closing the unlock tables
+
+Each release takes the top rows of [UNLOCK_TABLES.md](UNLOCK_TABLES.md) it can build, then the census is run again (`calibration/census.py`, `calibration/dev/vital_unlock_table.py`) and the table is rewritten, so the counts stay true. Format changes only add keys (gate 1). A row is closed when the census no longer lists it, or marked "not worth it" with the measurement that says so (Bode is the first: those presets already import without it). Order is by presets affected, then by how much of the work is shared. Rows that are only left-out effects overstate what is blocked (see the note at the top of the table): check an A/B render before building one.
+
+| Release | Theme | Table rows |
+|---|---|---|
+| 1.1 | **Vital modulation.** Random sources are done (0.9.8); live routes in place of baked values: the spectral morph amount, phase-distortion amount, unison detune, filter drive and blend transpose; a route that scales another route; more than two envelope routes | Vital 1 to 5, 8, 9, 11 to 14 |
+| 1.2 | **Serum filters and warps.** Voice filter models still unsupported (Reverb1, LPH24, FlangePhase), the warps driven by noise or Filter 1 (DLM, AM_NOISE), the single warp types; a probe each | Serum 3, 4, 15 |
+| 1.3 | **Effects.** Filter FX models that are not a magnitude response (a probe each), Diffuser, Filter FX moved by an LFO or velocity, the distortion filter morph, a second Distortion / Comp / Delay, Utils moved by a modulator, more effect types inside a Split band; for Vital the chorus / flanger / phaser order and routes to an effect mix or EQ cutoff; tempo-following mod effects | Serum 1, 5, 8, 9, 10, 11, 13, 14; Vital 6, 10 |
+| 1.4 | **Sample and space.** Convolution / Space reverb, a fourth sample slot (MultiSample), the granular gaps (warp on the grains, routes into Warp / Pitch / Position), reverb build-up | Serum 6, 7, 12 |
+| 1.5 | **Per-channel and per-note detail.** `lfo_N_stereo` (oscillators rendered separately for left and right), macro min / max (#8), wavetable paging (#9), noise-driven warps left over, the Deep House leads | Vital 15; roadmap #8, #9 |
+| Ongoing | **Single-preset leads** (Vital row 16, the Deep House leads below): taken when a preset is reported, never in a release of their own | Vital 16 |
 
 ## Built since the first roadmap (2026-11-04)
 

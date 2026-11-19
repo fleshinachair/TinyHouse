@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.9.8
+
+The formant filters planned as 0.9.7 and the Vital leads planned as 0.9.8 ship together. Saved presets from earlier versions load and sound the same: of 112 presets rendered with the 0.9.6 engine and this one, 64 are bit-identical and the other 48 (noise and random phases make them differ on every render) differ by no more than their own run-to-run noise. Every new parameter defaults to the old behaviour, so a Serum preset is unchanged; a Vital preset gains the new behaviour when it is imported again.
+
+**Fixed: the module's parameter list stays inside the host's 64 KB limit.** The host refuses to load a synth whose list does not fit. The new parameters would have crossed it, so keys that only the converter or a preset load sets are no longer published (the list is 56.7 KB, from 64.7 KB in 0.9.6). Nothing on the device or the remote page used them.
 
 **Formant voice filters.** Serum's three Formant models (ONE, TWO, TWB) and Vital's Formant model are now their own engine filter, so presets that use them import instead of being skipped or read as a low-pass. Serum's are measured against the plugin (a sum of parallel band-pass resonators; Freq, Var, Reso and key tracking all move them), Vital's follows its own vowel tables with the X / Y, Spread, Transpose and Resonance knobs. They are closer to the originals than a low-pass but not exact: Serum's TWB is least exact at its highest Var, and a formant preset plays a few dB quieter than Serum until its level is refitted.
 
 **The Move card and the remote UI draw the same wavetable lines.** The remote page now keeps the module's wavetable digest, the one the Move's card draws, instead of replacing it with its own read of the file (a different set of frames, with a guessed frame size).
+
+**Vital's random modulators are live.** Sample-and-hold, Perlin, Sine and Lorenz (`random_lfo.cpp`) run in the engine as four extra sources on the eight LFO routes (Rnd1 to Rnd4, with a rate and a Tempo switch, so a synced one follows the Move's tempo), with a new random value drawn for every note, as Vital does. 21 of the 33 local presets that route one now carry it; before, the route was dropped, which left its cutoff, pitch, wave-frame or pan fixed. Against the plugin (a saw through a low-pass, 12 notes), the spread of the cutoff effect between and within notes has the same shape for all four styles. New hidden params `rn1..4_style / _rate / _tempo`; saved presets are unchanged. A route from a sixth or later LFO is now reported as not carried instead of vanishing.
 
 **Vital imports: the envelope attack follows Vital's curve, and a route into a filter's Blend moves it live.** Vital's attack stage is a power curve (`env_N_attack_power`, read from its source: the curve is `powerScale(x, -power)`, squared into the gain for the amp envelope); the engine's attack was one fixed curve, 29 dB off at the start of a slow attack, now 0.7 to 3.8 dB (new hidden `vca_apow`, `flt_apow`, `me1_apow`, `me2_apow`; 0 keeps the old attack, so saved presets are unchanged). An LFO or envelope route into the Blend knob of the Analog, Phaser or Comb filter used to be folded in at the LFO's mean (an envelope not at all); it is now a live destination (Filter Blend, Filter 2 Blend, appended): 10 to 13 dB error against the plugin before, 1 to 2 dB after. The remote import report now lists the small details of Vital presets (they were hidden) in a closed group.
 

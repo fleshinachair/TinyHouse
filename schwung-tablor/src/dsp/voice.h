@@ -15,6 +15,7 @@
 #include "../ported/analog_tables.h"
 #include "../ported/filter.h"
 #include "comb.h"
+#include "formant.h"
 #include "sample.h"
 #include "granular.h"
 #include "../ported/adsr.h"
@@ -91,6 +92,7 @@ enum ModDst {
     MD_EQ1_FREQ, MD_EQ1_GAIN, MD_EQ2_FREQ, MD_EQ2_GAIN, MD_EQ3_FREQ, MD_EQ3_GAIN, MD_EQ4_FREQ, MD_EQ4_GAIN,     /* the master EQ's band Freq (a fraction of the log scale) and Gain (a fraction of 48 dB): read by the engine from the newest voice (eqMod) */
     MD_DISTV_DRIVE, MD_DISTV_CUT, MD_DISTV_RES, MD_DISTV_BLEND,     /* the Vital distortion's Drive and filter Cutoff, Res and Blend, each a fraction of the control's range: read by the engine from the newest voice (distVMod) */
     MD_WT1_FINE, MD_WT2_FINE, MD_WT3_FINE,     /* an oscillator's pitch in semitones, 2 per unit of the route: a vibrato of a few cents (Vital's osc Tune knob spans 2 st), which the 48-per-unit Pitch destination cannot hold in a 127-step amount */
+    MD_FLT_BLEND, MD_FLT2_BLEND,     /* Vital's voice filter Blend knob (a fraction of its 0..2 range): added to the stored blend of the Blend, Phaser and Comb filters before the block is run */
     MD_COUNT
 };
 
@@ -194,6 +196,8 @@ public:
         phaser.setSampleRate(sr);
         vph1.setSampleRate(sr);
         vph2.setSampleRate(sr);
+        fm1.setSampleRate(sr);
+        fm2.setSampleRate(sr);
         phaser2.setSampleRate(sr);
         noiseHp.setSampleRate(sr); noiseLp.setSampleRate(sr);
         filterADSR.setSampleRate(sr);
@@ -259,6 +263,8 @@ public:
         phaser.reset();
         vph1.reset();
         vph2.reset();
+        fm1.reset();
+        fm2.reset();
         phaser2.reset();
         noiseHp.reset(); noiseLp.reset();
         noiseHpSet = noiseLpSet = 0.0f;
@@ -619,7 +625,8 @@ public:
             if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
             const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
             if (driving2) { if (vDriveLaw) vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES]))); else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
-            if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
+            if (fmOn2) fm2.process(pre2L, pre2R, n, fmSet2);
+            else if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
             else if (combType2 && vcMode2) comb2.processVital(pre2L, pre2R, n, combType2 <= 2 ? 0 : combType2 - 2, combRes2, fltTarget2, vcBlend2, vcTrans2, vcMode2 == 2);
             else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
@@ -641,7 +648,8 @@ public:
         if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
         const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
         if (driving) { if (vDriveLaw) vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES]))); else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
-        if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
+        if (fmOn1) fm1.process(preL, preR, n, fmSet1);
+        else if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
         else if (combType && vcMode) comb.processVital(preL, preR, n, combType <= 2 ? 0 : combType - 2, combRes, fltTarget, vcBlend, vcTrans, vcMode == 2);
         else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
@@ -720,6 +728,7 @@ private:
         filterADSR.setDelay(potEnvStage(P[TB_P_FLT_DELAY]));
         filterADSR.setHold(potEnvStage(P[TB_P_FLT_HOLD]));
         filterADSR.setAttack(potAttackTime(P[TB_P_FLT_A]));
+        filterADSR.setAttackPower(attackPower(P[TB_P_FLT_APOW]), P[TB_P_FLT_APOW] >= 0.5f, false);
         filterADSR.setDecay(potEnvTime(decayPot(P[TB_P_FLT_D])));
         filterADSR.setSustainLevel(pot01(P[TB_P_FLT_S]));
         filterADSR.setRelease(potEnvTime(P[TB_P_FLT_R]));
@@ -728,6 +737,7 @@ private:
         adsr.setDelay(potEnvStage(P[TB_P_VCA_DELAY]));
         adsr.setHold(potEnvStage(P[TB_P_VCA_HOLD]));
         adsr.setAttack(potAttackTime(P[TB_P_VCA_A]));
+        adsr.setAttackPower(attackPower(P[TB_P_VCA_APOW]), P[TB_P_VCA_APOW] >= 0.5f, true);
         adsr.setDecay(potEnvTime(decayPot(P[TB_P_VCA_D])));
         adsr.setDecayPower(P[TB_P_VCA_DPOW] >= 0.5f ? (P[TB_P_VCA_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f);
         adsr.setSustainLevel(pot01(P[TB_P_VCA_S]));
@@ -749,6 +759,7 @@ private:
                 modEnv[i].setDelay(potEnvStage(P[TB_P_ME1_DELAY + 2 * i]));
                 modEnv[i].setHold(potEnvStage(P[TB_P_ME1_HOLD + 2 * i]));
                 modEnv[i].setAttack(potAttackTime(P[k[i].a]));
+                modEnv[i].setAttackPower(attackPower(P[TB_P_ME1_APOW + (TB_P_ME2_APOW - TB_P_ME1_APOW) * i]), P[TB_P_ME1_APOW + (TB_P_ME2_APOW - TB_P_ME1_APOW) * i] >= 0.5f, false);
                 modEnv[i].setDecay(potEnvTime(P[k[i].d]));
                 modEnv[i].setSustainLevel(pot01(P[k[i].s]));
                 modEnv[i].setRelease(potEnvTime(P[k[i].r]));
@@ -979,9 +990,9 @@ private:
             n += env * sens * potBipolar(P[TB_P_FLT_ENV]) * filterWidth;
             n += modOff[MD_FLT_FREQ] * filterWidth;
 
-            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 15);
-            combType = ft >= 8 ? ft - 7 : 0;                                  /* 1 Comb +, 2 Comb -, 3 Flange +, 4 Flange - */
-            if (combType) n += (P[TB_P_FLT_CFINE] - 64.0f) * 0.01f;              /* a comb is tuned in cents */
+            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 18);
+            combType = ft >= 8 && ft < 16 ? ft - 7 : 0;                                  /* 1 Comb +, 2 Comb -, 3 Flange +, 4 Flange - */
+            if (combType || ft >= 16) n += (P[TB_P_FLT_CFINE] - 64.0f) * 0.01f;              /* a comb is tuned in cents */
             float f = midiNoteToHz(n);
             float maxFreq = std::min(20000.0f, (float) (sampleRate / 2.0));
             f = std::clamp(f, combType ? 3.0f : 4.0f, maxFreq);
@@ -995,13 +1006,17 @@ private:
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
                 Filter::bandpass, Filter::bandpass, Filter::notch, Filter::notch };
             combRes = res;
-            vcMode = (int) P[TB_P_VCOMB]; vcBlend = P[TB_P_CBLEND] * (2.0f / 127.0f); vcTrans = (P[TB_P_CTRANS] - 64.0f) * 0.75f;   /* the Vital comb's blend and transpose (comb.h processVital) */
+            vcMode = (int) P[TB_P_VCOMB]; vcBlend = blendOf(P[TB_P_CBLEND], MD_FLT_BLEND); vcTrans = (P[TB_P_CTRANS] - 64.0f) * 0.75f;   /* the Vital comb's blend and transpose (comb.h processVital) */
             int t = ft >= 8 ? 1 : ft & 7;
             filter.setType(kTypes[t]);
             filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
-            vph1.on = P[TB_P_FLT_VB] >= 1.5f; vph1Blend = P[TB_P_FLT_BLEND] * (2.0f / 127.0f); vph1Inv = (ft & 1) != 0;   /* Vital's Phaser filter: the type's low bit is its Style */
+            vph1.on = P[TB_P_FLT_VB] >= 1.5f && P[TB_P_FLT_VB] < 2.5f; vph1Blend = blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND); vph1Inv = (ft & 1) != 0;   /* Vital's Phaser filter: the type's low bit is its Style */
             vb1.on = P[TB_P_FLT_VB] >= 0.5f && P[TB_P_FLT_VB] < 1.5f && !combType && ft < 8;             /* Vital's Blend knob: a crossfade of the low / band / high outputs (see VBlend) */
-            if (vb1.on) vb1.set(P[TB_P_FLT_BLEND] * (2.0f / 127.0f), (t & 1) != 0, q, P[TB_P_FLT_VBG] * (20.0f / 127.0f));
+            if (vb1.on) vb1.set(blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0, q, P[TB_P_FLT_VBG] * (20.0f / 127.0f));
+            fmOn1 = P[TB_P_FLT_VB] >= 2.5f || ft >= 16;     /* Vital's Formant model (X / Y between the style's vowels, Spread and Transpose, Resonance) or one of Serum's (Freq and Var: the measured tables), formant.h */
+            if (ft >= 16) fmSet1 = serumFormantSet(ft - 16, n * kSerumFormantPerNote, P[TB_P_FLT_VAR] * (1.0f / 127.0f), res);
+            else if (fmOn1) fmSet1 = vitalFormantSet((int) P[TB_P_FLT_FST], P[TB_P_FLT_FX] * (1.0f / 127.0f), P[TB_P_FLT_FY] * (1.0f / 127.0f), (P[TB_P_FLT_FSP] - 64.0f) * (1.0f / 64.0f),
+                                                 (P[TB_P_FLT_FTR] - 64.0f) * (12.0f / 64.0f), P[TB_P_FLT_FRES] * (1.0f / 127.0f));
             fltTarget = f; fltQ = q;           /* applied in steps across the block (see runFilter) */
 
             /* Filter 2: the same law with its own knobs (and its own share of the filter envelope), and the destination the LFOs and
@@ -1010,20 +1025,24 @@ private:
             n2 += ((float) midiNote - 60.0f) * pot01(P[TB_P_FLT2_KEY]);
             n2 += env * sens * potBipolar(P[TB_P_FLT2_ENV]) * filterWidth;
             n2 += modOff[MD_FLT2_FREQ] * filterWidth;
-            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 15);
-            combType2 = ft2 >= 8 ? ft2 - 7 : 0;
-            if (combType2) n2 += (P[TB_P_FLT2_CFINE] - 64.0f) * 0.01f;
+            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 18);
+            combType2 = ft2 >= 8 && ft2 < 16 ? ft2 - 7 : 0;
+            if (combType2 || ft2 >= 16) n2 += (P[TB_P_FLT2_CFINE] - 64.0f) * 0.01f;
             fltTarget2 = std::clamp(midiNoteToHz(n2), combType2 ? 3.0f : 4.0f, maxFreq);
             combRes2 = std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f);
-            vcMode2 = (int) P[TB_P_VCOMB2]; vcBlend2 = P[TB_P_CBLEND2] * (2.0f / 127.0f); vcTrans2 = (P[TB_P_CTRANS2] - 64.0f) * 0.75f;
+            vcMode2 = (int) P[TB_P_VCOMB2]; vcBlend2 = blendOf(P[TB_P_CBLEND2], MD_FLT2_BLEND); vcTrans2 = (P[TB_P_CTRANS2] - 64.0f) * 0.75f;
             fltQ2 = kFilterQ / (1.0f - std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f) * 0.99f);
             if (P[TB_P_FLT_VDL] >= 0.5f) fltQ2 = vitalFilterDriveQ(fltQ2, pot01(P[TB_P_FLT2_DRIVE]));
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
             filter2.setType(kTypes[t2]);
             filter2.setSlope((t2 & 1) ? Filter::db24 : Filter::db12);
-            vph2.on = P[TB_P_FLT2_VB] >= 1.5f; vph2Blend = P[TB_P_FLT2_BLEND] * (2.0f / 127.0f); vph2Inv = (ft2 & 1) != 0;
+            vph2.on = P[TB_P_FLT2_VB] >= 1.5f && P[TB_P_FLT2_VB] < 2.5f; vph2Blend = blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND); vph2Inv = (ft2 & 1) != 0;
             vb2.on = P[TB_P_FLT2_VB] >= 0.5f && P[TB_P_FLT2_VB] < 1.5f && !combType2 && ft2 < 8;
-            if (vb2.on) vb2.set(P[TB_P_FLT2_BLEND] * (2.0f / 127.0f), (t2 & 1) != 0, fltQ2, P[TB_P_FLT2_VBG] * (20.0f / 127.0f));
+            if (vb2.on) vb2.set(blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0, fltQ2, P[TB_P_FLT2_VBG] * (20.0f / 127.0f));
+            fmOn2 = P[TB_P_FLT2_VB] >= 2.5f || ft2 >= 16;
+            if (ft2 >= 16) fmSet2 = serumFormantSet(ft2 - 16, n2 * kSerumFormantPerNote, P[TB_P_FLT2_VAR] * (1.0f / 127.0f), combRes2);
+            else if (fmOn2) fmSet2 = vitalFormantSet((int) P[TB_P_FLT2_FST], P[TB_P_FLT2_FX] * (1.0f / 127.0f), P[TB_P_FLT2_FY] * (1.0f / 127.0f), (P[TB_P_FLT2_FSP] - 64.0f) * (1.0f / 64.0f),
+                                                 (P[TB_P_FLT2_FTR] - 64.0f) * (12.0f / 64.0f), P[TB_P_FLT2_FRES] * (1.0f / 127.0f));
         }
     }
 
@@ -1156,6 +1175,9 @@ private:
     CombFilter comb, comb2;                       /* the comb / flange / phaser filter types (comb.h); 0 = the biquad is used, 1..4 = Comb +, Comb -, Flange +, Flange -, 5..8 = Phase 12..48 + */
     PhaserFilter phaser, phaser2;
     VitalPhaserFilter vph1, vph2;                 /* Vital's Phaser voice filter (comb.h); flt_vb = 2 */
+    FormantBank fm1, fm2;                         /* Vital's Formant voice filter (formant.h); flt_vb = 3 */
+    FormantSet fmSet1, fmSet2;
+    bool fmOn1 = false, fmOn2 = false;
     float vph1Blend = 1.0f, vph2Blend = 1.0f; bool vph1Inv = false, vph2Inv = false, vphClean = false;
     int combType = 0, combType2 = 0;
     float combRes = 0.0f, combRes2 = 0.0f;
@@ -1166,6 +1188,8 @@ private:
     GrainCloud gran, gran2, gran3;      /* the same slots in their Granular kind */
     AnalogADSR filterADSR, adsr;
     AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
+    /* a voice filter's Blend knob (a 0..127 pot = 0..2) with the routes into it (a fraction of the 0..2 range) added */
+    float blendOf(float potV, int dst) const { return std::clamp(potV * (1.0f / 127.0f) + modOff[dst], 0.0f, 1.0f) * 2.0f; }
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */
     float lfoPhase[kLfos] = {};
     float lfoDelayLeft[kLfos] = {};      /* seconds of Vital LFO Delay still to wait, and how far the Fade In has got (0..1) */

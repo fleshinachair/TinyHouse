@@ -111,6 +111,7 @@ calibration/*.json
 !calibration/evenodd_measured.json
 !calibration/probe_comb_saw.json
 !calibration/probe_phase_saw.json
+!calibration/formant_grid.json
 # the original Tablor wavetable packs are third-party: never commit wavetables
 schwung-tablor/src/wavetables/
 

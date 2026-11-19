@@ -630,6 +630,7 @@ FILTER_MAP = {
     "MgL12": (0, False), "L12": (0, True), "MgL6": (0, False), "L6": (0, False),
     "H24": (3, True), "H12": (2, True), "H6": (2, False), "B24": (5, True), "B12": (4, True),
     "LadderMg": (1, False), "LadderEMS": (1, False), "LN12": (0, False),     # ladders and a 12 dB low-pass: the nearest engine filter
+    "FormantONE": (16, True), "FormantTWO": (17, True), "FormantTWB": (18, True),     # the engine's own formant types (formant.h: parallel band-pass resonators from the measured Freq x Var tables)
 }
 # Voice filter laws, measured by probe_vfilter.py / probe_vreso.py: a held saw through each Serum filter model at several cutoffs and
 # resonances, and the engine's cutoff and resonance pots searched for the pair whose harmonic transfer matches. Cutoff: the pots to add
@@ -2066,7 +2067,15 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         key = _clamp(abs(fl["keytrack"]), 0, 1) * CAL["key_scale"]
         pivot = (60 - CAL["key_pivot"]) * key
         reso_pct = _clamp(fl["reso_pct"] + 100.0 * fold[("VoiceFilter", "kParamReso", key_id)], 0, 100)
-        if idx >= 8:
+        if idx >= 16:
+            # Serum's Formant models (engine types 16..18, formant.h): the resonators sit where the measured Freq x Var tables put them and Reso narrows them (bandwidth / (1 + 2 Reso)); the knob's note exactly,
+            # like a comb (no calibration offset; the pot is whole semitones, so the rest goes to the cents pot)
+            note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
+            P[f"{prefix}_freq"] = int(math.floor(note_pot))
+            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
+            P[f"{prefix}_var"] = round(_clamp(float(fl.get("var") or 0.0) / 100.0 * 127.0, 0, 127))
+            P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
+        elif idx >= 8:
             # a comb is tuned to the cutoff itself: the knob's note, no calibration offset; the pot is whole semitones, so the rest goes to the cents pot (64 = 0)
             note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
             P[f"{prefix}_freq"] = int(math.floor(note_pot))

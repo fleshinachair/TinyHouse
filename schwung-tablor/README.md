@@ -94,7 +94,7 @@ and still save with the patch; they simply have no cell on the hardware.
 
 ## Web panel
 
-Open `move.local:7700/remote-ui` for the full control surface, laid out after Serum 2: three oscillators
+Open `move.local:7700/remote-ui` for the full control surface: three oscillators
 with 3D wavetable displays across the top, then tabs for the filters, envelopes, the effects rack, the
 sub / noise / sample mixer and the globals. Every parameter the module declares has a control (the panel
 builds itself from `chain_params`, and anything not placed lands in "More"), and every control is live in

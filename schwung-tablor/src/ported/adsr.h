@@ -50,6 +50,7 @@ public:
             state = State::attack;
             if (orig == State::idle)
                 output = 0.0f;
+            startAttack();
         }
     }
 
@@ -78,6 +79,10 @@ public:
      * the decay time, squared into the gain as Vital squares its amplitude envelope (the sustain level is the gain, so the curve ends on it). 0 keeps the analog one-pole stage. */
     void setDecayPower(float p) { decayPow = p; }
 
+    /* Vital's own attack shape: when on, the attack stage is the curve Vital draws, (exp(-p x) - 1) / (exp(-p) - 1) over x = 0..1 of the attack time (a negative p starts slowly, a positive one
+     * rises at once, 0 is a straight line), squared into the gain for the amplitude envelope as Vital squares it. Off keeps the analog one-pole stage. */
+    void setAttackPower(float p, bool on, bool squared) { attackPow = p; attackOn = on; attackSq = squared; }
+
     void setSustainLevel(float s)
     {
         if (sustain != s) {
@@ -93,13 +98,19 @@ public:
         switch (state) {
         case State::idle: break;
         case State::attack:
+            if (attackOn) {
+                attackPos += attackStep;
+                if (attackPos >= 1.0f) { output = 1.0f; decayPos = 0.0f; enterHoldOrDecay(); }
+                else { const float v = attackCurve(attackPos); output = attackSq ? v * v : v; }
+                break;
+            }
             output = attackOffset + output * attackCoeff;
             if (output >= 1.0f || attack == 0.0f) { output = 1.0f; decayPos = 0.0f; enterHoldOrDecay(); }
             break;
         case State::delay:
             if (--stageLeft <= 0.0f) {
                 if (attack == 0.0f) { output = 1.0f; decayPos = 0.0f; enterHoldOrDecay(); }
-                else state = State::attack;
+                else { state = State::attack; startAttack(); }
             }
             break;
         case State::hold:
@@ -151,6 +162,19 @@ public:
     }
 
 private:
+    float attackCurve(float x) const
+    {
+        return std::fabs(attackPow) < 0.01f ? x : (std::exp(-attackPow * x) - 1.0f) / (std::exp(-attackPow) - 1.0f);
+    }
+    /* where on the power curve the stage starts: at the beginning, or (a note on over a sounding envelope) at the point that matches the level it is at */
+    void startAttack()
+    {
+        attackPos = 0.0f;
+        attackStep = (float) (sampleRate * attack) > 1.0f ? 1.0f / (float) (sampleRate * attack) : 1.0f;
+        if (!attackOn || output <= 0.0f) return;
+        const float v = std::fmin(1.0f, attackSq ? std::sqrt(output) : output);
+        attackPos = std::fabs(attackPow) < 0.01f ? v : std::log(1.0f + v * (std::exp(-attackPow) - 1.0f)) / -attackPow;
+    }
     void enterHoldOrDecay()
     {
         if (holdSec > 0.0f) { state = State::hold; stageLeft = (float) (sampleRate * holdSec); }
@@ -162,6 +186,7 @@ private:
         float tco = std::exp(-0.5f);
         attackCoeff = std::exp(-std::log((1.0f + tco) / tco) / samples);
         attackOffset = (1.0f + tco) * (1.0f - attackCoeff);
+        attackStep = samples > 1.0f ? 1.0f / samples : 1.0f;
     }
     void calculateDecay()
     {
@@ -186,6 +211,8 @@ private:
     float attackOffset = 0.0f, decayOffset = 0.0f, releaseOffset = 0.0f;
     float output = 0.0f;
     float decayPow = 0.0f, decayPos = 0.0f, decayStep = 1.0f;
+    float attackPow = 0.0f, attackPos = 0.0f, attackStep = 1.0f;
+    bool attackOn = false, attackSq = false;
     float delaySec = 0.0f, holdSec = 0.0f, stageLeft = 0.0f;
 };
 

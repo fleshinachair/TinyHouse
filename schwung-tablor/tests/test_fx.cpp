@@ -11,6 +11,8 @@
 
 #include "../src/dsp/engine.h"
 #include "../src/dsp/fx.h"
+#include "../src/dsp/formant.h"
+#include "../src/ported/adsr.h"
 
 using namespace tb;
 
@@ -1632,6 +1634,116 @@ int main()
         CHECK(w1 < -30.0, "Wet 100 %%: the low-pass takes a 4 kHz sine away (%.1f dB)", w1);
         CHECK(std::fabs(w0) < 0.3, "Wet 0: the sine passes untouched (%+.2f dB)", w0);
         CHECK(std::fabs(wh - 20.0 * std::log10(0.75)) < 0.8, "Wet 50 %%: only the dry part left, 1 - s^2 = 0.75 (%.2f dB, want %.2f)", wh, 20.0 * std::log10(0.75));
+    }
+
+    printf("\n-- Vital attack curve (adsr.h) --\n");
+    {
+        /* Vital: attack value = (exp(-p x) - 1) / (exp(-p) - 1) over x = 0..1 of the attack time, squared for the amplitude envelope; p near 0 is a straight line. */
+        const double sr = 44100.0;
+        const float powers[] = { -6.0f, 0.0f, 3.0f };
+        for (float p : powers) {
+            tb::AnalogADSR e;
+            e.setSampleRate(sr);
+            e.setAttack(1.0f); e.setDecay(0.2f); e.setSustainLevel(1.0f);
+            e.setAttackPower(p, true, true);
+            e.noteOn();
+            double worst = 0.0;
+            for (int i = 1; i <= (int) (sr * 0.95); i++) {
+                const float o = e.process();
+                if (i % 2205) continue;
+                const double x = i / sr;
+                const double v = std::fabs(p) < 0.01 ? x : (std::exp(-p * x) - 1.0) / (std::exp(-p) - 1.0);
+                worst = std::fmax(worst, std::fabs(o - v * v));
+            }
+            CHECK(worst < 6e-3, "attack power %+.0f follows Vital's curve, squared (worst error %.4f)", p, worst);
+        }
+        tb::AnalogADSR e;                                                  /* unsquared (a filter envelope) and a retrigger from a sounding level */
+        e.setSampleRate(sr); e.setAttack(0.5f); e.setSustainLevel(1.0f);
+        e.setAttackPower(0.0f, true, false);
+        e.noteOn();
+        e.process((int) (sr * 0.25));
+        CHECK(std::fabs(e.getOutput() - 0.5f) < 0.01f, "unsquared straight attack is at 0.5 half way (%.3f)", e.getOutput());
+        e.noteOff(); e.process((int) (sr * 0.01)); const float before = e.getOutput(); e.noteOn(); e.process();
+        CHECK(e.getOutput() >= before - 0.001f && e.getOutput() < before + 0.01f, "a note on over a sounding envelope rises from its level (%.3f -> %.3f)", before, e.getOutput());
+        tb::AnalogADSR a;                                                  /* off keeps the analog stage */
+        a.setSampleRate(sr); a.setAttack(0.5f); a.setSustainLevel(1.0f); a.noteOn(); a.process((int) (sr * 0.05));
+        CHECK(a.getOutput() > 0.1f, "power off keeps the analog attack (%.3f after a tenth of the time)", a.getOutput());
+    }
+
+    printf("\n-- Vital Formant voice filter (formant.h) --\n");
+    {   /* four band-pass resonators between the vowels: a sine at a vowel's first formant passes, one far from every formant is cut. The numbers are Vital's (filters/formant_filter.cpp:
+         * vowel a's first formant is midi 75.76 = 651 Hz); the filter itself was checked against the plugin on a saw (0.56 dB rms over 12 kHz). */
+        auto formantDb = [&](const FormantSet &fs, double hz) {
+            FormantBank fb;
+            fb.setSampleRate(SR);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.02 * std::sin(6.283185307 * hz * i / SR));
+            for (int i = 0; i < n; i += 128) fb.process(L.data() + i, R.data() + i, std::min(128, n - i), fs);
+            double a = 0, b = 0;
+            for (int i = n / 2; i < n; i++) { a += 0.0004 * 0.5; b += (double) L[(size_t) i] * L[(size_t) i]; }
+            return 10.0 * std::log10(b / a);
+        };
+        const FormantSet a0 = vitalFormantSet(0, 0.0f, 0.0f, 0.0f, 0.0f, 0.85f);
+        const double at651 = formantDb(a0, 651.0), at80 = formantDb(a0, 80.0), at12k = formantDb(a0, 12000.0);
+        CHECK(at651 > at80 + 15.0 && at651 > at12k + 20.0, "vowel a: its first formant (651 Hz) stands %.1f dB over 80 Hz and %.1f dB over 12 kHz", at651 - at80, at651 - at12k);
+        const FormantSet up = vitalFormantSet(0, 0.0f, 0.0f, 0.0f, 12.0f, 0.85f);
+        const double up1302 = formantDb(up, 1302.0);
+        CHECK(std::fabs(up1302 - at651) < 1.5, "Transpose +12 moves the formants up an octave (%.2f dB at 1302 Hz against %.2f at 651 Hz)", up1302, at651);
+        const FormantSet wide = vitalFormantSet(0, 0.0f, 0.0f, -1.0f, 0.0f, 0.85f), tight = vitalFormantSet(0, 0.0f, 0.0f, 1.0f, 0.0f, 0.85f);
+        CHECK(tight.midi[0] > 79.9f && tight.midi[3] < 80.1f && wide.midi[0] < a0.midi[0] && wide.midi[3] > a0.midi[3],
+              "Spread +1 pulls every formant to note 80 and -1 pushes them apart (%.1f / %.1f against %.1f / %.1f)", wide.midi[0], wide.midi[3], a0.midi[0], a0.midi[3]);
+        const FormantSet e0 = vitalFormantSet(0, 0.0f, 1.0f, 0.0f, 0.0f, 0.85f), e1 = vitalFormantSet(1, 1.0f, 1.0f, 0.0f, 0.0f, 0.85f);
+        CHECK(std::fabs(e0.midi[0] - 65.0382f) < 0.01f && std::fabs(e1.midi[0] - 67.34996f) < 0.01f, "the corners are the vowels: style 0 top left is u (%.2f), style 1 top right is e (%.2f)", e0.midi[0], e1.midi[0]);
+        bool stable = true;
+        for (int style = 0; style < 2; style++)
+            for (float x = 0; x <= 1; x += 1)
+                for (float y = 0; y <= 1; y += 1) {
+                    const double g = formantDb(vitalFormantSet(style, x, y, 1.0f, 12.0f, 1.0f), 2000.0) + formantDb(vitalFormantSet(style, x, y, -1.0f, -12.0f, 1.0f), 100.0);
+                    stable = stable && std::isfinite(g);
+                }
+        CHECK(stable, "every corner at full resonance and the extreme Spread / Transpose stays finite");
+    }
+
+    printf("\n-- Serum Formant voice filters (formant.h, measured tables) --\n");
+    {   /* the sum of band-pass resonators the tables describe, read back through the engine's state-variable stage: its gain at a few frequencies against the analog formula the fits were made with
+         * (which the tables reproduce to 0.1 dB against Serum's own saw render). Below 5 kHz the two stay within a dB. */
+        auto sineDb = [&](const FormantSet &fs, double hz) {
+            FormantBank fb;
+            fb.setSampleRate(SR);
+            const int n = (int) SR;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.02 * std::sin(6.283185307 * hz * i / SR));
+            for (int i = 0; i < n; i += 128) fb.process(L.data() + i, R.data() + i, std::min(128, n - i), fs);
+            double a = 0, b = 0;
+            for (int i = n / 2; i < n; i++) { a += 0.0004 * 0.5; b += (double) L[(size_t) i] * L[(size_t) i]; }
+            return 10.0 * std::log10(b / a);
+        };
+        auto analogDb = [&](const FormantSet &fs, double hz) {
+            double re = 0, im = 0;
+            for (int r = 0; r < fs.n; r++) {
+                const double f0 = 440.0 * std::exp2((fs.midi[r] - 69.0) / 12.0), x = hz / f0, q = 1.0 / fs.k[r], g = fs.post[r] / fs.k[r];
+                const double dr = 1.0 - x * x, di = x / q, nr = 0.0, ni = x / q;
+                const double den = dr * dr + di * di;
+                re += g * (nr * dr + ni * di) / den; im += g * (ni * dr - nr * di) / den;
+            }
+            return 20.0 * std::log10(std::sqrt(re * re + im * im));
+        };
+        const FormantSet two = serumFormantSet(1, 0.35f, 0.5f, 0.0f);
+        double worst = 0;
+        for (double hz : { 300.0, 628.0, 1200.0, 2500.0, 3300.0, 5000.0 }) worst = std::max(worst, std::fabs(sineDb(two, hz) - analogDb(two, hz)));
+        CHECK(worst < 1.0, "FormantTWO at Freq 0.35 Var 50: the engine's resonators follow the tabulated sum within %.2f dB", worst);
+        CHECK(std::fabs(two.midi[0] - (69.0f + 12.0f * std::log2(628.0f / 440.0f))) < 0.6f && std::fabs(two.midi[1] - (69.0f + 12.0f * std::log2(2493.0f / 440.0f))) < 0.6f,
+              "its first two formants sit at about 628 and 2493 Hz (the fit made on Serum's render): %.1f / %.1f", two.midi[0], two.midi[1]);
+        const FormantSet narrow = serumFormantSet(1, 0.35f, 0.5f, 1.0f);
+        const double wideAt = sineDb(two, 628.0 * 1.08), narrowAt = sineDb(narrow, 628.0 * 1.08);
+        CHECK(narrowAt < wideAt - 2.0 && std::fabs(sineDb(narrow, 628.0) - sineDb(two, 628.0)) < 1.0, "Reso 100 %% narrows the bandwidth to a third (%.1f dB against %.1f one resonator-bandwidth off the centre, the peak unchanged)", narrowAt, wideAt);
+        CHECK(serumFormantSet(0, 0.5f, 0.5f, 0.0f).n == 5 && serumFormantSet(1, 0.5f, 0.5f, 0.0f).n == 3 && serumFormantSet(2, 0.5f, 0.5f, 0.0f).n == 4, "ONE has five resonators, TWO three, TWB four");
+        bool stable = true;
+        for (int m = 0; m < 3; m++)
+            for (float x : { 0.0f, 0.37f, 1.0f })
+                for (float v : { 0.0f, 0.5f, 1.0f }) stable = stable && std::isfinite(sineDb(serumFormantSet(m, x, v, 1.0f), 1000.0) + sineDb(serumFormantSet(m, x, v, 0.0f), 9000.0));
+        CHECK(stable, "every model at the corners of Freq and Var stays finite");
     }
 
     printf("\n%s (%d failures)\n", g_fail ? "FX TESTS FAILED" : "FX TESTS PASSED", g_fail);

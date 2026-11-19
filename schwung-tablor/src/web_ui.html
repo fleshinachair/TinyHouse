@@ -801,10 +801,10 @@ function ridge(g, pts, w, h, o) {
 
 /* ---- wavetable waterfall ------------------------------------------------
  * wtN_shape is "<frames>,<samples>,<data>", one character per sample quantised to
- * 64 levels over [-1,1], built by the module when a table lands. The panel also
- * reads the file itself over the manager's file API, so the drawing follows
- * whichever table is loaded from either side. */
-var SHAPE = {}, QI = {}, PATHS = [], shapeReq = {}, audioCtx = null;
+ * 64 levels over [-1,1], built by the module when a table lands (24 frames of 64 samples at most). The Move's wavetable card draws from the same digest, so the highlighted frame is the
+ * same line on both screens. The panel also reads the file itself over the manager's file API, but only as a stand-in until the module's digest has arrived: the file gives a different
+ * set of frames (32 of 96 samples) and a frame size guessed from the name, so once a digest is in, the file never replaces it. */
+var SHAPE = {}, DIGESTED = {}, QI = {}, PATHS = [], shapeReq = {}, audioCtx = null;
 (function () {
   var A = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
   for (var i = 0; i < A.length; i++) QI[A.charAt(i)] = i;
@@ -823,7 +823,7 @@ function parseShape(str) {
   }
   return { frames: nf, samples: ns, data: out };
 }
-function ingestShape(osc, v) { var sh = parseShape(v); if (sh) { SHAPE[osc] = sh; redrawSoon(); } }
+function ingestShape(osc, v) { var sh = parseShape(v); if (sh) { SHAPE[osc] = sh; DIGESTED[osc] = true; redrawSoon(); } }
 function frameSizeOf(path) {
   var m = /\.wt(\d+)$/i.exec(path || ""), n = m ? parseInt(m[1], 10) : 0;
   return (n >= 256 && n <= 4096 && (n & (n - 1)) === 0) ? n : 2048;
@@ -840,7 +840,7 @@ function loadShapeFromFile(osc, path) {
     return audioCtx.decodeAudioData(buf);
   }).then(function (ab) {
     var pcm = ab.getChannelData(0), fs = frameSizeOf(path), nf = Math.floor(pcm.length / fs);
-    if (nf < 1) return;
+    if (nf < 1 || DIGESTED[osc]) return;                      /* the module's digest (what the Move draws) is already here: keep it */
     var OF = Math.min(32, nf), OS = 96, out = [];
     for (var f = 0; f < OF; f++) {
       var src = OF === 1 ? 0 : Math.round(f * (nf - 1) / (OF - 1)), a = new Float32Array(OS);
@@ -2689,7 +2689,7 @@ async function runImport() {
 
 /* ---- the report ---- */
 /* What one preset has that did not come across, one line each. */
-function impLines(p) {
+function impAllLines(p) {
   var out = p.gaps.map(function (g) { return g; });
   p.not_carried.forEach(function (g) { out.push(/not carried|not imported/.test(g) ? g : g + " not carried"); });
   p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
@@ -2698,8 +2698,14 @@ function impLines(p) {
     out.push("Sample not found: " + t + (IMP.smps.length ? " (that oscillator stays silent" + (own ? "; it is one of Serum's own sample files and was not found in the folder you chose" : "") + ")"
       : " (" + (own ? "a file of Serum's own library, not in the pack: " : "") + "no Samples folder has been chosen: pick your Serum 2 folder, not only its Presets folder, then import again; that oscillator stays silent)"));
   });
-  return p.tier === "vital" ? out.filter(function (l) { return !impIsMinor(l); }) : out;           /* a Vital preset nearly always has a few small details the engine does not carry: they are not listed as gaps */
+  return out;
 }
+function impLines(p) {
+  var out = impAllLines(p);
+  return p.tier === "vital" ? out.filter(function (l) { return !impIsMinor(l); }) : out;           /* a Vital preset nearly always has a few small details the engine does not carry: they are not counted as gaps, but they are listed (see impMinorLines) */
+}
+/* The small details of a Vital preset that did not come across: kept out of the gap counts, listed in their own closed group so nothing is dropped without a word. */
+function impMinorLines(p) { return p.tier === "vital" ? impAllLines(p).filter(impIsMinor) : []; }
 /* Small details of a Vital preset: a modulation route, a modulator's delay or shape, a filter's drive or key tracking, a filter's partial mix, the amp envelope's delay. The sound is close without them. */
 function impIsMinor(l) {
   return /^not carried: |^LFO \d|key tracking not carried|drive not carried|serial routing not carried|^filter \d mix [\d.]+ not carried|^amp envelope delay|random start phase|transpose quantize|^portamento|slope .* straight glide/.test(l);
@@ -2727,7 +2733,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
   var tk = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; }).slice(0, 6);
   if (tk.length) el("div", "rep-sub", body, "Most common gaps: " + tk.map(function (k) { return k + " ×" + tally[k]; }).join(" · "));
   var nSound = part.filter(function (p) { return impSound(p) > 0; }).length;
-  if (whole.length) el("div", "rep-line", body, whole.length + (ok.length && ok.every(function (p) { return p.tier === "vital"; }) ? " imported with no notable gaps (small details are not listed)." : " imported with nothing left out."));
+  if (whole.length) el("div", "rep-line", body, whole.length + (ok.length && ok.every(function (p) { return p.tier === "vital"; }) ? " imported with no notable gaps (their small details are listed in a closed group below)." : " imported with nothing left out."));
   var nVital = ok.filter(function (p) { return p.tier === "vital"; }).length;
   if (part.length) el("div", "rep-line", body, nSound + " will sound different, an oscillator is silent or plays another wavetable (listed first, in amber). " + (part.length - nSound) + (nVital ? " only miss a detail, an effect or a modulation route: the sound should be close, not identical." : " only miss an effect: the sound is the same, with less of that effect."));
   if (skipped.length) el("div", "rep-line", body, skipped.length + " not imported because “only presets with nothing missing” was chosen. Import again without that choice to get them.");
@@ -2745,9 +2751,14 @@ function impReport(bank, list, sent, failed, landed, existed) {
   group("Imported, with parts missing", part, "part", lines);
   group("Imported complete", whole, "ok", function () { return []; });
   group("Left out (not complete)", skipped, "bad", lines);
+  var minor = ok.filter(function (p) { return impMinorLines(p).length; });
+  if (minor.length) {                                          /* Vital's small details: closed, after the rest */
+    group("Small details not carried (Vital)", minor, "minor", impMinorLines);
+    var mg = body.querySelector("details.rep-g.minor"); if (mg) mg.open = false;
+  }
   group("Not imported", bad, "bad", function (p) { return [p.error || "Could not be sent to the Move"]; });
   if (failed.length) group("Upload problems", [{ name: "Files that did not reach the Move", f: failed }], "bad", function (p) { return p.f; });
-  if (nVital === ok.length && ok.length) el("div", "rep-note", body, "Vital presets are not level-matched (that needs Vital and the native engine): set Volume by ear. Vital's own effects, reverb included, are carried. Small details are not listed (a few modulation routes, a filter's partial mix or drive, the shape of an LFO). The engine is tuned mainly on Serum 2, so a Vital preset is an approximation: it may sound different.");
+  if (nVital === ok.length && ok.length) el("div", "rep-note", body, "Vital presets are not level-matched (that needs Vital and the native engine): set Volume by ear. Vital's own effects, reverb included, are carried. Small details are not counted as gaps but are listed in their own closed group (a few modulation routes, a filter's partial mix or drive, the shape of an LFO). The engine is tuned mainly on Serum 2, so a Vital preset is an approximation: it may sound different.");
   else el("div", "rep-note", body, "Loudness, reverb and width are set by general rules, not matched to Serum (that needs Serum to measure): set Volume and the effects to taste. Granular oscillators are left silent, and Sample oscillators too unless you chose the Samples folders.");
   var again = el("button", "imp-go", body, "Import more");
   again.addEventListener("click", function () { IMP.presets = []; IMP.bankTouched = false; impBuildForm(); impSummary(); });

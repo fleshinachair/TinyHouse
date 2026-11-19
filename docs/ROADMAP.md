@@ -10,21 +10,21 @@ Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 
 1.0 means a stranger can install the release, import their own Serum 2 or Vital presets, and trust it. It does not mean every Serum feature. The gates:
 
-1. **Saved state stops changing.** Anything that alters the preset or state format lands first, because after 1.0 every change needs a migration: macro min / max (#8 below) and wavetable paging past 128 (#9).
+1. **Saved state keeps loading.** From 1.0 a format change only adds keys (their defaults keep the old sound) and keeps reading the old ones; nothing already saved changes meaning. Macro min / max (#8 below) and wavetable paging past 128 (#9) fit that rule, so they no longer block 1.0: a `mac` route converts on load, a page key defaults to page 0. Each release is checked by loading saved presets from earlier ones.
 2. **Correct at any tempo.** A synced LFO follows the Move's BPM (#2), not 120.
-3. **Safe on a clean Move.** A fresh install from the release tarball, an upgrade from 0.9.1 and 0.9.5 with old saved presets still loading, and the heaviest preset profiled with a CPU ceiling (#7).
+3. **Safe to upgrade and to run.** An upgrade from 0.9.1 and 0.9.5 with old saved presets still loading, and the heaviest preset profiled with a CPU ceiling (#7). A fresh install from the release tarball is not tested here: outside beta testers do that.
 4. **The importer is honest.** A dropped preset or feature is reported with its reason; the formant filter (#1) closes the largest group of silent drops.
 5. **Docs and licence.** README, in-module help and a how-to-import walkthrough with screenshots; the GPL text and THIRD-PARTY.md stay in the package.
 
 | Release | Content |
 |---|---|
-| 0.9.6 | Done: tempo-following LFOs, Vital fixes (filter drive law, Filter FX drive, Bit Crush, fine-pitch routes, 64-point LFO shapes, oscillator start phase), `tablor_loadtest` dropped from `deploy.sh`. Clean-install test on a fresh Move still to do before 1.0 |
-| 0.9.7 | State-format changes (macro min / max, wavetable paging), then freeze the format |
-| 0.9.8 | Formant voice filter; the cheap Vital leads (Phaser regression, `lfo_N_stereo`, attack power) |
-| 0.9.9 | Release candidate: performance pass, docs, outside testers on their own Move and presets (Serum testing so far is positive; Vital testers are being sought) |
+| 0.9.6 | Done: tempo-following LFOs, Vital fixes (filter drive law, Filter FX drive, Bit Crush, fine-pitch routes, 64-point LFO shapes, oscillator start phase), `tablor_loadtest` dropped from `deploy.sh` |
+| 0.9.7 | Formant voice filter, Vital and Serum models (new filter types and params only, so old presets load unchanged) |
+| 0.9.8 | The cheap Vital leads: attack power and live filter Blend routes done (Unreleased); the Phaser "regression" is not the filter (see below); `lfo_N_stereo` is not cheap (left and right need separate oscillator renders). The importer lists every dropped preset and feature: the browser report now lists Vital's small details too |
+| 0.9.9 | Release candidate: performance pass, docs, outside beta testers on their own Move (fresh installs included) and presets (Serum testing so far is positive; Vital testers are being sought) |
 | 1.0 | The release candidate has no new bug reports for about a week |
 
-After 1.0: granular gaps, extra effect stages, noise-driven warps, reverb build-up and the Deep House leads below.
+After 1.0: macro min / max and wavetable paging (#8, #9; the current macros work well in use, so the rewrite is not worth its risk before then), granular gaps, extra effect stages, noise-driven warps, reverb build-up and the Deep House leads below.
 
 ## Built since the first roadmap (2026-11-04)
 
@@ -39,12 +39,14 @@ browser, Osc / Sample / Macros / FX tabs, macros you assign yourself); the Move'
 The Vital front end (`converter/vital_import.py`) runs on the same engine; 85 presets from the development folder convert with no errors and sound close. Measured laws and the A/B method are in `docs/VITAL_COVERAGE.md`. Still open:
 
 - Phatt_Bass: the multiband compressor's per-band boost differs from Vital's (top end 3 to 6 dB under) and the delay's side signal is about 5 dB low. KEYS - The House: more reverb and delay in Vital. Space Melody: envelope routes into reverb / delay wet are not carried. PD type 9 (FM from the sample) on Faded Chords / Haven Chords. The Diode filter's drive is still about 22 dB hot.
-- The Phaser filter scores worse than before on Thumpus and KEYS - LoFi Trap (1 to 2 dB); Thumpus also has a Filter FX wet-level lead.
+- The Phaser filter matches the plugin to 1 to 2 dB on its own (`vital_vfilter_probe.py --model 7`); Thumpus (8.5 to 12 dB octave rms) is wrong elsewhere: its 125 to 250 Hz band is 25 dB low and its highs 10 to 16 dB hot with the second filter off as well, so the lead is in the oscillators or a modulation, not the filter. Thumpus also has a Filter FX wet-level lead.
 - Unison morph spread, frame / distortion spread with unison, and Space Station's comb 2 path and dry oscillators.
-- Filter FX steepness, `lfo_N_stereo`, attack power, the spare-envelope route limit, the delay-time route (Whipple), Diode and other model blends.
+- Filter FX steepness, `lfo_N_stereo` (the left and right LFO phases differ by the stereo amount; needs per-channel oscillator renders), the spare-envelope route limit, the delay-time route (Whipple), Diode and other model blends.
 - Waterfall card legibility when waves nest (the scrolled-to frame is highlighted; fewer rows or dotted back rows are options).
 
 ## Next, biggest effect first
+
+For the measured ranking of what still blocks the Serum factory presets (and what Vital gaps remain), by presets unlocked, see [UNLOCK_TABLES.md](UNLOCK_TABLES.md); pick engine work from its top rows.
 
 | # | Item | What it takes |
 |---|---|---|
@@ -55,8 +57,8 @@ The Vital front end (`converter/vital_import.py`) runs on the same engine; 85 pr
 | 5 | **Noise- and Filter-1-driven warps**, DLM, spectral tables, Sync Var; the `Comb2` / `Combs` / `L6` comb variants, Diffuser, Reverb and RM filter models | the largest groups among the factory presets the importer drops; each needs a probe first (`census.py` lists what blocks what) |
 | 6 | **Reverb build-up**: Serum's wet holds its peak 50 to 100 ms longer; tails are 1 to 3 dB under | a build-up stage in `processReverb`; `calibration/dev/reverb_engine_only.py` measures it without a Serum render |
 | 7 | **Performance**: a granular preset in slot 2 was the heaviest on the Move (about 1.3 ms of the 2.67 ms block) | name the preset, then an on-device profile (see the overnight notes in the reports) |
-| 8 | **Macro min / max per control** (as Ableton racks): the macro would set the control to a fixed range instead of moving it by the knob's change | state format change, a min / max editor on the Macros tab, and a rule for a control moved by hand. Gives exact part-way ranges and inversion; today's Match knob button goes away |
-| 9 | **Wavetable lists past 128 on the Move**: the host caps an enum at 128 options, so the WT1 to WT3 Table knobs show only the first 128 tables of the library or pack (the development Move has 346 tables, and one pack can hold more than 128) | split big packs into pages or sub-packs (for example by letter), or a second knob to step through pages; the remote page's own list is separate |
+| 8 | **Macro min / max per control** (as Ableton racks): the macro would set the control to a fixed range instead of moving it by the knob's change | after 1.0, additive: a new `macr` key (`macro:key:min:max`), old `mac` routes converted on load from the saved macro and control values (identical sound), a min / max editor on the Macros tab, last touch wins for a control moved by hand, a control on several macros still adds each macro's change (about 13% of presets). Gives exact part-way ranges; today's Match knob button goes away. Inversion already works (negative travel) |
+| 9 | **Wavetable lists past 128 on the Move**: the host caps an enum at 128 options, so the WT1 to WT3 Table knobs show only the first 128 tables of the library or pack (the development Move has 346 tables, and one pack can hold more than 128) | after 1.0, additive: a page param per table knob (default page 0) so old presets load unchanged, or split big packs into sub-packs by letter; the remote page's own list is separate. Imported presets load tables by name, so only browsing by hand is affected |
 
 ## Still open from the Deep House pack, cause not found (not rechecked since 2026-11-04)
 

@@ -58,7 +58,7 @@ Your presets go nowhere but your Move: the converter runs inside the browser pag
 
 ## Tweaking and playing
 
-**Fine-tuning is on the remote UI**, laid out after Serum: tabs along the top (Osc, Sample, Macros, Filter, Envelopes, FX, Mix, Globals, Demo). The Osc tab has
+**Fine-tuning is on the remote UI**: tabs along the top (Osc, Sample, Macros, Filter, Envelopes, FX, Mix, Globals, Demo). The Osc tab has
 three oscillators with 3D wavetable displays, and the **Sample** tab has the three sample slots (sample or granular, with a picture of the grains). On the **FX** tab every control in an effect's slot wears that effect's colour. Drag the
 filter curve and envelopes, pick wavetables from the list, set the effects, and save the result as a preset. The import report's loudness, reverb and width come
 from general rules, so set **Volume** and the effects to taste.
@@ -131,13 +131,13 @@ There are also **two FX buses**, each a full copy of the rack, with their own os
 - Three wavetable oscillators with unison to 16 voices, a sub and a noise oscillator; stepped or interpolated wavetable position; fixed-pitch and pitch-envelope oscillators.
 - Warps: bend, PWM, sync, even/odd, the filter warps, and FM, phase-distortion, ring-mod and AM warps driven by the Sub or another oscillator (two per oscillator), with LFO and envelope routes into their amounts.
 - Sample and multisample oscillators (from your Samples folders), and the **granular oscillator** (density, length, scan, start, loops, scan range, tempo and BPM modes, random settings, unison).
-- Two filters, in parallel or series: ladder, high-pass and low-pass models, notch, band-reject, Exp, Scream, RM and DJMixer models, and the comb, flange and phase models, each matched to the closest engine filter.
+- Two filters, in parallel or series: ladder, high-pass and low-pass models, notch, band-reject, Exp, Scream, RM and DJMixer models, the formant models, and the comb, flange and phase models, each matched to the closest engine filter.
 - Envelopes, four LFOs, the arpeggiator, and routes from macros, velocity, note number, mod wheel and random sources. A synced LFO follows the Move's tempo.
 - The whole effects chain and both FX buses, including the reverb and convolution reverb of a Split band; Convolution (Space) reverbs use the impulse response from Serum's Impulses folder or the preset.
 
 **Not carried yet**
 - FM, ring-mod and phase-distortion warps driven by the noise or by Filter 1; DLM, spectral tables, Sync Var.
-- Formant and reverb filter models, and the rarer comb variants (Comb2, Combs).
+- Reverb filter models, and the rarer comb variants (Comb2, Combs).
 - A second distortion, compressor or delay; a filter placed before the distortion; sends moved by an LFO or envelope (the Distortion's Wet follows one).
 - The Bode frequency shifter: a preset whose only unsupported effect is a Bode imports without it and the report says so.
 - In Split and SplitMS branches, only the Distortion, Chorus / Flanger / Phaser (Distortion only for SplitMS), EQ and band reverbs are carried; a HyperD, Delay,
@@ -151,7 +151,7 @@ A preset using something in the second list still imports, with that part left o
 Read these before you rely on it for a gig. TinyHouse is an early release (0.9).
 
 - **It sounds similar to the Serum 2 or Vital original, not identical.** Levels, filters, effects and the stereo image are matched against Serum (and, for Vital presets, measured against Vital), but some presets land closer than others. Reverb tails run 1 to 3 dB quieter than Serum's and the wet signal builds up a little faster.
-- **Not every preset comes across.** Of Serum 2's 626 factory presets, 363 import well enough to install. The rest use something listed under "Not carried yet" (the formant filters are the biggest group) and are skipped, or import with that part left out. The import report says which.
+- **Not every preset comes across.** Of Serum 2's 626 factory presets, 363 import well enough to install. The rest use something listed under "Not carried yet" (Bode and some Filter FX models are the biggest groups) and are skipped, or import with that part left out. The import report says which.
 - **Tempo-synced chorus, flanger and phaser (Vital) do not follow the Move's tempo.** They run at their rate at 120 BPM. Synced LFOs do follow it.
 - **Heavy presets use a lot of CPU.** A dense granular preset is the most demanding thing it plays. If a set with several heavy slots crackles, use fewer of them or lighter presets.
 - **The Move's wavetable list stops at 128 tables.** The WT1 to WT3 Table knobs list the first 128 tables of the library, or of the pack you pick with the WT Pack knob. A pack with more than 128 tables shows only its first 128 there.

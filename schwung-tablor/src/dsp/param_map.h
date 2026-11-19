@@ -41,6 +41,12 @@ inline float potAttackTime(float v)
     return std::max(0.003f, 0.0005f + 10.0f * x5);
 }
 
+/* Vital's attack curve power from its pot: (pot - 64) * 20 / 63, so 64 is a straight line (the stage is only drawn when the pot is not 0). */
+inline float attackPower(float v)
+{
+    return (v - 64.0f) * (20.0f / 63.0f);
+}
+
 /* LFO rate: 0.02 .. 20 Hz, exponential. */
 inline float potLfoRate(float v)
 {

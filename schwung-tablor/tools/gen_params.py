@@ -115,8 +115,8 @@ def osc(n):
 # and the third oscillator is there to fill a sound out, not to shape it.
 O1, O2, O3 = osc(1), osc(2), osc(3)
 
-# The voice filters' types: the eight biquads, then Serum's comb and flanger models (comb.h: a feedback comb tuned to the cutoff, Reso its feedback).
-FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +"]
+# The voice filters' types: the eight biquads, then Serum's comb and flanger models (comb.h: a feedback comb tuned to the cutoff, Reso its feedback), then Serum's three Formant models (formant.h: parallel band-pass resonators from measured tables, Freq and the hidden Var move them).
+FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB"]
 
 FILTER = dict(
     freq = pot("flt_freq", "FREQ", "Filter Freq", 127),
@@ -396,7 +396,9 @@ MOD_DST = ["None",
            # The Vital distortion's Drive (a fraction of its 60 dB range), and its filter's Cutoff (a fraction of 128 notes), Res and Blend (a fraction of 0..2), moved by an LFO / envelope route (fx.h setVitalDistMod).
            "Dist Drive", "Dist Flt Cut", "Dist Flt Res", "Dist Flt Blend",
            # An oscillator's pitch in semitones at 2 per unit of the route (a vibrato of a few cents: the 48-per-unit WT Pitch destination steps by 0.76 st over a 127-step amount).
-           "WT1 Fine", "WT2 Fine", "WT3 Fine"]
+           "WT1 Fine", "WT2 Fine", "WT3 Fine",
+           # The voice filters' Blend knob (a fraction of its 0..2 range) of the Blend, Phaser and Comb filters, moved by an LFO / envelope route.
+           "Filter Blend", "Filter 2 Blend"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -765,7 +767,10 @@ BANKS = [
                               row(*[num(f"vdl_s{i}", f"VS{i}", f"Dist Audio LFO Shape {i + 1}", 0, 127, 0) for i in range(8, 16)])]),
     # After Vital Dist LFO, for the same reason. Vital's amplitude-envelope decay curve: 0 keeps the analog decay, 1..127 is a curve power of (pot - 64) * 10 / 63 (a positive power holds the level and
     # then plunges, as Vital's Kick Drum 1 does; the analog decay only falls fast first). Set by the Vital converter.
-    ("Vital Env", False, [row(num("vca_dpow", "VDP", "Vital Amp Decay Curve", 0, 127, 0))]),
+    ("Vital Env", False, [row(num("vca_dpow", "VDP", "Vital Amp Decay Curve", 0, 127, 0)),
+                         row(num("vca_apow", "VAP", "Vital Amp Attack Curve", 0, 127, 0), num("flt_apow", "FAP", "Vital Filter Attack Curve", 0, 127, 0),
+                             num("me1_apow", "M1P", "Vital Mod Env 1 Attack Curve", 0, 127, 0), num("me2_apow", "M2P", "Vital Mod Env 2 Attack Curve", 0, 127, 0))]),
+    # Attack curves (0 keeps the analog attack; 1..127 draws Vital's attack, power (pot - 64) * 20 / 63, 64 a straight line; the amplitude envelope is squared into the gain as Vital does).
     # After Vital Env, for the same reason. Vital's chorus (calibration/vital_chorus_probe.py): Off keeps Serum's. On runs Vital's module: 1-4 voice pairs of two delay lines each (Delay 1 and Delay 2 are log2 seconds over the
     # pot's 0..127 = -10..-5.64), Depth adds up to 30 ms on top of the sweep, Feedback is bipolar (pot 0..127 = -0.95..+0.95) and a band-pass (Cutoff = a MIDI note, pot 0..127 = 8..136, Spread 0..1) sits in the loop. Mix is an equal-power crossfade.
     ("Vital Chorus", False, [row(enum("chor_vital", "VCH", "Vital Chorus", ["Off", "On"], 0), num("chor_voices", "VCV", "Vital Chorus Voices", 1, 4, 1),
@@ -812,8 +817,8 @@ BANKS = [
     ("Vital Filter FX", False, [row(num("fxf_key", "VFK", "FX Filter Key Track", 0, 127, 64))]),
     # After Vital Filter FX, for the same reason. Vital's filter Blend knob on its first five models (Analog, Dirty, Ladder, Digital, Diode): a linear crossfade of the low-pass (0), band-pass (1) and high-pass (2)
     # outputs of the same two- or four-pole filter (calibration/vital_vfilter_probe.py --blend). Type Blend plays the Type's slope (12 / 24 dB) with the blend, Off plays the Type as it is. Blend is 0..2 over the pot. Passband Drop is how many dB the low-pass / high-pass end loses at full resonance (0..20 over the pot, a curve of res^0.9): Vital's Analog filter drops 10, its Digital none.
-    ("Vital Filter Blend", False, [row(enum("flt_vb", "VB1", "Filter Blend Mode", ["Off", "On", "Phaser"], 0), num("flt_blend", "VBL", "Filter Blend", 0, 127, 0),
-                                       enum("flt2_vb", "VB2", "Filter 2 Blend Mode", ["Off", "On", "Phaser"], 0), num("flt2_blend", "VBM", "Filter 2 Blend", 0, 127, 0),
+    ("Vital Filter Blend", False, [row(enum("flt_vb", "VB1", "Filter Blend Mode", ["Off", "On", "Phaser", "Formant"], 0), num("flt_blend", "VBL", "Filter Blend", 0, 127, 0),
+                                       enum("flt2_vb", "VB2", "Filter 2 Blend Mode", ["Off", "On", "Phaser", "Formant"], 0), num("flt2_blend", "VBM", "Filter 2 Blend", 0, 127, 0),
                                        num("flt_vbg", "VD1", "Filter Passband Drop", 0, 127, 0), num("flt2_vbg", "VD2", "Filter 2 Passband Drop", 0, 127, 0))]),
     # After Vital Filter Blend, for the same reason. LFO Tempo: a synced LFO of the source preset (Serum's BeatSync, Vital's Tempo / Dotted / Triplets) plays its Rate pot as the rate at 120 BPM and the host
     # tempo scales it (rate x BPM / 120); Free leaves the rate a fixed Hz, as every LFO was before. No host tempo (0) counts as 120.
@@ -829,6 +834,15 @@ BANKS = [
     # free-running start, 0 starts every voice at the Phase offset (0..127 over one cycle). Two oscillators at the same pitch then keep a fixed phase to each other, so their harmonics add or cancel the same way on every note.
     ("Osc Phase", False, [row(num("wt1_rph", "RP1", "Osc A Random Phase", 0, 127, 127), num("wt2_rph", "RP2", "Osc B Random Phase", 0, 127, 127), num("wt3_rph", "RP3", "Osc C Random Phase", 0, 127, 127)),
                           row(num("wt1_phs", "PS1", "Osc A Phase", 0, 127, 0), num("wt2_phs", "PS2", "Osc B Phase", 0, 127, 0), num("wt3_phs", "PS3", "Osc C Phase", 0, 127, 0))]),
+    # After Osc Phase, for the same reason. Vital's Formant voice filter (Filter Blend Mode = Formant, derived from filters/formant_filter.cpp, formant.h): four band-pass resonators placed between the vowels of the style by X / Y
+    # (0..127 over 0..1); Spread (64 = 0, -1..+1) pulls them together or apart around note 80, Transpose (64 = 0, +-12 semitones) moves them, Resonance is the knob (0..1 over the pot). Style: a-i-u-o or a-o-i-e corners. Set by the Vital converter.
+    ("Vital Formant", False, [row(num("flt_fx", "FMX1", "Formant X", 0, 127, 64), num("flt_fy", "FMY1", "Formant Y", 0, 127, 64), num("flt_fsp", "FMS1", "Formant Spread", 0, 127, 64),
+                                  num("flt_ftr", "FMT1", "Formant Transpose", 0, 127, 64), num("flt_fres", "FMR1", "Formant Resonance", 0, 127, 108), enum("flt_fst", "FMK1", "Formant Style", ["A I U O", "A O I E"], 0)),
+                             row(num("flt2_fx", "FMX2", "Formant 2 X", 0, 127, 64), num("flt2_fy", "FMY2", "Formant 2 Y", 0, 127, 64), num("flt2_fsp", "FMS2", "Formant 2 Spread", 0, 127, 64),
+                                  num("flt2_ftr", "FMT2", "Formant 2 Transpose", 0, 127, 64), num("flt2_fres", "FMR2", "Formant 2 Resonance", 0, 127, 108), enum("flt2_fst", "FMK2", "Formant 2 Style", ["A I U O", "A O I E"], 0))]),
+    # After Vital Formant, for the same reason. Serum's Formant filter models (Filter Type = Formant ONE / TWO / TWB) take the Freq knob and this Var knob (0..127 over Serum's 0..100 %): the resonators sit where the measured
+    # tables put them for that Freq and Var (a Freq / Key Track / envelope move slides them along the same axis). Set by the Serum converter.
+    ("Serum Formant", False, [row(num("flt_var", "FV1", "Filter Var", 0, 127, 0), num("flt2_var", "FV2", "Filter 2 Var", 0, 127, 0))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

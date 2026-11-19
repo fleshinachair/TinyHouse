@@ -381,7 +381,9 @@ RANDOM_AS_MEAN = True
 AMOUNT_SWEEP = False                                                                        # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
 FILTER_BLEND = True                                                                         # the voice filters' Blend knob as a continuous crossfade (engine flt_vb / flt_blend) instead of the nearest LP / BP / HP type
 FILTER_BLEND_MODELS = (0, 1, 2, 3)
+VITAL_FORMANT = True                                                                         # Vital's Formant voice filter (model 5, styles 0 and 1) as its own engine filter (formant.h) instead of a low-pass
 VITAL_PHASER = True                                                                          # Vital's Phaser voice filter (model 7) as its own engine filter (comb.h VitalPhaserFilter) instead of 'Phase 24 +'
+VITAL_BLEND_LIVE = True                                                                 # a route to a voice filter's Blend knob moves it live (engine destinations Filter Blend / Filter 2 Blend) instead of at its mean
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
 FILTER_BLEND_DROP_DB = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}                                  # how far the low-pass / high-pass passband falls at full resonance (engine flt_vbg). Measured per model (Analog 10 dB, Dirty 7.4, Ladder 11, Digital 2: calibration/vital_vfilter_probe.py at res 0.5, taken as res^0.9) but it made the A/B scores worse overall (92 presets: 7.42 without, 7.46 with half, 7.55 with all of it), so it is off
 ROUTE_CURVES = True
@@ -509,6 +511,11 @@ def dest_spec(name: str, s: dict, P: dict, main_filter: int) -> dict | None:
         return {"lr": LR_DST[f"wt{n}_fine"], "x": 1.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}            # Vital's osc Tune spans 2 st, the engine's Fine destination moves 2 st per unit: a vibrato of cents keeps its depth
     if name == "sample_level" and s.get("sample_on"):
         return {"lr": 39, "x": 1.0, "key": "smp_level", "pot": 127.0, "lo": 0, "hi": 127}       # the engine's "Smp1 Level" destination
+    mb = re.fullmatch(r"filter_([12])_blend", name)
+    if mb and VITAL_BLEND_LIVE and s.get(f"filter_{mb.group(1)}_on") and int(s.get(f"filter_{mb.group(1)}_model", 0)) in FILTER_BLEND_MODELS + (6, 7):
+        fi, mdl = int(mb.group(1)), int(s[f"filter_{mb.group(1)}_model"])
+        key = ("cblend" if fi == 1 else "cblend2") if mdl == 6 else ("flt_blend" if fi == 1 else "flt2_blend")
+        return {"lr": 63 + fi, "x": 1.0, "key": key, "pot": 127.0, "lo": 0, "hi": 127}                 # the engine's Filter Blend / Filter 2 Blend destinations: a fraction of the knob's 0..2 range
     if s.get("filter_1_on"):
         if name == "filter_1_cutoff":
             return {"lr": LR_DST["cutoff"], "x": 128.0 / d2m.FILTER_WIDTH, "key": "flt_freq", "pot": 128.0, "lo": 0, "hi": 127}
@@ -749,6 +756,8 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"me{n}_amt"] = pot(64 + 63 * CLAMP(x, -1, 1))
         t4 = lambda key: env_seconds(s, key)
         P[f"me{n}_a"] = d2m.pot_attack(t4(f"env_{k}_attack"))
+        if attack_curve_pot(s, k):
+            P[f"me{n}_apow"] = attack_curve_pot(s, k)
         hp, dsec = env_hold_decay(s, k)
         P[f"me{n}_d"] = d2m.pot_time(dsec)
         P[f"me{n}_s"] = pot(127 * CLAMP(s[f"env_{k}_sustain"], 0, 1))
@@ -909,6 +918,19 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
         sustain = float(s.get(f"env_{n}_sustain", 0.0)) if key.endswith("_decay") else 0.0
         sec *= env_fall_factor(float(s.get(key + "_power", 0.0)), CLAMP(sustain, 0.0, 1.0), squared)
     return sec
+
+
+ATTACK_CURVE = True
+ATTACK_CURVE_MIN = 0.01                                                 # seconds: a shorter attack is the engine's own 3 ms floor either way
+
+
+def attack_curve_pot(s: dict, k: int) -> int:
+    """The engine's hidden attack-curve pot for Vital envelope k: Vital's attack stage is a power curve (env_N_attack_power; 0 is a straight line, a negative power starts slowly, a positive one rises at
+    once) that ends exactly at the set time, which the engine's one-pole attack (about -15 dB after 3 % of the time, a power of about +6) cannot draw (calibration/vital_attack_probe.py).
+    0 keeps the analog attack: used when the attack is too short to hear."""
+    if not ATTACK_CURVE or max(float(s.get(f"env_{k}_attack", 0.0)), 0.0) ** 4 < ATTACK_CURVE_MIN:
+        return 0
+    return pot(64 + CLAMP(float(s.get(f"env_{k}_attack_power", 0.0)), -20.0, 20.0) * 63.0 / 20.0)
 
 
 def fold_fx_routes(s: dict, routes: list) -> int:
@@ -1116,6 +1138,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     # --- amp envelope (seconds are stored as seconds ** 0.25)
     t = lambda key: env_seconds(s, key)
     P["vca_a"] = d2m.pot_attack(t("env_1_attack"))
+    if attack_curve_pot(s, 1):
+        P["vca_apow"] = attack_curve_pot(s, 1)
     dpow = float(s.get("env_1_decay_power", 0.0))
     if dpow >= DPOW_HOLD or dpow <= DPOW_FAST:                                                                 # a strong positive power holds the level and then plunges, which the engine's one-pole fall cannot follow (Kick Drum 1 at 5.5: 24 -> 4.6; powers of 1.8 to 2 fit as before): the engine draws Vital's own curve (adsr.h setDecayPower), over the stored time itself
         P["vca_dpow"] = pot(64 + CLAMP(dpow, -20.0, 20.0) * 63.0 / 20.0)
@@ -1139,14 +1163,24 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         if why:
             notes.append(f"filter {fi}: {why}")
         if VITAL_PHASER and mdl == 7:
-            if LFO_BLEND_MEAN:
+            if LFO_BLEND_MEAN and not VITAL_BLEND_LIVE:
                 bl = CLAMP(bl + 2.0 * lfo_route_mean(s, routes, f"filter_{fi}_blend"), 0.0, 2.0)
             P[f"{pre}_type"] = 1 if sty == 1 else 0                                       # the Style (its sign), carried by the type's low bit (engine flt_vb = 2, comb.h VitalPhaserFilter)
             P[f"{pre}_vb"] = 2
             P[f"{pre}_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
             notes.pop() if why and notes and notes[-1].endswith(why) else None
+        elif VITAL_FORMANT and mdl == 5 and sty in (0, 1):
+            # Vital's Formant model (engine flt_vb = 3, formant.h): four band-pass resonators between the style's vowels. It ignores the cutoff, resonance and key tracking knobs; its own are X / Y, Spread, Transpose and Resonance.
+            P[f"{pre}_vb"] = 3
+            P[f"{pre}_fst"] = sty
+            P[f"{pre}_fx"] = pot(127.0 * CLAMP(s.get(f"filter_{fi}_formant_x", 0.5), 0.0, 1.0))
+            P[f"{pre}_fy"] = pot(127.0 * CLAMP(s.get(f"filter_{fi}_formant_y", 0.5), 0.0, 1.0))
+            P[f"{pre}_fsp"] = pot(64.0 + 64.0 * CLAMP(s.get(f"filter_{fi}_formant_spread", 0.0), -1.0, 1.0))
+            P[f"{pre}_ftr"] = pot(64.0 + CLAMP(s.get(f"filter_{fi}_formant_transpose", 0.0), -12.0, 12.0) * 64.0 / 12.0)
+            P[f"{pre}_fres"] = pot(127.0 * CLAMP(s.get(f"filter_{fi}_formant_resonance", 0.85), 0.0, 1.0))
+            notes.pop() if why and notes and notes[-1].endswith(why) else None
         elif FILTER_BLEND and mdl in FILTER_BLEND_MODELS:
-            if LFO_BLEND_MEAN:
+            if LFO_BLEND_MEAN and not VITAL_BLEND_LIVE:
                 bl = CLAMP(bl + 2.0 * lfo_route_mean(s, routes, f"filter_{fi}_blend"), 0.0, 2.0)               # an LFO moving the Blend knob, at the mean of its shape
             P[f"{pre}_type"] = 1 if sty == 1 else 0                                       # the slope; the Blend crossfade picks low / band / high (engine flt_vb)
             P[f"{pre}_vb"] = 1
@@ -1175,6 +1209,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             amt = ecut[0][2]
             P[f"{pre}_env"] = pot(64 + 63 * CLAMP(amt * 128.0 / d2m.FILTER_WIDTH, -1, 1))
             P["flt_a"] = d2m.pot_attack(t("env_2_attack"))                                    # the engine's two filters share one envelope
+            if attack_curve_pot(s, 2):
+                P["flt_apow"] = attack_curve_pot(s, 2)
             hp2, dsec2 = env_hold_decay(s, 2)
             P["flt_d"] = d2m.pot_time(dsec2)
             P["flt_s"] = pot(127 * CLAMP(s["env_2_sustain"], 0, 1))

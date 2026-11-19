@@ -212,6 +212,29 @@ def bake_phase_distortion(table: np.ndarray, typ: int, amount: float) -> np.ndar
     return out.astype(np.float32)
 
 
+def amount_sweep_table(table: np.ndarray, pos127: float, kind: str, morph_type: int, morph_amt: float, pd_type: int, pd_amt: float) -> np.ndarray:
+    """An oscillator whose distortion (kind 'pd') or morph (kind 'morph') AMOUNT is moved live by an LFO or envelope while its frame stays put: the engine cannot move those amounts, but it moves the table
+    position live, so the table is rebuilt with the amount along its frame axis: frame j is the one static frame with that effect at amount j / 127, and the route drives the position instead. The other effect
+    stays baked at its saved amount."""
+    i0 = int(math.floor(pos127))
+    f = pos127 - i0
+    i1 = min(i0 + 1, table.shape[0] - 1)
+    base = (table[i0] * (1.0 - f) + table[i1] * f)[None].astype(np.float64)
+    rows = []
+    for j in range(128):
+        a = j / 127.0
+        fr = base
+        ma, pa = (a, pd_amt) if kind == "morph" else (morph_amt, a)
+        if morph_type in VM.KNOWN:
+            mo = VM.morph_table(fr, morph_type, CLAMP(ma, 0.0, 1.0))
+            fr = mo if mo is not None else fr
+        if pd_type:
+            bk = bake_phase_distortion(fr, pd_type, CLAMP(pa, 0.0, 1.0))
+            fr = bk if bk is not None else fr
+        rows.append(fr[0])
+    return np.stack(rows).astype(np.float32)
+
+
 def write_table(frames: np.ndarray, wt_root: Path, subdir: str) -> str:
     """Write the table as a Serum-style float WAV (interpolated between frames) and return its path on the Move."""
     digest = hashlib.md5(frames.tobytes()).hexdigest()[:12]
@@ -353,6 +376,8 @@ def env_stage_pot(s: dict, k: int, stage: str) -> int:
 
 
 RANDOM_AS_MEAN = True
+AMOUNT_SWEEP = False                     # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
+ROUTE_CURVES = True
 
 
 def static_source_value(s: dict, src: str):
@@ -366,7 +391,59 @@ def static_source_value(s: dict, src: str):
         return float(s.get("mod_wheel", 0.0))
     if src.startswith("random_") and RANDOM_AS_MEAN:
         return 0.5                                           # a random modulator (0..1, a new value each time) cannot be replayed: its average, which is the middle of its range
+    if src.startswith("const:"):
+        return float(src[6:])                                # a static source already passed through its route's curve (route_static_value)
     return None
+
+
+def line_value(line: dict, x: float) -> float:
+    """Vital's LineGenerator at phase x (line_generator.cpp render): the value is 1 - y, each segment eased by Smooth and bent by its power."""
+    pts = line.get("points") or [0.0, 1.0, 1.0, 0.0]
+    xs, ys = pts[0::2], pts[1::2]
+    pw = line.get("powers") or [0.0] * len(xs)
+    x = CLAMP(x, 0.0, 1.0)
+    if x <= xs[0]:
+        return 1.0 - ys[0]
+    for j in range(len(xs) - 1):
+        if xs[j] <= x <= xs[j + 1]:
+            w = xs[j + 1] - xs[j]
+            if w <= 0.0:
+                return 1.0 - ys[j + 1]
+            t = (x - xs[j]) / w
+            if line.get("smooth"):
+                t = 0.5 * math.sin((t - 0.5) * math.pi) + 0.5
+            p = pw[j] if j < len(pw) else 0.0
+            if abs(p) > 1e-6:
+                t = (math.exp(p * t) - 1.0) / (math.exp(p) - 1.0)
+            return 1.0 - (ys[j] + CLAMP(t, 0.0, 1.0) * (ys[j + 1] - ys[j]))
+    return 1.0 - ys[-1]
+
+
+def route_shaped(s: dict, i: int) -> bool:
+    """Whether route i (0-based) bends its source: a curve other than the identity line (ModulationConnectionProcessor uses the map unless LineGenerator::linear()), or a power."""
+    lm = (s.get("modulations") or [{}] * (i + 1))[i].get("line_mapping")
+    lin = (not lm or (not lm.get("smooth") and lm.get("num_points", 2) == 2 and not (lm.get("powers") or [0.0])[0]
+                      and list(lm.get("points", [0.0, 1.0, 1.0, 0.0]))[:4] == [0.0, 1.0, 1.0, 0.0]))
+    return not lin or abs(float(s.get(f"modulation_{i + 1}_power", 0.0))) > 1e-6
+
+
+def route_static_value(s: dict, i: int, v: float) -> float:
+    """What a static source value v becomes after route i's curve and power (modulation_connection_processor.cpp: value = map(v), then shift = value * (bip + 1) - bip,
+    out = sign(shift) * powerScale(|shift|, -power) * (1 - bip / 2)), given back on the 0..1 scale the route code expects (a bipolar route subtracts 0.5 from it)."""
+    lm = (s.get("modulations") or [{}] * (i + 1))[i].get("line_mapping")
+    bip = 1.0 if s.get(f"modulation_{i + 1}_bipolar") else 0.0
+    p = -float(s.get(f"modulation_{i + 1}_power", 0.0))
+    def one(x):
+        val = CLAMP(line_value(lm, x), -1.0, 1.0) if lm else x
+        sh = val * (bip + 1.0) - bip
+        a = abs(sh)
+        ps = a if abs(p) < 1e-6 else (math.exp(p * a) - 1.0) / (math.exp(p) - 1.0)
+        out = math.copysign(ps, sh) * (1.0 - 0.5 * bip)
+        return out + 0.5 * bip
+    src = (s.get("modulations") or [{}] * (i + 1))[i].get("source", "")
+    if src.startswith("random_"):
+        return sum(one(k / 32.0) for k in range(33)) / 33.0     # the mean of the curve over the random value's range
+    return one(v)
 # Seconds per LFO cycle at 120 BPM for lfo_N_sync = 1 Tempo / 2 Dotted / 3 Triplets, from the tempo index: the same ladder the delay measured (calibration/vital_lfo_probe.py checks it)
 LFO_SYNC_MULT = {1: 1.0, 2: 1.5, 3: 2.0 / 3.0}
 
@@ -477,6 +554,8 @@ def fold_meta_modulation(s: dict) -> tuple[list[float], set[int]]:
         v = static_source_value(s, src)
         if v is None:
             continue
+        if route_shaped(s, j):
+            v = route_static_value(s, j, v)
         metas.append((j, n, v - (0.5 if s.get(f"modulation_{j + 1}_bipolar") else 0.0)))
     amt = list(base)
     for _ in range(4):                                                  # a meta route can itself be scaled by another: iterate to a fixed point
@@ -497,6 +576,10 @@ def keytrack_audio_hz(s: dict, k: int) -> float:
 AUDIO_DIST_DST = {"dist_drive": 0, "dist_flt_cut": 1, "dist_flt_res": 2, "dist_flt_blend": 3}
 
 
+# the engine's cutoff destinations (filter 1, filter 2, Filter FX, distortion filter): an envelope route there sweeps the whole audio band, which a route of the same size to a wavetable position or a
+# drive does not, so they come first when the routes outnumber the engine's two spare envelopes (Railgun: env 3 opens its distortion's low-pass from 8 st, and without it the zap plays dark)
+CUTOFF_DST = {13, 23, 24, 58}
+ENV_CUTOFF_WEIGHT = 2.0
 LAST_DROPPED_ENV: list = []                 # (vital envelope, engine destination index) of the routes the last map_modulation left out for want of a spare envelope (diagnostics: work/ceil_env.py)
 
 
@@ -548,7 +631,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             else:
                 if bip and spec["key"]:                                  # a bipolar envelope is amount * (env - 0.5): the -0.5 part is a fixed offset
                     fold[spec["key"]] = fold.get(spec["key"], 0.0) - 0.5 * a * spec["pot"]
-                me.append((abs(x), int(src[4:]), spec["lr"], a * spec["x"], dest))
+                me.append((abs(x) * (ENV_CUTOFF_WEIGHT if spec["lr"] in CUTOFF_DST else 1.0), int(src[4:]), spec["lr"], a * spec["x"], dest))
         elif src.startswith("macro_control_"):
             k = int(src[len("macro_control_"):])
             if spec["key"] is None:
@@ -557,7 +640,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             v0 = macro_vals[k - 1]
             fold[spec["key"]] = fold.get(spec["key"], 0.0) + a * spec["pot"] * ((v0 - 0.5) if bip else v0)
             mac.append((k, spec["key"], a * spec["pot"], spec["lo"], spec["hi"]))
-        elif src in ("velocity", "mod_wheel"):
+        elif src in ("velocity", "mod_wheel") or src.startswith("const:"):
             if spec["key"] is None:
                 drop(f"{src}->{dest}")
                 continue
@@ -653,10 +736,11 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"me{n}_amt"] = pot(64 + 63 * CLAMP(x, -1, 1))
         t4 = lambda key: env_seconds(s, key)
         P[f"me{n}_a"] = d2m.pot_attack(t4(f"env_{k}_attack"))
-        P[f"me{n}_d"] = d2m.pot_time(t4(f"env_{k}_decay"))
+        hp, dsec = env_hold_decay(s, k)
+        P[f"me{n}_d"] = d2m.pot_time(dsec)
         P[f"me{n}_s"] = pot(127 * CLAMP(s[f"env_{k}_sustain"], 0, 1))
         P[f"me{n}_r"] = d2m.pot_time(t4(f"env_{k}_release"))
-        P[f"me{n}_delay"], P[f"me{n}_hold"] = env_stage_pot(s, k, "delay"), env_stage_pot(s, k, "hold")
+        P[f"me{n}_delay"], P[f"me{n}_hold"] = env_stage_pot(s, k, "delay"), hp
     for w, k, dst, x, dn in me[2:]:
         drop("envelope routes past the engine's 2")
         LAST_DROPPED_ENV.append((k, dn))
@@ -769,6 +853,41 @@ def env_fall_factor(power: float, sustain: float, squared: bool) -> float:
     return _FALL_CACHE[key]
 
 
+ENV_HOLD_FIT = True
+_HOLD_CACHE: dict = {}
+
+
+def env_hold_decay(s: dict, k: int) -> tuple[int, float]:
+    """The engine's Hold pot and decay seconds for Vital envelope k on an engine envelope that keeps its analog decay (the spare and filter envelopes). A Vital decay power well above 0 holds near 1
+    for most of the stage and then falls fast, which no stretch of the engine's fall can draw (Railgun's env 3, power 6.6: the old fit hit its 6x limit); when Vital's own Hold is 0, the flat part goes
+    into the engine's Hold and the fall is fitted to the rest (least squares on the value, over the whole stage). Gives the plain env_seconds fit when that is as good."""
+    hold_pot = env_stage_pot(s, k, "hold")
+    dec = env_seconds(s, f"env_{k}_decay")
+    if not ENV_HOLD_FIT or hold_pot or float(s.get(f"env_{k}_hold", 0.0)) > 0:
+        return hold_pot, dec
+    T = max(float(s[f"env_{k}_decay"]), 0.0) ** 4
+    power, sustain = float(s.get(f"env_{k}_decay_power", 0.0)), CLAMP(float(s.get(f"env_{k}_sustain", 0.0)), 0.0, 1.0)
+    key = (round(power, 2), round(sustain, 2))
+    if key not in _HOLD_CACHE:
+        x = np.linspace(0.0, 1.5, 600)
+        target = np.where(x < 1.0, 1.0 - (1.0 - sustain) * _power_scale(np.minimum(x, 1.0), power), sustain)
+        best, err0 = (1e30, 0.0, 1.0), 1e30
+        for hf in np.linspace(0.0, 0.95, 39):
+            for f in np.geomspace(0.05, 6.0, 120):
+                u = np.maximum(x - hf, 0.0) / f
+                eng = sustain + (1.0 - sustain) * np.where(u < 1.0, 1.0 - _power_scale(np.minimum(u, 1.0), ENGINE_FALL_POWER), 0.0)
+                err = float(((target - eng) ** 2).mean())
+                if err < best[0] - 1e-9:
+                    best = (err, float(hf), float(f))
+            if hf == 0.0:
+                err0 = best[0]
+        _HOLD_CACHE[key] = best[1:] if best[0] < 0.5 * err0 else (0.0, 1.0)                # only when the hold at least halves the error: a near-exponential decay keeps the plain fit
+    hf, f = _HOLD_CACHE[key]
+    if hf <= 0.0 or T <= 0.0:
+        return hold_pot, dec
+    return pot(127.0 * (hf * T / 4.0) ** 0.25), f * T
+
+
 def env_seconds(s: dict, key: str, squared: bool = False) -> float:
     """An envelope time in seconds (the stored value to the 4th), with Vital's decay and release shapes translated to the engine's (see env_fall_factor)."""
     sec = max(float(s[key]), 0.0) ** 4
@@ -823,7 +942,7 @@ def lfo_route_mean(s: dict, routes: list, dest: str) -> float:
     return off
 
 
-VITAL_ENV_RANGE = {"attack": 2.37842, "decay": 2.37842, "release": 2.37842, "sustain": 1.0}      # the stored range of an envelope control (SynthParameters): times are the value ** 4 seconds
+VITAL_ENV_RANGE = {"attack": 2.37842, "decay": 2.37842, "release": 2.37842, "sustain": 1.0, "delay": 1.4142135624, "hold": 1.4142135624}      # the stored range of an envelope control (SynthParameters): times are the value ** 4 seconds
 
 
 # Vital's oscillator-to-oscillator modulation sources (ProducersModule::getFirstModulationIndex / getSecondModulationIndex): the oscillator that "A" and "B" mean for each oscillator
@@ -846,12 +965,15 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         if i in folded:
             continue
         if m.get("source") and m.get("destination") and not s.get(f"modulation_{i + 1}_bypass") and abs(amounts[i]) > 1e-6:
-            routes.append((m["source"], m["destination"], amounts[i], bool(s.get(f"modulation_{i + 1}_bipolar"))))
+            src = m["source"]
+            if ROUTE_CURVES and route_shaped(s, i) and (v := static_source_value(s, src)) is not None:
+                src = f"const:{route_static_value(s, i, v):.6f}"           # a static source through the route's own curve / power: a fixed value
+            routes.append((src, m["destination"], amounts[i], bool(s.get(f"modulation_{i + 1}_bipolar"))))
     # macros and velocity aimed at an envelope's attack / decay / release / sustain: added to the stored value (a fraction of its range; times are the value to the 4th) at the macro's saved value and velocity 100
     s = dict(s)
     env_folded = 0
     for r in list(routes):
-        m = re.fullmatch(r"env_([1-6])_(attack|decay|release|sustain)", r[1]) or re.fullmatch(r"filter_[12]_(mix)", r[1])      # a filter's mix is a 0..1 control like a sustain
+        m = re.fullmatch(r"env_([1-6])_(delay|attack|hold|decay|release|sustain)", r[1]) or re.fullmatch(r"filter_[12]_(mix)", r[1])      # a filter's mix is a 0..1 control like a sustain
         if m and static_source_value(s, r[0]) is not None:
             key, rng = r[1], VITAL_ENV_RANGE.get(m.group(m.lastindex), 1.0)
             v = static_source_value(s, r[0])
@@ -873,6 +995,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     # --- oscillators
     main_filter = 1 if s.get("filter_1_on") else (2 if s.get("filter_2_on") else 0)
     pd_baked: dict[int, bool] = {}
+    sweep_pos: dict[int, int] = {}
     voice_shift = float(s.get("voice_transpose", 0.0)) + float(s.get("voice_tune", 0.0))      # semitones; SynthVoiceHandler adds both to the note that feeds the oscillators (and the filters' key tracking)
     for o in (1, 2, 3):
         k = f"wt{o}"
@@ -882,16 +1005,33 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         table = render_table(s["wavetables"][o - 1], notes)
         smt = int(s.get(f"osc_{o}_spectral_morph_type", 0))
         sma = float(s.get(f"osc_{o}_spectral_morph_amount", 0.0)) + static_route_offset(s, routes, f"osc_{o}_spectral_morph_amount")
-        if table is not None and smt in VM.KNOWN:
+        pdt = int(s.get(f"osc_{o}_distortion_type", 0))
+        pda = CLAMP(float(s.get(f"osc_{o}_distortion_amount", 0.5)) + static_route_offset(s, routes, f"osc_{o}_distortion_amount"), 0.0, 1.0)
+        # a live LFO / envelope route to the distortion or morph amount on an oscillator whose frame is not moved: the amount runs along the table's frame axis (amount_sweep_table), the route drives the position
+        live = {}
+        if AMOUNT_SWEEP and table is not None and not any(r[1] == f"osc_{o}_wave_frame" for r in routes):
+            for kind, dname, ok in (("pd", f"osc_{o}_distortion_amount", 1 <= pdt <= 6), ("morph", f"osc_{o}_spectral_morph_amount", smt in VM.KNOWN)):
+                rs = [r for r in routes if r[1] == dname and r[0].startswith(("lfo_", "env_")) and abs(r[2]) > 0.02]
+                if ok and rs:
+                    live[kind] = rs
+        if live:
+            kind = max(live, key=lambda kd: sum(abs(r[2]) for r in live[kd]))
+            base_amt = pda if kind == "pd" else CLAMP(sma, 0.0, 1.0)
+            table = amount_sweep_table(table, CLAMP(float(s[f"osc_{o}_wave_frame"]) / 255.0 * 127.0, 0.0, 127.0), kind, smt, CLAMP(sma, 0.0, 1.0), pdt, pda)
+            for lst in (routes, left):
+                for r in list(lst):
+                    if r in live[kind]:
+                        lst[lst.index(r)] = (r[0], f"osc_{o}_wave_frame", r[2], r[3])
+            sweep_pos[o] = pot(127.0 * base_amt)
+            pd_baked[o] = kind == "pd" or bool(pdt and 1 <= pdt <= 6)
+            notes.append(f"osc {o}: its {'distortion' if kind == 'pd' else 'morph'} amount is moved live by an LFO / envelope: carried by sweeping the amount along the table position")
+        elif table is not None and smt in VM.KNOWN:
             morphed = VM.morph_table(table, smt, CLAMP(sma, 0.0, 1.0))
             if morphed is not None:
                 table = morphed
                 if any(r[1] == f"osc_{o}_spectral_morph_amount" for r in routes):
                     notes.append(f"osc {o}: spectral morph is baked at its saved amount (macros and velocity folded in), so a live route to it does not move it")
-        pdt = int(s.get(f"osc_{o}_distortion_type", 0))
-        pda = float(s.get(f"osc_{o}_distortion_amount", 0.5)) + static_route_offset(s, routes, f"osc_{o}_distortion_amount")
-        pda = CLAMP(pda, 0.0, 1.0)
-        if table is not None and pdt:
+        if table is not None and pdt and not live:
             baked = bake_phase_distortion(table, pdt, pda)
             if baked is not None:
                 table = baked
@@ -902,7 +1042,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             paths[f"{k}_table"] = write_table(table, wt_root, subdir)
         else:
             notes.append(f"osc {o}: no wavetable source found, plays Init")
-        P[f"{k}_pos"] = pot(s[f"osc_{o}_wave_frame"] / 255.0 * 127)
+        P[f"{k}_pos"] = sweep_pos[o] if o in sweep_pos else pot(s[f"osc_{o}_wave_frame"] / 255.0 * 127)
         P[f"{k}_level"] = pot(127 * s[f"osc_{o}_level"])                                     # GUESS: Vital's level is also squared before the mix
         P[f"{k}_pan"] = pot(64 + 63 * s[f"osc_{o}_pan"])
         P[f"{k}_tune"] = round(float(CLAMP(s[f"osc_{o}_transpose"] + s[f"osc_{o}_tune"] + voice_shift, -72, 72)), 3)      # semitones, fractional (the loader keeps the fraction: a fine tune is -1..1 st); Vital adds the voice's transpose and tune to the note itself
@@ -993,10 +1133,11 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             amt = ecut[0][2]
             P[f"{pre}_env"] = pot(64 + 63 * CLAMP(amt * 128.0 / d2m.FILTER_WIDTH, -1, 1))
             P["flt_a"] = d2m.pot_attack(t("env_2_attack"))                                    # the engine's two filters share one envelope
-            P["flt_d"] = d2m.pot_time(t("env_2_decay"))
+            hp2, dsec2 = env_hold_decay(s, 2)
+            P["flt_d"] = d2m.pot_time(dsec2)
             P["flt_s"] = pot(127 * CLAMP(s["env_2_sustain"], 0, 1))
             P["flt_r"] = d2m.pot_time(t("env_2_release"))
-            P["flt_delay"], P["flt_hold"] = env_stage_pot(s, 2, "delay"), env_stage_pot(s, 2, "hold")
+            P["flt_delay"], P["flt_hold"] = env_stage_pot(s, 2, "delay"), hp2
     if s.get("filter_2_on") and s.get("filter_2_mix", 1.0) >= 0.02:
         carried.append("filter 2")
     if s.get("filter_fx_on"):

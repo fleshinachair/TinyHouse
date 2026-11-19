@@ -274,4 +274,72 @@ struct VitalDirty {
     }
 };
 
+/* Vital's Digital model (filters/digital_svf.cpp, the same filter its EQ is built on): a trapezoidal state-variable filter with a hard clip after it, the 24 dB style two of them with the first
+ * at a fixed resonance and a clip between. Same wiring and level convention as VitalSK. */
+struct VitalDigital {
+    static constexpr float kVitalFull = 0.33650f;
+    bool on = false;
+    bool steep = false;
+    double sr = 44100.0;
+    struct Coefs { float g = 0, k = 1, drive = 1, post = 1, v0 = 0, v1 = 0, v2 = 1; };
+    Coefs cur, tgt;
+    bool fresh = true;
+    float ic1[2] = { 0, 0 }, ic2[2] = { 0, 0 }, pc1[2] = { 0, 0 }, pc2[2] = { 0, 0 };
+
+    void setSampleRate(double v) { sr = v; }
+    void reset() { fresh = true; for (int c = 0; c < 2; c++) ic1[c] = ic2[c] = pc1[c] = pc2[c] = 0.0f; }
+
+    void set(float hz, float res, float driveGain, float blend, bool steep24)
+    {
+        steep = steep24;
+        const float f = std::min(std::max(hz, 1.0f), (float) sr * 0.49f);
+        tgt.g = std::tan(std::min(0.499f, f / (float) sr) * 3.14159265f);
+        const float rp = std::min(std::max(res, 0.0f), 1.0f), adj = rp * rp * rp;
+        tgt.k = 1.0f / (0.5f + 15.5f * adj);
+        tgt.drive = driveGain / (adj * 2.0f + 1.0f);
+        tgt.post = 1.0f / std::sqrt(driveGain);
+        const float b = std::min(std::max(blend - 1.0f, -1.0f), 1.0f);
+        const float band = std::sqrt(1.0f - b * b), lo = b < 0.0f ? -b : 0.0f, hi = b >= 0.0f ? b : 0.0f;
+        tgt.v0 = hi; tgt.v1 = band - tgt.k * hi; tgt.v2 = lo - hi;
+        if (fresh) cur = tgt;
+    }
+
+    void process(float *l, float *r, int n)
+    {
+        const float inv = 1.0f / (float) std::max(n, 1);
+        Coefs d;
+        d.g = (tgt.g - cur.g) * inv; d.k = (tgt.k - cur.k) * inv; d.drive = (tgt.drive - cur.drive) * inv; d.post = (tgt.post - cur.post) * inv;
+        d.v0 = (tgt.v0 - cur.v0) * inv; d.v1 = (tgt.v1 - cur.v1) * inv; d.v2 = (tgt.v2 - cur.v2) * inv;
+        Coefs c = cur;
+        float *io[2] = { l, r };
+        auto clip = [](float v) { return std::min(std::max(v, -1.0f), 1.0f); };
+        for (int i = 0; i < n; i++) {
+            c.g += d.g; c.k += d.k; c.drive += d.drive; c.post += d.post; c.v0 += d.v0; c.v1 += d.v1; c.v2 += d.v2;
+            const float g = c.g, gg = g * g;
+            const float c0 = 1.0f / (gg + g * c.k + 1.0f), c1 = c0 * g, c2 = c0 * gg;
+            const float p0 = 1.0f / (gg + g + 1.0f), p1 = p0 * g, p2 = p0 * gg;
+            for (int ch = 0; ch < 2; ch++) {
+                const float x = io[ch][i] * (1.0f / kVitalFull);
+                float in = c.drive * x, y;
+                if (steep) {
+                    const float v3p = in - pc2[ch];
+                    const float v1p = p0 * pc1[ch] + p1 * v3p;
+                    const float v2p = pc2[ch] + p1 * pc1[ch] + p2 * v3p;
+                    pc1[ch] = 2.0f * v1p - pc1[ch]; pc2[ch] = 2.0f * v2p - pc2[ch];
+                    in = clip(c.v0 * in + c.v1 * v1p + c.v2 * v2p);
+                }
+                const float v3 = in - ic2[ch];
+                const float v1 = c0 * ic1[ch] + c1 * v3;
+                const float v2 = ic2[ch] + c1 * ic1[ch] + c2 * v3;
+                ic1[ch] = 2.0f * v1 - ic1[ch]; ic2[ch] = 2.0f * v2 - ic2[ch];
+                y = clip(c.v0 * in + c.v1 * v1 + c.v2 * v2);
+                io[ch][i] = y * c.post * kVitalFull;
+            }
+        }
+        cur = tgt;
+        fresh = false;
+        for (int ch = 0; ch < 2; ch++) { float *v[] = { &ic1[ch], &ic2[ch], &pc1[ch], &pc2[ch] }; for (float *q : v) if (std::fabs(*q) < 1e-15f) *q = 0.0f; }
+    }
+};
+
 } // namespace tb

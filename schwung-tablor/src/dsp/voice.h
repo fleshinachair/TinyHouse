@@ -240,7 +240,7 @@ public:
         filter2.setSampleRate(sr);
         vb1.setSampleRate(sr);
         vb2.setSampleRate(sr);
-        sk1.setSampleRate(sr); sk2.setSampleRate(sr); ld1.setSampleRate(sr); ld2.setSampleRate(sr); dt1.setSampleRate(sr); dt2.setSampleRate(sr);
+        sk1.setSampleRate(sr); sk2.setSampleRate(sr); ld1.setSampleRate(sr); ld2.setSampleRate(sr); dt1.setSampleRate(sr); dt2.setSampleRate(sr); dg1.setSampleRate(sr); dg2.setSampleRate(sr);
         comb.setSampleRate(sr);
         comb2.setSampleRate(sr);
         phaser.setSampleRate(sr);
@@ -307,7 +307,7 @@ public:
         fltPrev = -1.0f;
         filter2.reset();
         fltPrev2 = -1.0f;
-        vb1.reset(); vb2.reset(); sk1.reset(); sk2.reset(); ld1.reset(); ld2.reset(); dt1.reset(); dt2.reset();
+        vb1.reset(); vb2.reset(); sk1.reset(); sk2.reset(); ld1.reset(); ld2.reset(); dt1.reset(); dt2.reset(); dg1.reset(); dg2.reset();
         comb.reset();
         comb2.reset();
         phaser.reset();
@@ -681,11 +681,12 @@ public:
             const bool mixing2 = mixB < 0.999f;
             if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
             const bool plain2 = !(fmOn2 || vph2.on || combType2);                                                   /* Vital's analog filter takes 1 / (1 + 2 res) off the passband whatever its drive; a comb, phaser or formant filter does not */
-            const bool driving2 = !sk2.on && !ld2.on && !dt2.on && (drive2Mix > 0.0f || drive2MixTarget > 0.0f || (vDriveLaw && plain2 && P[TB_P_FLT2_RES] > 0.0f));
+            const bool driving2 = !sk2.on && !ld2.on && !dt2.on && !dg2.on && (drive2Mix > 0.0f || drive2MixTarget > 0.0f || (vDriveLaw && plain2 && P[TB_P_FLT2_RES] > 0.0f));
             if (driving2) { if (vDriveLaw) { const float a2 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES])); vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, a2, plain2 ? a2 : 1.0f); } else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
             if (sk2.on) sk2.process(pre2L, pre2R, n);
             else if (ld2.on) ld2.process(pre2L, pre2R, n);
             else if (dt2.on) dt2.process(pre2L, pre2R, n);
+            else if (dg2.on) dg2.process(pre2L, pre2R, n);
             else if (fmOn2) fm2.process(pre2L, pre2R, n, fmSet2);
             else if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
@@ -708,11 +709,12 @@ public:
         const bool mixing = mixA < 0.999f;
         if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
         const bool plain1 = !(fmOn1 || vph1.on || combType);
-        const bool driving = !sk1.on && !ld1.on && !dt1.on && (driveMix > 0.0f || driveMixTarget > 0.0f || (vDriveLaw && plain1 && P[TB_P_FLT_RES] > 0.0f));
+        const bool driving = !sk1.on && !ld1.on && !dt1.on && !dg1.on && (driveMix > 0.0f || driveMixTarget > 0.0f || (vDriveLaw && plain1 && P[TB_P_FLT_RES] > 0.0f));
         if (driving) { if (vDriveLaw) { const float a1 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES])); vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, a1, plain1 ? a1 : 1.0f); } else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
         if (sk1.on) sk1.process(preL, preR, n);
         else if (ld1.on) ld1.process(preL, preR, n);
         else if (dt1.on) dt1.process(preL, preR, n);
+        else if (dg1.on) dg1.process(preL, preR, n);
         else if (fmOn1) fm1.process(preL, preR, n, fmSet1);
         else if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
@@ -1103,8 +1105,10 @@ private:
             if (sk1.on) sk1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
             ld1.on = P[TB_P_FLT_VSK] >= 1.5f && P[TB_P_FLT_VSK] < 2.5f && !combType && ft < 8;
             if (ld1.on) ld1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
-            dt1.on = P[TB_P_FLT_VSK] >= 2.5f && !combType && ft < 8;
+            dt1.on = P[TB_P_FLT_VSK] >= 2.5f && P[TB_P_FLT_VSK] < 3.5f && !combType && ft < 8;
             if (dt1.on) dt1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
+            dg1.on = P[TB_P_FLT_VSK] >= 3.5f && !combType && ft < 8;
+            if (dg1.on) dg1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
             fmOn1 = P[TB_P_FLT_VB] >= 2.5f || ft >= 16;     /* Vital's Formant model (X / Y between the style's vowels, Spread and Transpose, Resonance) or one of Serum's (Freq and Var: the measured tables), formant.h */
             if (ft >= 16) fmSet1 = serumFormantSet(ft - 16, n * kSerumFormantPerNote, P[TB_P_FLT_VAR] * (1.0f / 127.0f), res);
             else if (fmOn1) fmSet1 = vitalFormantSet((int) P[TB_P_FLT_FST], P[TB_P_FLT_FX] * (1.0f / 127.0f), P[TB_P_FLT_FY] * (1.0f / 127.0f), (P[TB_P_FLT_FSP] - 64.0f) * (1.0f / 64.0f),
@@ -1135,8 +1139,10 @@ private:
             if (sk2.on) sk2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
             ld2.on = P[TB_P_FLT2_VSK] >= 1.5f && P[TB_P_FLT2_VSK] < 2.5f && !combType2 && ft2 < 8;
             if (ld2.on) ld2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
-            dt2.on = P[TB_P_FLT2_VSK] >= 2.5f && !combType2 && ft2 < 8;
+            dt2.on = P[TB_P_FLT2_VSK] >= 2.5f && P[TB_P_FLT2_VSK] < 3.5f && !combType2 && ft2 < 8;
             if (dt2.on) dt2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
+            dg2.on = P[TB_P_FLT2_VSK] >= 3.5f && !combType2 && ft2 < 8;
+            if (dg2.on) dg2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
             fmOn2 = P[TB_P_FLT2_VB] >= 2.5f || ft2 >= 16;
             if (ft2 >= 16) fmSet2 = serumFormantSet(ft2 - 16, n2 * kSerumFormantPerNote, P[TB_P_FLT2_VAR] * (1.0f / 127.0f), combRes2);
             else if (fmOn2) fmSet2 = vitalFormantSet((int) P[TB_P_FLT2_FST], P[TB_P_FLT2_FX] * (1.0f / 127.0f), P[TB_P_FLT2_FY] * (1.0f / 127.0f), (P[TB_P_FLT2_FSP] - 64.0f) * (1.0f / 64.0f),
@@ -1273,6 +1279,7 @@ private:
     VitalSK sk1, sk2;                             /* Vital's Analog (Sallen-Key) filter, used in place of everything else for a filter while .on (vital_sk.h) */
     VitalLadder ld1, ld2;                         /* Vital's Ladder filter, the same way */
     VitalDirty dt1, dt2;                          /* and its Dirty filter */
+    VitalDigital dg1, dg2;                        /* and its Digital filter */
     CombFilter comb, comb2;                       /* the comb / flange / phaser filter types (comb.h); 0 = the biquad is used, 1..4 = Comb +, Comb -, Flange +, Flange -, 5..8 = Phase 12..48 + */
     PhaserFilter phaser, phaser2;
     VitalPhaserFilter vph1, vph2;                 /* Vital's Phaser voice filter (comb.h); flt_vb = 2 */

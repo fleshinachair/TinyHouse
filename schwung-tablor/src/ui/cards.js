@@ -2,11 +2,13 @@
  * TinyHouse's parameter cards (Schwung `card_script`): a near full-screen picture of the wavetables, raised while one of the three
  * Wavetable Position knobs (wt1_pos .. wt3_pos) is held or turned, gone when you let go (the host takes it down; this file owns no timer).
  *
- * One knob held: its oscillator's wave at the current position fills the card, with the frame number and a position bar.
- * Two or three knobs touched in the same gesture: the card splits into that many panels side by side, each with its own wave, and the
- * oscillator you are moving now has its label inverted. The host hands a card only the knob it raised the card for, so "touched in the
- * same gesture" is remembered here: an oscillator joins when its card is drawn and the set is cleared when the card has been down
- * for a moment (the draws are a frame apart while the card is up).
+ * One knob held: its oscillator's whole table fills the card as a 3D waterfall like the remote panel's (frame 0 in front, the later frames
+ * stacked behind it, nearer frames hiding the ones behind), with the frame at the knob's position drawn thick, and the frame number in the header.
+ * Two or three knobs moved in the same gesture: the card becomes that many rows, one under the other, each with the frame at its knob's
+ * position drawn flat and full width (a waterfall that small is unreadable), and the oscillator you are moving now has its label inverted. The host hands a card only the knob it raised the card for (the last one touched),
+ * so "moved in the same gesture" is worked out here: an oscillator joins when its card is drawn, or when its position changes in the page's
+ * value map while another knob's card is up, and the set is cleared when the card has been down for a moment (the draws are a frame apart
+ * while the card is up). A knob whose position is driven by modulation moves in that map too, so it can join without being touched.
  *
  * The wave comes from the shape digests the DSP publishes (wt1_shape .. wt3_shape, "frames,samples,data", 63 levels a sample), the same
  * strings canvas.js draws on the Tone page. Nothing here reads a parameter: the card is handed the page's value map. An oscillator that
@@ -21,7 +23,7 @@
     const Q = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
     const digestCache = {}, waveCache = {};
     const GAP_MS = 800;                       /* the card is redrawn every frame while it is up; a longer silence is a new gesture */
-    let active = [false, false, false], lastMs = -1e12, lastWho = 0;
+    let active = [false, false, false], lastPos = [null, null, null], lastMs = -1e12, lastWho = 0;
 
     /* the host may prefix keys ("synth:wt1_pos") or add ":effective" */
     function val(values, key) {
@@ -57,22 +59,83 @@
         return d;
     }
 
-    function colsToRects(cols) {
-        const out = [];
-        for (const c of cols) {
-            const x = c[0], y0 = c[1], y1 = c[2], last = out[out.length - 1];
-            if (last && last[3] === y1 - y0 + 1 && last[1] === y0 && last[0] + last[2] === x) last[2]++;
-            else out.push([x, y0, 1, y1 - y0 + 1]);
+    /*
+     * THE WATERFALL: a lone panel draws the whole table as the remote panel does (frame 0 in front at the lower right, the later frames
+     * stacked behind it up and to the left, each hiding what is behind it) with the frame at the knob's position drawn thick.
+     * It is worked out into a bitmap here once per (digest, frame, size), then covered with as few rectangles as it can be, because
+     * every rectangle is one bridge call: the plan steps down to fewer rows and wider steps until it fits RECT_BUDGET.
+     */
+    const RECT_BUDGET = 130, TIERS = [[8, 1], [7, 2], [6, 2], [5, 3], [4, 4], [3, 6]];
+
+    function rowPlan(F, frame, R) {
+        const idx = [];
+        for (let k = 0; k < R; k++) idx.push(F === 1 ? 0 : Math.round((k * (F - 1)) / (R - 1)));
+        let near = 0, best = 1e9;
+        for (let k = 0; k < R; k++) { const dd = Math.abs(idx[k] - frame); if (dd < best) { best = dd; near = k; } }
+        idx[near] = frame;
+        return idx.filter((v, k) => idx.indexOf(v) === k);
+    }
+
+    function waterfallBitmap(d, frame, w, h, R, step) {
+        const F = d.frames, S = d.samples, rows = rowPlan(F, frame, R);
+        const dx = Math.round(w * 0.2), dy = Math.round(h * 0.34), fw = w - dx - 1, fh = h - dy - 1, amp = fh * 0.46;
+        const bm = new Uint8Array(w * h), hor = new Int16Array(w).fill(h + 8), ys = new Int16Array(fw);
+        for (let k = 0; k < rows.length; k++) {                                   /* front (frame 0) first, so what is nearer is already on the page */
+            const i = rows[k], t = F === 1 ? 1 : i / (F - 1), x0 = Math.round(dx * (1 - t)), yMid = Math.round(dy * (1 - t) + fh * 0.5), cur = i === frame;
+            for (let x = 0; x < fw; x++) {
+                const gx = step > 1 ? Math.floor(x / step) * step + (step >> 1) : x;
+                const sx = (Math.min(gx, fw - 1) * (S - 1)) / (fw - 1), a = Math.floor(sx), b = Math.min(S - 1, a + 1), f = sx - a;
+                ys[x] = Math.round(yMid - ((d.data[i * S + a] * (1 - f) + d.data[i * S + b] * f) / 63 * 2 - 1) * amp);
+            }
+            const top = new Int16Array(fw);
+            for (let x = 0; x < fw; x++) {
+                const X = x0 + x, y0 = x > 0 && (step === 1 || x % step === 0) ? Math.min(ys[x], ys[x - 1]) : ys[x], y1 = x > 0 && (step === 1 || x % step === 0) ? Math.max(ys[x], ys[x - 1]) : ys[x];
+                for (let y = y0; y <= y1 + (cur ? 1 : 0); y++) if (y >= 0 && y < h && y < hor[X]) bm[y * w + X] = 1;
+                top[x] = y0;
+            }
+            for (let x = 0; x < fw; x++) if (top[x] < hor[x0 + x]) hor[x0 + x] = top[x];
+        }
+        return bm;
+    }
+
+    /* horizontal runs per pixel row, a run that repeats on the next row is stretched down instead of drawn again */
+    function bitmapRects(bm, w, h) {
+        const out = []; let open = new Map();
+        for (let y = 0; y < h; y++) {
+            const next = new Map(); let x = 0;
+            while (x < w) {
+                if (!bm[y * w + x]) { x++; continue; }
+                let e = x; while (e < w && bm[y * w + e]) e++;
+                const key = x * 256 + (e - x), o = open.get(key);
+                if (o) { o[3]++; next.set(key, o); } else { const r = [x, y, e - x, 1]; out.push(r); next.set(key, r); }
+                x = e;
+            }
+            open = next;
         }
         return out;
     }
 
-    /* one wavetable frame as a line across w x h (a column spans from the previous column's level to its own, so a steep edge is solid) */
-    function waveRects(d, frame, w, h, tag) {
-        const key = tag + ":" + frame + ":" + w + "x" + h;
-        const hit = waveCache[key];
+    function waterfallRects(d, frame, w, h, tag, budget) {
+        const key = "w" + tag + ":" + frame + ":" + w + "x" + h, hit = waveCache[key];
         if (hit && hit.d === d) return hit.r;
-        const base = frame * d.samples, cols = [];
+        d.tiers = d.tiers || {};
+        let r = null, tier = d.tiers[w] || 0;                                    /* a table that needed a coarser plan once starts there: one pass per frame, not six */
+        for (; tier < TIERS.length; tier++) {
+            r = bitmapRects(waterfallBitmap(d, frame, w, h, TIERS[tier][0], TIERS[tier][1]), w, h);
+            if (r.length <= budget) break;
+        }
+        d.tiers[w] = Math.min(tier, TIERS.length - 1);
+        const keys = Object.keys(waveCache);
+        if (keys.length > 60) delete waveCache[keys[0]];
+        waveCache[key] = { d, r };
+        return r;
+    }
+
+    /* one wavetable frame as a line across w x h (a column spans from the previous column's level to its own, so a steep edge is solid), as merged rectangles */
+    function flatRects(d, frame, w, h, tag) {
+        const key = "f" + tag + ":" + frame + ":" + w + "x" + h, hit = waveCache[key];
+        if (hit && hit.d === d) return hit.r;
+        const base = frame * d.samples, out = [];
         let prev = null;
         for (let x = 0; x < w; x++) {
             const a = Math.floor((x * d.samples) / w), b = Math.max(a + 1, Math.floor(((x + 1) * d.samples) / w));
@@ -81,51 +144,62 @@
             let y0 = Math.round((1 - hi / 63) * (h - 1)), y1 = Math.round((1 - lo / 63) * (h - 1));
             if (prev !== null) { if (prev < y0) y0 = prev; else if (prev > y1) y1 = prev; }
             prev = Math.round((1 - ((lo + hi) / 2) / 63) * (h - 1));
-            cols.push([x, y0, y1]);
+            const last = out[out.length - 1];
+            if (last && last[3] === y1 - y0 + 1 && last[1] === y0 && last[0] + last[2] === x) last[2]++;
+            else out.push([x, y0, 1, y1 - y0 + 1]);
         }
-        const r = colsToRects(cols);
         const keys = Object.keys(waveCache);
         if (keys.length > 60) delete waveCache[keys[0]];
-        waveCache[key] = { d, r };
-        return r;
+        waveCache[key] = { d, r: out };
+        return out;
     }
 
     function draw(ctx, o, which) {
         o = o || {};
         const W = ctx.width, H = ctx.height, values = o && o.values;
         const now = num(o && o.nowMs, Date.now());
-        if (now - lastMs > GAP_MS || now < lastMs) active = [false, false, false];
+        const fresh = now - lastMs > GAP_MS || now < lastMs;
+        if (fresh) { active = [false, false, false]; lastPos = [null, null, null]; }
+        /* The host raises the card for ONE knob (the last touched), so a second knob is noticed by its position moving in the page's value map. */
+        for (let i = 0; i < 3; i++) {
+            const v = i === which && o.raw !== null && o.raw !== undefined && Number.isFinite(Number(o.raw)) ? Number(o.raw) : num(val(values, "wt" + (i + 1) + "_pos"), null);
+            if (!fresh && i !== which && v !== null && lastPos[i] !== null && Math.abs(v - lastPos[i]) >= 0.5) active[i] = true;
+            if (v !== null) lastPos[i] = v;
+        }
         active[which] = true; lastMs = now; lastWho = which;
         const idx = [0, 1, 2].filter((i) => active[i]);
-        const n = idx.length, gap = 3, pw = Math.floor((W - gap * (n - 1)) / n);
+        const n = idx.length;
         const on = val(values, "wt_on");
         const onList = typeof on === "string" ? on.split(",") : null;
-        for (let k = 0; k < n; k++) {
-            const i = idx[k], x0 = k * (pw + gap), cur = i === which;
+        const state = (i) => {
+            const cur = i === which;
             const pos = cur && o.raw !== null && o.raw !== undefined && Number.isFinite(Number(o.raw)) ? Number(o.raw) : num(val(values, "wt" + (i + 1) + "_pos"), null);   /* the knob in your hand is read live */
             const d = parseDigest(val(values, "wt" + (i + 1) + "_shape"));
-            const off = onList !== null && onList[i] === "0";
             const frame = d && pos !== null ? Math.max(0, Math.min(d.frames - 1, Math.round((Math.max(0, Math.min(127, pos)) / 127) * (d.frames - 1)))) : 0;
-            /* the header: "WT1" with the frame number, or just the digit when the panel is narrow; the one being turned is inverted */
-            const head = "WT" + (i + 1), tail = d && pos !== null ? String(frame + 1) : "";
-            let label = head;
-            if (ctx.textWidth(head + " " + tail) > pw) label = String(i + 1);
-            const text = tail && ctx.textWidth(label + " " + tail) <= pw ? label + " " + tail : label;
-            const tw = ctx.textWidth(text);
-            if (cur && n > 1) ctx.fillRect(x0, 0, Math.min(pw, tw + 2), 8, 1);
-            ctx.print(x0 + (cur && n > 1 ? 1 : 0), 0, text, cur && n > 1 ? 0 : 1);
-            if (n === 1 && d) {                                                         /* a lone panel has room for "of N" and the knob's own reading */
-                const right = (typeof o.value === "string" ? o.value : "") || "";
-                if (right) ctx.print(W - ctx.textWidth(right), 0, right, 1);
-            }
-            const top = 10, bar = 5, wh = H - top - bar - 2;
-            if (off || !d || pos === null) { ctx.fillRect(x0 + (pw >> 1) - 3, top + (wh >> 1), 7, 1, 1); continue; }   /* off, not read yet, or no position: a dash */
-            for (const q of waveRects(d, frame, pw, wh, "c" + i)) ctx.fillRect(x0 + q[0], top + q[1], q[2], q[3], 1);
-            const by = H - bar;                                                         /* the position bar: an outline, a block at the frame */
-            ctx.fillRect(x0, by, pw, 1, 1); ctx.fillRect(x0, by + bar - 1, pw, 1, 1);
-            ctx.fillRect(x0, by, 1, bar, 1); ctx.fillRect(x0 + pw - 1, by, 1, bar, 1);
-            const t = d.frames > 1 ? frame / (d.frames - 1) : 0, bw = 3;
-            ctx.fillRect(x0 + 1 + Math.round(t * (pw - 2 - bw)), by + 1, bw, bar - 2, 1);
+            return { cur, pos, d, frame, off: onList !== null && onList[i] === "0" };
+        };
+        if (n === 1) {                                                                  /* one knob: the whole table as a waterfall, the frame number and the knob's reading on top */
+            const i = idx[0], st = state(i);
+            const tail = st.d && st.pos !== null ? " " + (st.frame + 1) : "";
+            ctx.print(0, 0, "WT" + (i + 1) + tail, 1);
+            const right = (typeof o.value === "string" ? o.value : "") || "";
+            if (right && st.d) ctx.print(W - ctx.textWidth(right), 0, right, 1);
+            if (st.off || !st.d || st.pos === null) { ctx.fillRect((W >> 1) - 3, 9 + ((H - 9) >> 1), 7, 1, 1); return; }   /* off, not read yet, or no position: a dash */
+            for (const q of waterfallRects(st.d, st.frame, W, H - 9, "c" + i, RECT_BUDGET)) ctx.fillRect(q[0], 9 + q[1], q[2], q[3], 1);
+            return;
+        }
+        /* two or three knobs: one row each, stacked, the frame in your hand drawn flat and full width (a waterfall that small is unreadable), the knob you are moving now with its label inverted */
+        const gap = 2, rh = Math.floor((H - gap * (n - 1)) / n), lw = Math.min(ctx.textWidth("1:00") + 2, 28);
+        for (let k = 0; k < n; k++) {
+            const i = idx[k], st = state(i), y0 = k * (rh + gap);
+            const text = (i + 1) + (st.d && st.pos !== null ? ":" + (st.frame + 1) : "");
+            if (st.cur) ctx.fillRect(0, y0, lw - 1, 8, 1);
+            ctx.print(st.cur ? 1 : 0, y0, text, st.cur ? 0 : 1);
+            if (rh >= 20) ctx.fillRect(0, y0 + 9, lw - 3, 1, 1);
+            const x0 = lw + 1, ww = W - x0, hh = rh;
+            ctx.fillRect(x0 - 1, y0, 1, hh, 1);                                         /* a rule between the label and the wave */
+            if (st.off || !st.d || st.pos === null) { ctx.fillRect(x0 + (ww >> 1) - 3, y0 + (hh >> 1), 7, 1, 1); continue; }
+            for (const q of flatRects(st.d, st.frame, ww, hh, "r" + i)) ctx.fillRect(x0 + q[0], y0 + q[1], q[2], q[3], 1);
         }
     }
 
@@ -133,5 +207,5 @@
     globalThis.tinyhouse_wave_card_2 = (ctx, o) => draw(ctx, o, 1);
     globalThis.tinyhouse_wave_card_3 = (ctx, o) => draw(ctx, o, 2);
     /* test seam (tests/cards_test.mjs) */
-    globalThis.TINYHOUSE_CARDS_FOR_TEST = { draw, parseDigest, reset: () => { active = [false, false, false]; lastMs = -1e12; } };
+    globalThis.TINYHOUSE_CARDS_FOR_TEST = { draw, parseDigest, reset: () => { active = [false, false, false]; lastPos = [null, null, null]; lastMs = -1e12; } };
 })();

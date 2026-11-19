@@ -1,13 +1,13 @@
 # TinyHouse
 
-**A wavetable synth for the Ableton Move, inspired by Serum 2, that plays your own Serum 2 and Vital presets.**
+**A wavetable synth for the Ableton Move, inspired by Serum 2 and Vital, that plays your own Serum 2 and Vital presets.**
 
 TinyHouse is a sound-generator module for [Schwung](https://github.com/charlesvestal/schwung) (the Move's open module host). You bring Serum 2 presets (or [Vital](https://vital.audio) ones: `.vital` files, loose or in a `.zip`, are imported the same way);
 TinyHouse converts them, and they play on the Move as native patches: polyphonic, with unison, filters, modulation, eight macros, a sample and granular
 oscillator, and a full effects rack.
 
-TinyHouse is its own engine on a small ARM box, not a copy of Serum: **expect an imported preset or pack to sound similar to, and clearly related to, the Serum 2
-original, but not the same.** Some come out very close, some less so, and a bank will always have a few that miss. Some features are not built yet (see
+TinyHouse is its own engine on a small ARM box, not a copy of Serum or Vital: **expect an imported preset or pack to sound similar to, and clearly related to, the Serum 2
+or Vital original, but not the same.** Some come out very close, some less so, and a bank will always have a few that miss. Some features are not built yet (see
 [What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound; the import report says which. The same goes for Vital presets: the engine emulates Vital's oscillators, envelopes, filters and effects loosely, not exactly, and a Vital preset is not level-matched, so set its volume by ear.
 
 **This is experimental.** Importing in the browser is the easy route; it sets loudness, reverb and width from general rules. If you have Serum 2 on Windows and
@@ -150,7 +150,7 @@ A preset using something in the second list still imports, with that part left o
 
 Read these before you rely on it for a gig. TinyHouse is an early release (0.9).
 
-- **It sounds similar to the Serum 2 original, not identical.** Levels, filters, effects and the stereo image are matched against Serum, but some presets land closer than others. Reverb tails run 1 to 3 dB quieter than Serum's and the wet signal builds up a little faster.
+- **It sounds similar to the Serum 2 or Vital original, not identical.** Levels, filters, effects and the stereo image are matched against Serum (and, for Vital presets, measured against Vital), but some presets land closer than others. Reverb tails run 1 to 3 dB quieter than Serum's and the wet signal builds up a little faster.
 - **Not every preset comes across.** Of Serum 2's 626 factory presets, 363 import well enough to install. The rest use something listed under "Not carried yet" (the formant filters are the biggest group) and are skipped, or import with that part left out. The import report says which.
 - **Synced LFOs do not follow the Move's tempo.** They run at their rate at 120 BPM.
 - **Heavy presets use a lot of CPU.** A dense granular preset is the most demanding thing it plays. If a set with several heavy slots crackles, use fewer of them or lighter presets.

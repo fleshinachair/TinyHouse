@@ -43,14 +43,27 @@ const one = run(0, 1000);
 check(lit(one) > 200 && one.oob === 0, "one knob: a wave fills the card, inside it");
 check(one.texts[0].startsWith("WT1"), "one knob: header names the oscillator, got " + one.texts[0]);
 check(one.calls <= 140, "one knob costs " + one.calls + " draw calls (<= 140)");
+// the lone panel is a stacked waterfall: lit pixels in the upper rows too (the later frames sit behind and above the front one)
+check(one.px.slice(10 * W, 24 * W).some((v) => v), "one knob: the waterfall reaches up behind the front frame");
+// every plan stays inside the rectangle budget, whatever the table
+for (const kind of ["sin", "saw"]) { T.reset(); const c = run(kind === "sin" ? 0 : 1, 3000, { raw: 77 }); check(c.calls <= 140, kind + " waterfall costs " + c.calls + " calls"); }
 // the wave follows the position
 check(!same(run(0, 1016, { raw: 10 }), run(0, 1032, { raw: 60 })), "the wave follows the position");
 // a second knob in the same gesture: the card splits in two, both waves drawn
 T.reset(); run(0, 2000); const two = run(1, 2016);
-check(two.oob === 0 && two.calls <= 160, "two knobs: inside the card, " + two.calls + " calls");
+check(two.oob === 0 && two.calls <= 180, "two knobs: inside the card, " + two.calls + " calls");
 check(two.texts.length >= 2 && two.texts[0].includes("1") && two.texts[1].includes("2"), "two knobs: both oscillators are labelled " + JSON.stringify(two.texts));
+// a second knob turned while the first one's card is the one up (the host only draws the last touched): it joins through its position
+T.reset(); run(0, 2500); const v2 = { ...values, wt2_pos: 90 };
+{ const c = mockCtx(); T.draw(c, { values: v2, nowMs: 2516, raw: 10, value: "10" }, 0);
+  check(c.texts.length >= 2 && c.texts.some((x) => x.includes("2")), "a knob that moved in the value map joins the card " + JSON.stringify(c.texts)); }
+{ const c = mockCtx(); T.draw(c, { values: v2, nowMs: 2532, raw: 10, value: "10" }, 0);
+  check(c.texts.length >= 2, "a panel stays while the card is up even if its knob has stopped"); }
+// a position that was only ever static never joins
+T.reset(); run(0, 2600); const still = run(0, 2616);
+check(still.texts.filter((x) => x.startsWith("WT")).length === 1, "unmoved knobs do not join " + JSON.stringify(still.texts));
 // all three
-const three = run(2, 2032);
+T.reset(); run(0, 2800); run(1, 2816); const three = run(2, 2832);
 check(three.oob === 0 && three.calls <= 200, "three knobs: inside the card, " + three.calls + " calls");
 check(three.texts.length >= 3, "three knobs: three headers " + JSON.stringify(three.texts));
 // a quiet gap ends the gesture: the next draw is a lone panel again

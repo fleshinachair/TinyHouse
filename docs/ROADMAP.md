@@ -6,6 +6,26 @@ put it in the converter or engine, check with the audits, then judge by many pre
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of
 Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 
+## Road to 1.0
+
+1.0 means a stranger can install the release, import their own Serum 2 or Vital presets, and trust it. It does not mean every Serum feature. The gates:
+
+1. **Saved state stops changing.** Anything that alters the preset or state format lands first, because after 1.0 every change needs a migration: macro min / max (#8 below) and wavetable paging past 128 (#9).
+2. **Correct at any tempo.** A synced LFO follows the Move's BPM (#2), not 120.
+3. **Safe on a clean Move.** A fresh install from the release tarball, an upgrade from 0.9.1 and 0.9.5 with old saved presets still loading, and the heaviest preset profiled with a CPU ceiling (#7).
+4. **The importer is honest.** A dropped preset or feature is reported with its reason; the formant filter (#1) closes the largest group of silent drops.
+5. **Docs and licence.** README, in-module help and a how-to-import walkthrough with screenshots; the GPL text and THIRD-PARTY.md stay in the package.
+
+| Release | Content |
+|---|---|
+| 0.9.6 | Tempo-following LFOs; drop `tablor_loadtest` from `deploy.sh`; clean-install and upgrade test |
+| 0.9.7 | State-format changes (macro min / max, wavetable paging), then freeze the format |
+| 0.9.8 | Formant voice filter; the cheap Vital leads (Phaser regression, `lfo_N_stereo`, attack power) |
+| 0.9.9 | Release candidate: performance pass, docs, outside testers on their own Move and presets (Serum testing so far is positive; Vital testers are being sought) |
+| 1.0 | The release candidate has no new bug reports for about a week |
+
+After 1.0: granular gaps, extra effect stages, noise-driven warps, reverb build-up and the Deep House leads below.
+
 ## Built since the first roadmap (2026-11-04)
 
 Distortion, compressor, tempo-synced delay, chorus / flanger / phaser, HyperDimension and both FX buses; EQ, distortion, modulation and reverb inside Split / SplitMS branches;
@@ -46,5 +66,5 @@ The Vital front end (`converter/vital_import.py`) runs on the same engine; 85 pr
 
 ## Housekeeping
 
-- Before making the repo public: a proper fork / upstream remote for the Tablor code. History checked on 2026-11-17: 222 commits by one author, no Serum pack, preset, wavetable, sample or render ever committed (only screenshots), no keys or tokens; the Serum content stays out through `.gitignore`.
+- The repo is public. A proper fork / upstream remote for the Tablor code is still to do. History checked on 2026-11-17: 222 commits by one author, no Serum pack, preset, wavetable, sample or render ever committed (only screenshots), no keys or tokens; the Serum content stays out through `.gitignore`.
 - `reports/` are dated snapshots; `FX_COVERAGE.md` and `MISSING_FEATURES.md` predate most of the effects work.

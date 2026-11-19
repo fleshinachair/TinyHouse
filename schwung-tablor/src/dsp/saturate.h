@@ -26,15 +26,12 @@ inline float fastTanh(float x)
  * drive, so a trim of 0.3 dB per dB is applied, held from 20 dB up. g is the drive as a gain, ramped from g0 to gT across the block. */
 inline void vitalFilterDriveIn(float *l, float *r, int n, float g0, float gT, float a, float passGain = 1.0f)
 {
-    constexpr float kVitalFull = 0.46345f;                    /* 10^(-6.7 / 20): the engine's level against Vital's */
-    auto trim = [](float gain) { return std::pow(std::min(gain, 10.0f), -0.3f); };
+    constexpr float kVitalFull = 0.33650f;                    /* 10^(-9.45 / 20): the engine's level against Vital's */
     const float gStep = (gT - g0) / (float) n;
-    float g = g0, t = trim(g0);
-    const float tStep = (trim(gT) - t) / (float) n;
+    float g = g0;
     for (int i = 0; i < n; i++) {
         const float k = g * a / kVitalFull;
-        const float post = kVitalFull / (a * std::sqrt(g)) * t * passGain;
-        t += tStep;
+        const float post = kVitalFull / (a * std::sqrt(g)) * passGain;
         l[i] = post * fastTanh(k * l[i]);
         r[i] = post * fastTanh(k * r[i]);
         g += gStep;

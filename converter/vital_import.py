@@ -97,12 +97,74 @@ def _interp_frames(keys: list[tuple[float, np.ndarray]], pos: float, style: int,
     return np.fft.irfft(out, n=len(waves[0]))
 
 
-def _line_wave(line: dict) -> np.ndarray:
-    """A Line Source keyframe's drawn shape as 2048 samples (the editor's y = 0 is the top; segment powers are ignored: GUESS)."""
-    pts = line.get("points") or [0, 1, 1, 1]
-    xs, ys = pts[0::2], pts[1::2]
-    x = np.arange(FRAME) / FRAME
-    return 1.0 - 2.0 * np.interp(x, xs, ys)
+def _power_scale(t: float, power: float) -> float:
+    """Vital's futils::powerScale."""
+    if abs(power) < 0.01:
+        return t
+    return (math.exp(power * t) - 1.0) / (math.exp(power) - 1.0)
+
+
+def _line_state(kf: dict) -> tuple[list[tuple[float, float]], list[float], bool, float]:
+    """A Line Source keyframe's line (points, powers, smooth) and pull power, as Vital reads them: only a nested "line" object is read (WaveLineSource::jsonToState); a keyframe without one keeps the
+    generator's initial straight ramp, which the plugin then plays as a plain saw (Memory Leak's 'Quad Saw' stores its points at the top of the keyframe, where Vital does not look)."""
+    line = kf.get("line")
+    pull = float(kf.get("pull_power", 0.0))
+    if not isinstance(line, dict) or "points" not in line or "powers" not in line:
+        return [(0.0, 1.0), (1.0, 0.0)], [0.0, 0.0], False, pull
+    pts, pw = list(line["points"]), list(line["powers"])
+    n = max(1, min(int(line.get("num_points", len(pw))), len(pw), len(pts) // 2))
+    return [(float(pts[2 * k]), float(pts[2 * k + 1])) for k in range(n)], [float(x) for x in pw[:n]], bool(line.get("smooth", False)), pull
+
+
+def _line_render(points: list[tuple[float, float]], powers: list[float], smooth: bool) -> np.ndarray:
+    """LineGenerator::render (common/line_generator.cpp) at 2048 points, then WaveLineSourceKeyframe::render's y * 2 - 1."""
+    n = len(points)
+    out = np.empty(FRAME)
+    idx = 0
+    last = cur = points[0]
+    cur_pow = 0.0
+    for i in range(FRAME):
+        x = i / (FRAME - 1.0)
+        t = 1.0
+        if cur[0] > last[0]:
+            t = (x - last[0]) / (cur[0] - last[0])
+        if smooth:
+            t = 0.5 * math.sin((t - 0.5) * math.pi) + 0.5
+        t = min(max(_power_scale(t, cur_pow), 0.0), 1.0)
+        out[i] = 1.0 - (last[1] + t * (cur[1] - last[1]))
+        while x > cur[0] and idx < n:
+            cur_pow = powers[idx % n]
+            idx += 1
+            last = cur
+            cur = points[idx % n]
+            if idx >= n:
+                cur = (cur[0] + 1.0, cur[1])
+                break
+    return out * 2.0 - 1.0
+
+
+def _line_source_frames(src: dict) -> np.ndarray | None:
+    """A Line Source component as FRAMES_OUT frames: the keyframes' lines are tweened point by point (WaveLineSourceKeyframe::interpolate, the pull power bending the tween) and then drawn."""
+    kfs = sorted(src.get("keyframes", []), key=lambda k: k.get("position", 0))
+    if not kfs:
+        return None
+    states = [_line_state(k) for k in kfs]
+    ppos = [int(k.get("position", 0)) for k in kfs]
+    style = int(src.get("interpolation_style", 1))
+    frames = []
+    for f in range(FRAMES_OUT):
+        pos = f * 255.0 / (FRAMES_OUT - 1)
+        index = sum(1 for q in ppos if pos >= q) - 1                                         # the last keyframe at or before this position
+        a = min(max(index, 0), len(kfs) - 1)
+        if index < 0 or index >= len(kfs) - 1 or style == 0 or len(states[a][0]) != len(states[a + 1][0]):
+            pts, pw, sm, _ = states[a]
+        else:
+            (p0, w0, sm, pull0), (p1, w1, _s, pull1) = states[a], states[a + 1]
+            t = _power_scale((pos - ppos[a]) / float(ppos[a + 1] - ppos[a]), pull0 - pull1)
+            pts = [(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t) for (x0, y0), (x1, y1) in zip(p0, p1)]
+            pw = [u + (v - u) * t for u, v in zip(w0, w1)]
+        frames.append(_line_render(pts, pw, sm))
+    return np.stack(frames)
 
 
 def _resample(x: np.ndarray, n: int) -> np.ndarray:
@@ -140,6 +202,8 @@ def render_group(group: dict, notes: list[str]) -> np.ndarray | None:
 
 
 def _render_source(src: dict, notes: list[str]) -> np.ndarray | None:
+    if src["type"] == "Line Source":
+        return _line_source_frames(src)
     kfs = sorted(src.get("keyframes", []), key=lambda k: k.get("position", 0))
     keys: list[tuple[float, np.ndarray]] = []
     audio = None
@@ -155,8 +219,6 @@ def _render_source(src: dict, notes: list[str]) -> np.ndarray | None:
     for k in kfs:
         if src["type"] == "Wave Source":
             w = np.frombuffer(base64.b64decode(k["wave_data"]), dtype="<f4")[:FRAME].astype(np.float64)
-        elif src["type"] == "Line Source":
-            w = _line_wave(k.get("line", {}))
         else:
             w = _audio_wave(src, k, audio)
         keys.append((float(k.get("position", 0)), w))
@@ -343,7 +405,7 @@ def wet_pot(effect: str, w: float) -> int:
 
 
 VITAL_VOLUME_DB_AT_4879 = -9.5          # master gain at the 4879 knee value, from the compressor fit (the compressor's input level is the output minus this)
-ENGINE_PRE_MASTER_OFFSET_DB = -6.7      # the engine's pre-master signal against Vital's pre-volume signal for the same oscillator: measured on a plain level-1 sine, converter volume vs Vital's output (vital_ab.py 'raw level')
+ENGINE_PRE_MASTER_OFFSET_DB = -9.45     # the engine's pre-master signal against Vital's pre-volume signal for the same oscillator: a plain sine (filter off, one voice) renders 2.75 dB under the plugin at the old -6.7 at every level and note (2026-11-20 re-measure; across the 100 local presets the median was 3.9 dB under)
 COMP_OFFSET_DB = ENGINE_PRE_MASTER_OFFSET_DB    # the offset the compressor's thresholds take (the engine's level into it against Vital's)
 VITAL_FX_LIST = ("chorus", "compressor", "delay", "distortion", "eq", "filter_fx", "flanger", "phaser", "reverb")     # the effect list in code-0 order
 
@@ -478,6 +540,8 @@ def lfo_period_s(sync: int, tempo: float) -> float:
     return 2.0 ** (7 - round(tempo)) * LFO_SYNC_MULT.get(sync, 1.0)
 
 
+LFO_MEAN_BAKE_MORPH = False                                                                   # a morph amount that an LFO moves (and the table cannot follow) baked at the LFO's mean: neutral on average (helped 3 presets, hurt 3), off
+LFO_MEAN_BAKE_PD = True                                                                       # a phase-distortion amount whose saved value plays silence is baked at its LFO's mean instead (Disrupt's oscillator 3 was silent)
 LFO_LINE_SMOOTH = True
 
 
@@ -624,9 +688,10 @@ LAST_DROPPED_ENV: list = []                 # (vital envelope, engine destinatio
 
 def key_table(s: dict, i: int, what: str) -> list[int]:
     """Route i's curve (and power) over the note as the engine's 64-point Key table: Key reads point note / 2 (the curve at that pair's middle), Key in octave reads point 0..11 for the pitch class (the curve at class / 12)."""
+    shift = float(s.get("voice_transpose", 0.0)) + float(s.get("voice_tune", 0.0))          # Vital's note source is the BENT note: the voice's transpose and tune move it (the played note's pitch class, note_in_octave, they do not)
     out = []
     for j in range(64):
-        x = (2 * j + 0.5) / 127.0 if what == "note" else (j / 12.0 if j < 12 else 0.0)
+        x = (2 * j + 0.5 + shift) / 127.0 if what == "note" else (j / 12.0 if j < 12 else 0.0)
         out.append(pot(127.0 * CLAMP(route_static_value(s, i, CLAMP(x, 0.0, 1.0)), 0.0, 1.0)))
     return out
 
@@ -1065,6 +1130,11 @@ def static_route_offset(s: dict, routes: list, dest: str) -> float:
     for src, d, a, bip in routes:
         if d != dest:
             continue
+        if src.startswith("key:"):                                       # a Key / Key-in-octave route to a control the engine bakes into a table: its value at middle C, through the route's own curve
+            _, what, ri = src.split(":")
+            v = route_static_value(s, int(ri), CLAMP((60.0 + float(s.get("voice_transpose", 0.0)) + float(s.get("voice_tune", 0.0))) / 127.0, 0.0, 1.0) if what == "note" else 0.0)
+            off += a * ((v - 0.5) if bip else v)
+            continue
         v = static_source_value(s, src)
         if v is None:
             continue
@@ -1171,6 +1241,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             pd_baked[o] = kind == "pd" or bool(pdt and 1 <= pdt <= 6)
             notes.append(f"osc {o}: its {'distortion' if kind == 'pd' else 'morph'} amount is moved live by an LFO / envelope: carried by sweeping the amount along the table position")
         elif table is not None and smt in VM.KNOWN:
+            if LFO_MEAN_BAKE_MORPH:
+                sma += lfo_route_mean(s, routes, f"osc_{o}_spectral_morph_amount")             # an LFO the table cannot follow moves the amount around its mean: the baked amount sits there
             morphed = VM.morph_table(table, smt, CLAMP(sma, 0.0, 1.0))
             if morphed is not None:
                 table = morphed
@@ -1178,6 +1250,13 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
                     notes.append(f"osc {o}: spectral morph is baked at its saved amount (macros and velocity folded in), so a live route to it does not move it")
         if table is not None and pdt and not live:
             baked = bake_phase_distortion(table, pdt, pda)
+            if LFO_MEAN_BAKE_PD and (baked is None or float(np.abs(baked).max()) < 0.01):
+                # the saved amount plays silence (Formant at a low amount is a constant) where an LFO in the plugin moves it out of that: bake at the LFO's mean instead
+                mean_pda = CLAMP(pda + lfo_route_mean(s, routes, f"osc_{o}_distortion_amount"), 0.0, 1.0)
+                if mean_pda != pda:
+                    baked2 = bake_phase_distortion(table, pdt, mean_pda)
+                    if baked2 is not None and float(np.abs(baked2).max()) >= 0.01:
+                        baked = baked2
             if baked is not None:
                 table = baked
                 pd_baked[o] = True

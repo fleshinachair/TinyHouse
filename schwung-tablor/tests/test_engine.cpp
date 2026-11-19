@@ -435,6 +435,16 @@ static void testFilterDrive()
         srand(3); note(plain0, 57); auto p0 = render(plain0, 700);
         CHECK(rms(v1) < rms(s1) * 0.7, "Vital's drive law keeps a strongly driven level under Serum's (rms %.0f against %.0f)", rms(v1), rms(s1));
         CHECK(std::fabs(rms(v0) - rms(p0)) < 1.0, "at drive 0 the law changes nothing (rms %.0f against %.0f)", rms(v0), rms(p0));
+        /* Vital's analog filter takes 1 / (1 + 2 res) off the whole passband, drive or no drive (measured through the plugin: -3.5 dB at res 0.25, -6.0 at 0.5, -7.9 at 0.75) */
+        Engine vres, vres0;
+        setup(vres, 0); setup(vres0, 0);
+        vres.pots[TB_P_FLT_VDL] = 1; vres0.pots[TB_P_FLT_VDL] = 1;
+        vres.pots[TB_P_FLT_FREQ] = 120; vres0.pots[TB_P_FLT_FREQ] = 120;                       /* well above the note: a passband sine */
+        vres.pots[TB_P_FLT_RES] = 64;
+        srand(3); note(vres, 57); auto r1 = render(vres, 700);
+        srand(3); note(vres0, 57); auto r0 = render(vres0, 700);
+        const double db = 20.0 * std::log10(rms(r1) / rms(r0)), want = -20.0 * std::log10(1.0 + 2.0 * 64.0 / 127.0);
+        CHECK(std::fabs(db - want) < 0.5, "Vital's resonance takes the passband down by 1 / (1 + 2 res) (%.2f dB, expected %.2f)", db, want);
     }
 
     /* The note was fully rendered through the driven path if a knob ever left 0. */

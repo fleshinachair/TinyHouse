@@ -663,8 +663,8 @@ public:
         auto runF2 = [&]() {
             const bool mixing2 = mixB < 0.999f;
             if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
-            const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
-            if (driving2) { if (vDriveLaw) vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES]))); else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
+            const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f || (vDriveLaw && P[TB_P_FLT2_RES] > 0.0f);          /* Vital's analog filter takes 1 / (1 + 2 res) off the passband whatever its drive */
+            if (driving2) { if (vDriveLaw) { const float a2 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT2_RES])); vitalFilterDriveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, a2, a2); } else driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget); }
             if (fmOn2) fm2.process(pre2L, pre2R, n, fmSet2);
             else if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
@@ -686,8 +686,8 @@ public:
         }
         const bool mixing = mixA < 0.999f;
         if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
-        const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
-        if (driving) { if (vDriveLaw) vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES]))); else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
+        const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f || (vDriveLaw && P[TB_P_FLT_RES] > 0.0f);
+        if (driving) { if (vDriveLaw) { const float a1 = 1.0f / (1.0f + 2.0f * pot01(P[TB_P_FLT_RES])); vitalFilterDriveIn(preL, preR, n, driveGain, driveGainTarget, a1, a1); } else driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget); }
         if (fmOn1) fm1.process(preL, preR, n, fmSet1);
         else if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);

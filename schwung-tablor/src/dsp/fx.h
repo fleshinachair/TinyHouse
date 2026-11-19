@@ -943,7 +943,7 @@ public:
         /* Vital's filter saturates at every drive, 0 dB included, and its input gain 1 / (1 + 2 res) costs the passband about a ^ 0.8 (calibration probe: -5.2 dB at res 0.54, -2.1 at 0.2, -7.6 at 0.8) */
         xfDriveOn = vitalLaw || drive01 > 0.0f;
         xfDriveA = 1.0f / (1.0f + 2.0f * res01);
-        xfPass = vitalLaw ? std::pow(xfDriveA, 0.8f) : 1.0f;
+        xfPass = vitalLaw ? xfDriveA : 1.0f;                       /* Vital's passband loss of 1 / (1 + 2 res), exactly (measured with a sine through the plugin's Filter FX at every drive) */
         if (xfDriveOn) q = vitalFilterDriveQ(q, drive01);
         if (on) {
             if (!xfOn) xfS = xfWetKnob * xfWetKnob * (3.0f - 2.0f * xfWetKnob);

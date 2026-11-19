@@ -905,6 +905,11 @@ if MACRO_WIDGETS:
         for _k in ("gdens", "glen", "gscan", "gstart"):
             VIZ[f"{_p}_{_k}"] = {"kind": "custom:tinyhouse_grain", "group": f"grain_{_p}", "role": _k,
                                  "extra_keys": [f"{_p}_shape", f"{_p}_kind", f"{_p}_level", f"{_p}_gv"]}
+# The wavetable card (src/ui/cards.js): while a Tone-page position knob is held or turned the host raises a bordered picture of the wave over the page
+# (Schwung's `card_script`; the host needs 1.9 or later, an older one just shows no card). 124 x 58 is the card, 118 x 52 inside its border.
+CARDS = {}
+for _i in range(1, 4):
+    CARDS[f"wt{_i}_pos"] = {"card_script": f"cards.js#tinyhouse_wave_card_{_i}", "card_w": 124, "card_h": 58}
 def chain_param(p):
     if p["type"] == "file":
         d = {"key": p["key"], "name": p["full"], "type": "filepath",
@@ -918,6 +923,8 @@ def chain_param(p):
              "min": p["min"], "max": p["max"], "default": p["default"]}
     if p["key"] in VIZ:
         d["viz"] = VIZ[p["key"]]
+    if p["key"] in CARDS:
+        d.update(CARDS[p["key"]])
     # access:"write" is what stops the host scrubbing a trigger with a knob.
     # It was being emitted into the wrong builder, so the host treated SAVE
     # as an ordinary enum and every detent of a turn fired it -- reported as

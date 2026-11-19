@@ -1596,16 +1596,22 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         carried.append("compressor")
         notes.append(f"compressor carried with Vital's own law (bands {eb}); the per-band mix is one shared mix")
     # EQ: low shelf, band (bell), high shelf
+    # Vital's three EQ bands are its Digital filter in two shapes each (measured, then read in equalizer_module.cpp): the low band a shelf, or a high-pass in mode 1; the band a bell, or a notch;
+    # the high band a shelf, or a low-pass. The engine's V types (fx.h Biquad::setVital) are that filter exactly. A shelf or bell at no gain does nothing; a pass or notch always filters.
     bands = []
-    for tag, ty in (("low", 2), ("band", 1), ("high", 3)):
+    for tag, shape, cut in (("low", 6, 9), ("band", 7, 11), ("high", 8, 10)):
         g = s.get(f"eq_{tag}_gain", 0.0)
-        if abs(g) > 0.1:
-            bands.append((ty, note_hz(s[f"eq_{tag}_cutoff"]), g, s.get(f"eq_{tag}_resonance", 0.5)))
+        mode = s.get(f"eq_{tag}_mode", 0.0) >= 0.5
+        if mode or abs(g) > 0.1:
+            bands.append((cut if mode else shape, note_hz(s[f"eq_{tag}_cutoff"]), g, s.get(f"eq_{tag}_resonance", 0.5)))
     P["eq_on"] = 1 if (s.get("eq_on") and bands) else 0
     if s.get("eq_on") and bands:
         for n, (ty, hz, g, q) in enumerate(bands, 1):
             P[f"eq{n}_type"] = ty
             P[f"eq{n}_freq"] = eq_freq_pot(hz)
+            if ty >= 6:                                                                        # a Vital band is tuned finer than the knob's step (+-0.5 semitone left over)
+                resid = 12.0 * math.log2(hz / (20.0 * 1000.0 ** (P[f"eq{n}_freq"] / 127.0)))
+                P[f"eq{n}_ffine"] = int(round(CLAMP(64 + resid * 63.0 / 0.5, 0, 127)))
             P[f"eq{n}_gain"] = pot(64 + 63 * CLAMP(g / 24.0, -1, 1))
             P[f"eq{n}_q"] = pot(127 * CLAMP(q, 0, 1))                                          # GUESS
         carried.append("EQ")

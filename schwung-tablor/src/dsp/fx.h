@@ -27,7 +27,9 @@ namespace tb {
 
 /* ------------------------------------------------------------------ pot maps */
 
-enum EqType { EQ_OFF = 0, EQ_BELL, EQ_LOSHELF, EQ_HISHELF, EQ_HIPASS, EQ_LOPASS };
+enum EqType { EQ_OFF = 0, EQ_BELL, EQ_LOSHELF, EQ_HISHELF, EQ_HIPASS, EQ_LOPASS,
+              EQ_VLOSHELF, EQ_VBELL, EQ_VHISHELF, EQ_VHIPASS, EQ_VLOPASS, EQ_VNOTCH };         /* the last six are Vital's EQ bands (Biquad::setVital) */
+inline bool eqIsCut(int t) { return t == EQ_HIPASS || t == EQ_LOPASS || t == EQ_VHIPASS || t == EQ_VLOPASS || t == EQ_VNOTCH; }
 
 /* 20 Hz .. 20 kHz, exponential. */
 inline float potEqFreq(float v) { return 20.0f * std::pow(1000.0f, pot01(v)); }
@@ -39,6 +41,7 @@ inline float potEqGain(float v) { return potBipolar(v) * 24.0f; }
  * shelf's slope from gentle to resonant. */
 inline float potEqQ(int type, float v)
 {
+    if (type >= EQ_VLOSHELF) return std::min(std::max(v * (1.0f / 127.0f), 0.0f), 1.0f);      /* Vital's own: the resonance knob, 0..1 */
     static const float reso[9] = { 0, 10, 25, 40, 50, 60, 75, 90, 100 };
     static const float qBell[9] = { 0.10f, 0.10f, 0.16f, 0.58f, 1.25f, 2.4f, 5.5f, 10.0f, 14.0f };
     static const float qShelf[9] = { 0.40f, 0.40f, 0.44f, 0.51f, 0.64f, 0.79f, 1.13f, 1.67f, 2.10f };
@@ -62,9 +65,39 @@ inline float sanitize(float x) { return std::fabs(x) < 1e-15f ? 0.0f : x; }
 struct Biquad {
     float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
 
+    /* Vital's EQ bands, which are its Digital filter (DigitalSvf, a trapezoidal state-variable filter) in the shapes the EQ module picks: the low band is a shelf or a high-pass, the band a
+     * bell or a notch, the high band a shelf or a low-pass. The filter is out = hi s^2 + band s + lo over s^2 + k s + 1 (s in units of the cutoff, k = 1 / (0.5 + 15.5 res^3), res the
+     * Resonance knob, squared first), and a trapezoidal filter is the bilinear transform at the pre-warped cutoff tan(pi f / sr). A shelf or bell at gain A (an amplitude) has lo, hi and band set by the
+     * blend (-1 low shelf, 0 bell, 1 high shelf), as vital/src/synthesis/filters/digital_svf.cpp does it (its setupFilter also shifts a shelf's cutoff by A^(blend / 4), but the filter reads the
+     * unshifted one: measured through the plugin, the shelves fit with no shift to 0.00 dB). */
+    void setVital(int type, float fc, float gainDb, float res, float sr)
+    {
+        const float r2 = std::min(std::max(res, 0.0f), 1.0f), r3 = r2 * r2;                 /* the Resonance knob is squared on its way in (measured: knob 0.5 gives a resonance of 0.742, 0.7 gives 2.32, 1 gives 16), then cubed */
+        const float k = 1.0f / (0.5f + 15.5f * r3 * r3 * r3);
+        const float A = std::pow(10.0f, std::min(std::max(gainDb, -15.0f), 15.0f) / 20.0f);
+        float lo = 0, band = 0, hi = 0;
+        if (type == EQ_VLOSHELF || type == EQ_VBELL || type == EQ_VHISHELF) {
+            const float blend = type == EQ_VLOSHELF ? -1.0f : type == EQ_VBELL ? 0.0f : 1.0f;
+            const float lowBellT = std::min(std::max(blend + 1.0f, 0.0f), 1.0f), bellHighT = std::min(std::max(blend, 0.0f), 1.0f), bandT = 1.0f - blend * blend;
+            const float sA = std::sqrt(A);
+            lo = A + (1.0f - A) * lowBellT;
+            hi = 1.0f + (A - 1.0f) * bellHighT;
+            band = k * sA * (1.0f + (sA - 1.0f) * bandT);
+        } else if (type == EQ_VHIPASS) { hi = 1.0f; }
+        else if (type == EQ_VLOPASS) { lo = 1.0f; }
+        else { lo = 1.0f; hi = 1.0f; }                                          /* notch */
+        const float f = std::min(std::max(fc, 1.0f), sr * 0.499f);
+        const float c = 1.0f / std::tan(3.14159265f * f / sr), c2 = c * c;
+        const float B0 = hi * c2 + band * c + lo, B1 = 2.0f * (lo - hi * c2), B2 = hi * c2 - band * c + lo;
+        const float A0 = c2 + k * c + 1.0f, A1 = 2.0f * (1.0f - c2), A2 = c2 - k * c + 1.0f;
+        const float inv = 1.0f / A0;
+        b0 = B0 * inv; b1 = B1 * inv; b2 = B2 * inv; a1 = A1 * inv; a2 = A2 * inv;
+    }
+
     /* RBJ cookbook. fc is clamped below Nyquist so a 20 kHz band cannot go unstable. */
     void set(int type, float fc, float gainDb, float q, float sr)
     {
+        if (type >= EQ_VLOSHELF) { setVital(type, std::min(std::max(fc, 10.0f), sr * 0.499f), gainDb, q, sr); return; }
         fc = std::min(std::max(fc, 10.0f), sr * 0.45f);
         const float w0 = 6.28318530718f * fc / sr;
         const float cw = std::cos(w0), sw = std::sin(w0);
@@ -872,7 +905,7 @@ public:
             if (f == eqModSeen[b * 2] && g == eqModSeen[b * 2 + 1]) continue;
             eqModSeen[b * 2] = f; eqModSeen[b * 2 + 1] = g;
             const auto &bd = st.band[b];
-            const bool cut = bd.type == EQ_HIPASS || bd.type == EQ_LOPASS;
+            const bool cut = eqIsCut(bd.type);
             const float hz = std::min(std::max(bd.hz * std::exp(f * 6.8342f), 10.0f), 20000.0f);
             const float gain = cut ? 0.0f : std::min(std::max(bd.gainDb + g * 48.0f, -24.0f), 24.0f);
             eq[b].c.set(bd.type, hz, gain, bd.q, sr);

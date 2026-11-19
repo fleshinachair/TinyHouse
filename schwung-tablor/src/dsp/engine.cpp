@@ -922,9 +922,9 @@ FxSettings Engine::fxSettings(const float *pots) const
 
     for (int b = 0; b < 4; b++) {
         const int base = TB_P_EQ1_TYPE + b * 4;
-        const int type = std::clamp((int) pots[base], 0, 5);
+        const int type = std::clamp((int) pots[base], 0, 11);
         s.band[b].type = type;
-        s.band[b].hz = potEqFreq(pots[base + 1]);
+        s.band[b].hz = potEqFreq(pots[base + 1]) * (type >= EQ_VLOSHELF ? std::exp2((pots[TB_P_EQ1_FFINE + b] - 64.0f) * (0.5f / 63.0f / 12.0f)) : 1.0f);
         s.band[b].gainDb = potEqGain(pots[base + 2]);
         s.band[b].q = potEqQ(type, pots[base + 3]);
     }
@@ -933,7 +933,7 @@ FxSettings Engine::fxSettings(const float *pots) const
         const int first = k == 0 ? TB_P_EQM1_TYPE : TB_P_EQS1_TYPE;
         for (int b = 0; b < 4; b++) {
             const int at = first + (b / 2) * 8 + (b % 2);
-            const int type = std::clamp((int) pots[at], 0, 5);
+            const int type = std::clamp((int) pots[at], 0, 11);
             s.msBand[k][b].type = type;
             s.msBand[k][b].hz = potEqFreq(pots[at + 2]);
             s.msBand[k][b].gainDb = potEqGain(pots[at + 4]);

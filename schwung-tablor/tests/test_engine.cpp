@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -404,6 +405,31 @@ static void testLfoHiRes()
     P[TB_P_LFO2_HR] = 1.0f;
     CHECK(lfoShapeAt(P, 1, 20.5f / 64.0f) > 0.99f && lfoShapeAt(P, 1, 30.0f / 64.0f) < 0.01f && lfoShapeAt(P, 1, 10.0f / 64.0f) < 0.01f,
           "a narrow pulse keeps its height and its width (%.2f on the pulse, %.2f either side)", lfoShapeAt(P, 1, 20.5f / 64.0f), lfoShapeAt(P, 1, 30.0f / 64.0f));
+}
+
+/* Vital's EQ bands (Biquad::setVital): the response at a frequency, from the coefficients. */
+static double eqResponseDb(const Biquad &b, double hz)
+{
+    const double w = 2.0 * 3.14159265358979 * hz / 44100.0;
+    const std::complex<double> z1 = std::polar(1.0, -w), z2 = std::polar(1.0, -2.0 * w);
+    return 20.0 * std::log10(std::abs((double) b.b0 + (double) b.b1 * z1 + (double) b.b2 * z2) / std::abs(1.0 + (double) b.a1 * z1 + (double) b.a2 * z2));
+}
+static void testVitalEq()
+{
+    printf("== Vital EQ bands ==\n");
+    Biquad b;
+    b.set(EQ_VBELL, 1000.0f, 10.0f, 0.5f, 44100.0f);
+    CHECK(std::fabs(eqResponseDb(b, 1000.0) - 10.0) < 0.05 && std::fabs(eqResponseDb(b, 20.0)) < 0.5, "a bell at +10 dB: +10 dB at its centre (%.2f), flat far away", eqResponseDb(b, 1000.0));
+    b.set(EQ_VNOTCH, 1000.0f, 0.0f, 0.5f, 44100.0f);
+    CHECK(eqResponseDb(b, 1000.0) < -60.0 && std::fabs(eqResponseDb(b, 100.0)) < 1.0, "a notch is deep at its frequency (%.1f dB)", eqResponseDb(b, 1000.0));
+    b.set(EQ_VHIPASS, 1000.0f, 0.0f, 0.0f, 44100.0f);
+    CHECK(eqResponseDb(b, 100.0) < -30.0 && std::fabs(eqResponseDb(b, 10000.0)) < 0.5, "a high-pass cuts below its corner (%.1f dB at a tenth)", eqResponseDb(b, 100.0));
+    b.set(EQ_VLOPASS, 1000.0f, 0.0f, 0.0f, 44100.0f);
+    CHECK(eqResponseDb(b, 10000.0) < -30.0 && std::fabs(eqResponseDb(b, 100.0)) < 0.5, "a low-pass cuts above its corner (%.1f dB at ten times)", eqResponseDb(b, 10000.0));
+    b.set(EQ_VLOSHELF, 200.0f, -8.0f, 0.3f, 44100.0f);
+    CHECK(std::fabs(eqResponseDb(b, 30.0) + 8.0) < 0.5 && std::fabs(eqResponseDb(b, 8000.0)) < 0.2, "a low shelf takes 8 dB off the bottom (%.2f) and leaves the top", eqResponseDb(b, 30.0));
+    b.set(EQ_VHISHELF, 4000.0f, 6.0f, 0.3f, 44100.0f);
+    CHECK(std::fabs(eqResponseDb(b, 18000.0) - 6.0) < 0.7 && std::fabs(eqResponseDb(b, 100.0)) < 0.2, "a high shelf lifts the top by 6 dB (%.2f)", eqResponseDb(b, 18000.0));
 }
 
 /* Drive at 0 leaves a note untouched; turned up it adds level and harmonics. */
@@ -1639,6 +1665,7 @@ int main()
     testSoftClipper();
     testFilterDrive();
     testLfoHiRes();
+    testVitalEq();
     testUnisonWidth();
     testSyncThroughAVoice();
     testSecondFilter();

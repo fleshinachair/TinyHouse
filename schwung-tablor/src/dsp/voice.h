@@ -791,7 +791,8 @@ private:
         filterADSR.setDecayPower(P[TB_P_FLT_DPOW] >= 0.5f ? (P[TB_P_FLT_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);      /* Vital's decay curve on the filter envelope (0 keeps the analog fall) */
         filterADSR.setSustainLevel(pot01(P[TB_P_FLT_S]));
         filterADSR.setRelease(potEnvTime(P[TB_P_FLT_R]));
-        if (blockSize > 0) filterADSR.process(blockSize);
+        filterADSR.setControlRate(P[TB_P_UNI_VITAL] >= 0.5f);
+        if (blockSize > 0) { if (P[TB_P_UNI_VITAL] >= 0.5f) filterADSR.processControl(blockSize); else filterADSR.process(blockSize); }
 
         adsr.setDelay(potEnvStage(P[TB_P_VCA_DELAY]));
         adsr.setHold(potEnvStage(P[TB_P_VCA_HOLD]));
@@ -824,7 +825,8 @@ private:
                 modEnv[i].setDecayPower(P[k[i].dpow] >= 0.5f ? (P[k[i].dpow] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);
                 modEnv[i].setSustainLevel(pot01(P[k[i].s]));
                 modEnv[i].setRelease(potEnvTime(P[k[i].r]));
-                if (blockSize > 0) modEnv[i].process(blockSize);
+                modEnv[i].setControlRate(P[TB_P_UNI_VITAL] >= 0.5f);
+                if (blockSize > 0) { if (P[TB_P_UNI_VITAL] >= 0.5f) modEnv[i].processControl(blockSize); else modEnv[i].process(blockSize); }
                 const int dst = (int) P[k[i].dst];
                 if (dst > MD_NONE && dst < MD_COUNT) {
                     const float e = modEnv[i].getOutput() * potBipolar(P[k[i].amt]);

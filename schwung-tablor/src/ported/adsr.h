@@ -42,7 +42,7 @@ public:
             stageLeft = (float) (sampleRate * delaySec);
             return;
         }
-        if (attack == 0.0f) {
+        if (attack == 0.0f && !controlRate) {
             output = 1.0f;
             decayPos = 0.0f;
             enterHoldOrDecay();
@@ -139,6 +139,15 @@ public:
         return output;
     }
 
+    /* Vital runs its modulation envelopes once per block and takes one stage at most in a block: a stage that ends part way through gives the rest of the block away, so an attack and decay far
+     * shorter than a block still hold the full level for one whole block. `controlRate` turns that on (the amplitude envelope runs at audio rate and does not use it). */
+    void setControlRate(bool on) { controlRate = on; }
+    float processControl(int num)
+    {
+        for (int i = num; --i >= 0;) { const State s0 = state; process(); if (state != s0) break; }
+        return output;
+    }
+
     float process(int num)
     {
         for (int i = num; --i >= 0;) process();
@@ -205,6 +214,7 @@ private:
     }
 
     State state = State::idle;
+    bool controlRate = false;
     double sampleRate = 44100.0;
     float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f;
     float attackCoeff = 0.0f, decayCoeff = 0.0f, releaseCoeff = 0.0f;

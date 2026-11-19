@@ -47,7 +47,7 @@ All of these default to 0 (or the pot's middle), which leaves a Serum preset exa
 - Filter FX: `fxf_key` is Vital's Key Track (pot 64 = 0, 127 = +1, 1 = -1): the cutoff moves by the amount times (the last played note - 60) semitones (`calibration/vital_fxkey_probe.py`).
 
 Not hidden controls but worth knowing: the importer bakes Vital's four wavetable modifiers (Wave Folder, Frequency Filter, Wave Warp, Phase Shift) into the table frames (`converter/vital_wtmod.py`, checked against the plugin in `calibration/vital_modifier_check.py`),
-and a random modulator (sample-and-hold, Perlin) is carried as its average, the middle of its range, folded in like a macro. A random route into an LFO's own frequency, smooth time, delay, fade or phase is folded the same way.
+Vital's Stereo Routing (Stereo Mode 0) as the engine's own Master Width (side over mid = (cos - sin) / (cos + sin) at phi = (1 - routing) pi/4, checked against the plugin to 0.1 dB), an oscillator sent to Dual Filters with only one filter on through that filter alone (the off filter's half is silent, not dry), and a random modulator (sample-and-hold, Perlin) is carried as its average, the middle of its range, folded in like a macro. A random route into an LFO's own frequency, smooth time, delay, fade or phase is folded the same way.
 
 ## If these are surfaced later
 

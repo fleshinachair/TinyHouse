@@ -71,11 +71,11 @@ def main() -> None:
     a = ap.parse_args()
     host = VR.VitalHost()
     vr = lambda d: np.asarray(host.render(json.dumps(d).encode(), ((NOTE, 100, 0.0, 1.0),), 1.4))[0]
-    ref = curves(vr, preset(a.model, 0, a.blend, 136.0, 0.0))
+    ref = curves(vr, preset(0, 0, 0.0, 136.0, 0.0))             # an open Analog low-pass: the unfiltered saw
     if a.engine:
         import vital_porta_probe as PP
         er = lambda d: PP.engine_render(d, [(0.0, 1.0, NOTE)], 1.4)
-        eref = curves(er, preset(a.model, 0, a.blend, 136.0, 0.0))
+        eref = curves(er, preset(0, 0, 0.0, 136.0, 0.0))
     print("harmonic Hz:", [int(F0 * x) for x in K_IDX], "cutoff note", a.cutoff, f"= {440.0 * 2 ** ((a.cutoff - 69) / 12):.0f} Hz")
     for st in a.style:
         for r in a.res:

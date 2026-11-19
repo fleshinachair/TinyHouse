@@ -175,6 +175,19 @@ def test_wavetable_modifiers_follow_vitals_algorithms():
     assert np.allclose(np.abs(np.fft.rfft(ph)), np.abs(np.fft.rfft(x)), atol=1e-6)      # Clear keeps every harmonic's level
 
 
+def test_stereo_routing_becomes_the_master_width():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import vital_lfo_probe as LP
+    d = LP.base_preset()
+    s = d["settings"]
+    s["stereo_mode"], s["stereo_routing"] = 0.0, 0.5
+    assert VI.map_vital(d, "p", Path("/nonexistent"), "Probe")["params"]["mwidth"] == 27         # side x (cos - sin) over mid x (cos + sin) at phi = pi/8: 0.4226 of the width
+    s["stereo_routing"] = 0.0
+    assert VI.map_vital(d, "p", Path("/nonexistent"), "Probe")["params"]["mwidth"] == 0          # mono
+    s["stereo_mode"] = 1.0                                                                       # the legacy mode ignores the control
+    assert "mwidth" not in VI.map_vital(d, "p", Path("/nonexistent"), "Probe")["params"]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

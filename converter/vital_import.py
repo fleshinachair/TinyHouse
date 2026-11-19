@@ -267,6 +267,8 @@ def filter_type(model: int, style: int, blend: float) -> tuple[int, str | None]:
     if model == 7:
         return 13, "phaser filter read as 'Phase 24 +' (approximate)"
     steep = 1 if style == 1 else 0
+    if model == 4 and 0.5 <= blend < 1.5:
+        return 0, None                                           # measured (calibration/vital_vfilter_probe.py --model 4): the Diode filter's middle blends still pass the lows, a 12 dB low-pass, not a band-pass
     kind = 0 if blend < 0.5 else (4 if blend < 1.5 else 2)       # LP, BP, HP
     t = kind + steep
     return t, ("formant filter not carried: read as a low-pass" if model == 5 else None)
@@ -921,6 +923,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         dest = int(s[f"osc_{o}_destination"])
         P[f"{k}_post"] = {3: 1, 4: 3}.get(dest, 0)                                            # Effects: past the filters, into the effects; Direct Out: past the effects as well
         P[f"{k}_bal"] = {0: 0, 1: 127, 2: 64}.get(dest, 0)                                    # the engine's balance between filter 1 (0) and filter 2 (127); Dual Filters splits it
+        if dest == 2 and bool(s.get("filter_1_on")) != bool(s.get("filter_2_on")):
+            P[f"{k}_bal"] = 0 if s.get("filter_1_on") else 127                                # measured: Dual with one filter off plays only the filtered half (the off filter's half is silent, not dry)
         pdt_o = int(s.get(f"osc_{o}_distortion_type", 0))
         if pdt_o in (10, 11):                                                                  # ring modulation by another oscillator: the engine's RM warp from Osc A/B/C
             src_osc = MOD_SOURCE[o][pdt_o - 10]
@@ -1016,6 +1020,11 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     P["voice_mode"] = 1 if poly == 1 else 0
     P["voices"] = int(CLAMP(poly, 1, 8))
     P["legato"] = 1 if s.get("legato") else 0
+    # Vital's Stereo Routing (a Stereo Mode 0 preset; the older legacy mode ignores it): out = x cos(phi) + swap(x) sin(phi), phi = (1 - routing) pi/4 (checked against the plugin: mid x (cos + sin), side x (cos - sin)).
+    # The engine's master Width scales the side against the mid, so the ratio of the two is the width (0 = mono); the mid's 0..3 dB lift is level, which the play-level pass takes care of
+    if "stereo_mode" in s and int(s["stereo_mode"]) == 0 and float(s.get("stereo_routing", 1.0)) < 0.999:
+        phi = (1.0 - CLAMP(float(s["stereo_routing"]), 0.0, 1.0)) * math.pi / 4.0
+        P["mwidth"] = pot(64.0 * (math.cos(phi) - math.sin(phi)) / (math.cos(phi) + math.sin(phi)))
     P["pb_range"] = int(CLAMP(s.get("pitch_bend_range", 2), 0, 24))
     if s.get("portamento_time", -10) > -9.9:
         # Vital's portamento (calibration/vital_porta_probe.py): 2^time seconds for the whole glide, or for each octave with Scale, a linear ramp in pitch; a glide starts from the previous note while

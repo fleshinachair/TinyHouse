@@ -317,7 +317,8 @@ FX_FOLD_RANGE = {
     **{f"compressor_{b}_{k}": r for b in ("low", "band", "high") for k, r in (("upper_threshold", (-80.0, 0.0)), ("lower_threshold", (-80.0, 0.0)), ("upper_ratio", (0.0, 1.0)), ("lower_ratio", (-1.0, 1.0)), ("gain", (-30.0, 30.0)))},
     **{f"eq_{b}_{k}": r for b in ("low", "band", "high") for k, r in (("cutoff", (8.0, 136.0)), ("gain", (-15.0, 15.0)), ("resonance", (0.0, 1.0)))},
     # an LFO's own controls moved by a macro, velocity or a random modulator (taken at its average): the LFO runs at the moved value
-    **{f"lfo_{n}_{k}": r for n in range(1, 9) for k, r in (("frequency", (-7.0, 9.0)), ("smooth_time", (-10.0, 4.0)), ("delay_time", (0.0, 4.0)), ("fade_time", (0.0, 8.0)), ("phase", (0.0, 1.0)))},
+    **{f"lfo_{n}_{k}": r for n in range(1, 9) for k, r in (("frequency", (-7.0, 9.0)), ("smooth_time", (-10.0, 4.0)), ("delay_time", (0.0, 4.0)), ("fade_time", (0.0, 8.0)), ("phase", (0.0, 1.0)),
+                                                         ("tempo", (0.0, 12.0)))},
 }
 
 # Effect mix loudness, measured by calibration/vital_mix_probe.py (tail level 0.3-1.5 s after a short pluck, dB re the dry note).
@@ -901,13 +902,24 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
 def fold_fx_routes(s: dict, routes: list) -> int:
     """Add the macro / velocity routes to effect controls (FX_FOLD_RANGE) into the stored values, at the macro's saved value and velocity 100; the folded routes are removed from `routes`. Returns how many."""
     n = 0
+    tempo_shift: dict[str, float] = {}
     for r in list(routes):
+        if r[1].endswith("_tempo") and r[0].startswith("random"):
+            continue                                                    # a random modulator picks a new tempo step each note: no single step stands for it
         if r[1] in FX_FOLD_RANGE and r[1] in s and static_source_value(s, r[0]) is not None:
             lo, hi = FX_FOLD_RANGE[r[1]]
             v = static_source_value(s, r[0])
-            s[r[1]] = CLAMP(float(s[r[1]]) + r[2] * (hi - lo) * ((v - 0.5) if r[3] else v), lo, hi)
+            add = r[2] * (hi - lo) * ((v - 0.5) if r[3] else v)
+            if r[1].endswith("_tempo"):
+                tempo_shift[r[1]] = tempo_shift.get(r[1], 0.0) + add
+            else:
+                s[r[1]] = CLAMP(float(s[r[1]]) + add, lo, hi)
             routes.remove(r)
             n += 1
+    # a tempo index (an indexed control) moved by routes, measured through the plugin (Space Station, mod wheel 0..1 into lfo_2_tempo): the stored index is taken to the nearest step and the
+    # routes' sum moves it one step every 1.0 of index, the first step coming at +0.2 (thresholds at 0.2-0.26, 1.20-1.22, 2.14-2.27 and below 3.24): index = round(base) + floor(shift + 0.8)
+    for k, sh in tempo_shift.items():
+        s[k] = CLAMP(float(round(float(s[k])) + math.floor(sh + 0.8)), *FX_FOLD_RANGE[k])
     return n
 
 

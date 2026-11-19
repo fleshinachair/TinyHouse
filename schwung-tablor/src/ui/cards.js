@@ -88,10 +88,17 @@
                 ys[x] = Math.round(yMid - ((d.data[i * S + a] * (1 - f) + d.data[i * S + b] * f) / 63 * 2 - 1) * amp);
             }
             const top = new Int16Array(fw);
+            const span = [];
             for (let x = 0; x < fw; x++) {
                 const X = x0 + x, y0 = x > 0 && (step === 1 || x % step === 0) ? Math.min(ys[x], ys[x - 1]) : ys[x], y1 = x > 0 && (step === 1 || x % step === 0) ? Math.max(ys[x], ys[x - 1]) : ys[x];
-                for (let y = y0; y <= y1 + (cur ? 1 : 0); y++) if (y >= 0 && y < h && y < hor[X]) bm[y * w + X] = 1;
+                if (cur) { span.push([X, y0, y1]); continue; }                      /* the chosen frame is drawn after the others, whole, over them */
+                for (let y = y0; y <= y1; y++) if (y >= 0 && y < h && y < hor[X]) bm[y * w + X] = 1;
                 top[x] = y0;
+            }
+            if (cur) {                                                              /* a frame behind others stays whole: a 1 px moat cleared round it, then the line drawn 2 px thick on top */
+                for (const [X, y0, y1] of span) for (let y = Math.max(0, y0 - 2); y <= Math.min(h - 1, y1 + 3); y++) bm[y * w + X] = 0;
+                for (const [X, y0, y1] of span) for (let y = y0; y <= y1 + 1; y++) if (y >= 0 && y < h) bm[y * w + X] = 1;
+                for (let x = 0; x < fw; x++) top[x] = span[x][1];
             }
             for (let x = 0; x < fw; x++) if (top[x] < hor[x0 + x]) hor[x0 + x] = top[x];
         }

@@ -1321,6 +1321,29 @@ static void testHiddenModEnvelopes()
     }
 }
 
+/* Vital's LFO 5..8 (route sources 11..14) and routes 9..16: an LFO held at 1 by its shape, taken by a full-ish Uni route to Voice Pitch, raises the voice 12.1 semitones (as the spare envelopes do) */
+static void testExtraLfosAndRoutes()
+{
+    auto hz = [](int lfo, int route) {
+        Engine e; soloWt3(e);
+        if (lfo > 0) {
+            const int b = TB_P_LFO5_RATE + (lfo - 5) * 88;
+            for (int k = 0; k < 16; k++) e.pots[b + 2 + k] = 127;
+            e.pots[b] = 0;
+            const int rb = route < 8 ? TB_P_LR1_SRC + route * 4 : TB_P_LR9_SRC + (route - 8) * 4;
+            e.pots[rb] = (float) (6 + lfo); e.pots[rb + 1] = 66; e.pots[rb + 2] = 80; e.pots[rb + 3] = 0;
+        }
+        note(e, 69, 100);
+        return heardHz(render(e, 400));
+    };
+    const double plain = hz(0, 0);
+    for (int lfo = 5; lfo <= 8; lfo++)
+        for (int route : { 0, 8, 15 }) {
+            const double s = 12.0 * std::log2(hz(lfo, route) / plain);
+            CHECK(std::fabs(s - 48.0 * 16.0 / 63.0) < 0.6, "LFO %d on route %d raises the voice %.2f semitones (expected 12.19)", lfo, route + 1, s);
+        }
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1620,6 +1643,7 @@ int main()
     testKeyLfo();
     testVelocityAftertouchSources();
     testHiddenModEnvelopes();
+    testExtraLfosAndRoutes();
     testRandomModulators();
     testOscPhase();
     testUtilOutLfo();

@@ -344,6 +344,7 @@ def wet_pot(effect: str, w: float) -> int:
 
 VITAL_VOLUME_DB_AT_4879 = -9.5          # master gain at the 4879 knee value, from the compressor fit (the compressor's input level is the output minus this)
 ENGINE_PRE_MASTER_OFFSET_DB = -6.7      # the engine's pre-master signal against Vital's pre-volume signal for the same oscillator: measured on a plain level-1 sine, converter volume vs Vital's output (vital_ab.py 'raw level')
+COMP_OFFSET_DB = ENGINE_PRE_MASTER_OFFSET_DB    # the offset the compressor's thresholds take (the engine's level into it against Vital's)
 VITAL_FX_LIST = ("chorus", "compressor", "delay", "distortion", "eq", "filter_fx", "flanger", "phaser", "reverb")     # the effect list in code-0 order
 
 
@@ -391,6 +392,13 @@ KEY_LIVE = True                                                                 
 VELOCITY_LIVE = True                                                                    # a velocity route to a control the engine can route moves with the pad's velocity (route source Velocity) while route slots last, instead of being folded in at velocity 100
 AFTERTOUCH_LIVE = True                                                                  # an aftertouch route is a live route source (Aftertouch) instead of being dropped
 MOD_ENVS = 4                                                                            # the engine's routable envelopes (two on its pages, two hidden ones for Vital presets)
+LFO_SLOTS = 8                                                                           # the engine's LFOs (1..4 are route sources 1..4, 5..8 are sources 11..14) and its LFO routes
+ROUTE_SLOTS = 16
+
+
+def lfo_source(slot: int) -> int:
+    """The engine's route source number of its LFO `slot` (1..8): saved presets store the number, so LFO 5..8 sit after Aftertouch."""
+    return slot if slot <= 4 else 6 + slot
 OSC_KEY_TRACK_OFF = True                                                                 # an oscillator with Key Track off plays a fixed pitch (the engine's Pitch: Fixed) instead of following the key
 CTRANS_LIVE = True                                                                      # a route to a comb filter's Blend Transpose moves it live (engine destinations Filter Comb Trans / Filter 2 Comb Trans)
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
@@ -738,11 +746,11 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         for j, v in enumerate(lfo_shape(s["lfos"][k - 1])):
             P[f"vdl_s{j}"] = v
         notes.append(f"LFO {k} follows the keyboard at an audio rate ({keytrack_audio_hz(s, k):.0f} Hz at middle C): its distortion routes run in the distortion stage at the note's pitch")
-    # LFOs: up to four, ranked by the strength of their routes
+    # LFOs: up to eight (the engine's first four are on the route sources 1..4, 5..8 on sources 11..14), ranked by the strength of their routes
     strength: dict[int, float] = {}
     for w, k, *_ in lr:
         strength[k] = strength.get(k, 0.0) + w
-    chosen = sorted(strength, key=lambda k: -strength[k])[:4]
+    chosen = sorted(strength, key=lambda k: -strength[k])[:LFO_SLOTS]
     for slot, k in enumerate(chosen, 1):
         if k >= 100:                                                                         # a Key / Key Oct lookup: the engine LFO's mode, and the route's curve as its Hi-Res table
             what, table = key_tables[k - 100]
@@ -801,7 +809,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     slot_of = {k: i for i, k in enumerate(chosen, 1)}
     for w, k, dst, x, bip in lr:
         if k not in slot_of:
-            drop("lfo routes past the engine's four LFOs" if k < 100 else "key routes past the engine's four LFOs")
+            drop(f"lfo routes past the engine's {LFO_SLOTS} LFOs" if k < 100 else f"key routes past the engine's {LFO_SLOTS} LFOs")
     # Vital's random modulators: a generator each (style, rate, tempo), a new value for every note, carried as route sources 5..8
     for k in sorted({r[1] for r in rn}):
         P[f"rn{k}_style"] = int(CLAMP(int(s.get(f"random_{k}_style", 0)), 0, 3))
@@ -816,28 +824,28 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"rn{k}_rate"] = pot(127.0 * math.log(CLAMP(hz, 0.05, 120.0) / 0.05) / math.log(2400.0))
         if int(s.get(f"random_{k}_sync_type", 0)):
             notes.append(f"random {k} is synced to the song position: it draws a new value per note instead")
-    combined = [(w, slot_of[k], dst, x, bip) for w, k, dst, x, bip in lr if k in slot_of] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
+    combined = [(w, lfo_source(slot_of[k]), dst, x, bip) for w, k, dst, x, bip in lr if k in slot_of] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
     combined += ex
     # velocity routes go live while the eight route slots last (the rest, and any with a control to fold into, are added at velocity 100 as before)
     vel_live.sort(key=lambda r: -r[0])
-    room = max(0, 8 - len(combined))
+    room = max(0, ROUTE_SLOTS - len(combined))
     for w, dst, x, bip, key, fold_amt, lo, hi in vel_live[:room]:
         combined.append((w * 0.5, 9, dst, x, bip))            # ranked below the same-sized LFO route: a slot lost here loses a live route, not a fixed offset
     for w, dst, x, bip, key, fold_amt, lo, hi in vel_live[room:]:
         if key:
             P[key] = int(round(CLAMP(P.get(key, 0) + fold_amt, lo, hi)))
         else:
-            drop("velocity routes past the engine's 8")
+            drop(f"velocity routes past the engine's {ROUTE_SLOTS}")
     combined.sort(key=lambda r: -r[0])
-    for n, (w, src_slot, dst, x, bip) in enumerate(combined[:8], 1):
+    for n, (w, src_slot, dst, x, bip) in enumerate(combined[:ROUTE_SLOTS], 1):
         P[f"lr{n}_src"] = src_slot
         P[f"lr{n}_dst"] = dst
         P[f"lr{n}_amt"] = pot(64 + 63 * CLAMP(x, -1, 1))
         P[f"lr{n}_bip"] = 1 if bip else 0
         if abs(x) > 1.0:
             notes.append(f"LFO route amount {x:.2f} is past the engine's full range: limited")
-    for w, src_slot, dst, x, bip in combined[8:]:
-        drop("lfo routes past the engine's 8")
+    for w, src_slot, dst, x, bip in combined[ROUTE_SLOTS:]:
+        drop(f"lfo routes past the engine's {ROUTE_SLOTS}")
     # envelope routes: the four strongest onto the engine's spare envelopes (1 and 2 are on its pages, 3 and 4 hidden)
     me.sort(key=lambda r: -r[0])
     for n, (w, k, dst, x, _dn) in enumerate(me[:MOD_ENVS], 1):
@@ -1478,8 +1486,8 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["comp_multi"] = 2
         P["vc_bands"] = eb
         for i, b in enumerate(("low", "band", "high"), 1):
-            P[f"vc_ut{i}"] = pot((s[f"compressor_{b}_upper_threshold"] + ENGINE_PRE_MASTER_OFFSET_DB + 100.0) / 112.0 * 127.0)
-            P[f"vc_lt{i}"] = pot((s[f"compressor_{b}_lower_threshold"] + ENGINE_PRE_MASTER_OFFSET_DB + 100.0) / 112.0 * 127.0)
+            P[f"vc_ut{i}"] = pot((s[f"compressor_{b}_upper_threshold"] + COMP_OFFSET_DB + 100.0) / 112.0 * 127.0)
+            P[f"vc_lt{i}"] = pot((s[f"compressor_{b}_lower_threshold"] + COMP_OFFSET_DB + 100.0) / 112.0 * 127.0)
             P[f"vc_ur{i}"] = pot(127 * CLAMP(s[f"compressor_{b}_upper_ratio"], 0.0, 1.0))
             P[f"vc_lr{i}"] = pot(64 + 63.5 * CLAMP(s[f"compressor_{b}_lower_ratio"], -1.0, 1.0))
             g = CLAMP(s[f"compressor_{b}_gain"], -30.0, 30.0)
@@ -1523,11 +1531,11 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     for o in (1, 2, 3):                                                                       # an oscillator at level 0 is only audible if a route (LFO, envelope, macro) raises it
         if s.get(f"osc_{o}_on") and P[f"wt{o}_level"] == 0:
             lvl_dst = {1: 3, 2: 4, 3: 19}[o]
-            moved = (any(P[f"lr{r}_dst"] == lvl_dst and P[f"lr{r}_src"] for r in range(1, 9)) or any(P.get(f"me{e}_dst", 0) == lvl_dst for e in range(1, MOD_ENVS + 1))
+            moved = (any(P.get(f"lr{r}_dst", 0) == lvl_dst and P.get(f"lr{r}_src", 0) for r in range(1, ROUTE_SLOTS + 1)) or any(P.get(f"me{e}_dst", 0) == lvl_dst for e in range(1, MOD_ENVS + 1))
                      or any(key == f"wt{o}_level" for _, key, _ in macro["routes"]))
             if not moved:
                 notes.append(f"osc {o}: level 0 with nothing carried to raise it")
-    if not P.get("smp_set") and not any(P[f"wt{o}_level"] > 0 or any(P[f"lr{r}_dst"] == {1: 3, 2: 4, 3: 19}[o] and P[f"lr{r}_src"] for r in range(1, 9))
+    if not P.get("smp_set") and not any(P[f"wt{o}_level"] > 0 or any(P.get(f"lr{r}_dst", 0) == {1: 3, 2: 4, 3: 19}[o] and P.get(f"lr{r}_src", 0) for r in range(1, ROUTE_SLOTS + 1))
                or any(P.get(f"me{e}_dst", 0) == {1: 3, 2: 4, 3: 19}[o] for e in range(1, MOD_ENVS + 1)) for o in (1, 2, 3)):
         notes.append("SILENT: no oscillator is audible (the sound comes from a route that is not carried)")
     return {"name": name, "params": P, "paths": paths, "carried_fx": carried, "notes": notes, "macro": macro,

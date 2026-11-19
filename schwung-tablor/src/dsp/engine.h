@@ -300,7 +300,7 @@ private:
     float toneLoDb = 0.0f, toneHiDb = 0.0f;
     bool  toneValid = false, loActive = false, hiActive = false;
     float driveCur = 0.0f;
-    float lfoFree[4] = {};                          /* the Free-mode LFOs' phases */
+    float lfoFree[8] = {};                          /* the Free-mode LFOs' phases */
 
     /* Master width and the mono-below crossover, after the shelves. Both neutral (64 and 0) skips the stage, so a
      * preset that does not use it is bit for bit what it was. */

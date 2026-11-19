@@ -417,8 +417,10 @@ LFOS = [dict(
     # Serum's LFO Smooth: a one-pole low-pass on the LFO's output, 2 ms to 0.7 s (log), 0 = off (calibration/dev/probe_lfo_smooth.py)
     smooth = pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0),
 ) for n in range(1, N_LFO + 1)]
+# The route sources, by number: 1..4 LFOs, 5..8 random, 9 velocity, 10 aftertouch, 11..14 LFO 5..8 (appended after the rest: a saved preset stores the number).
+LR_SRC = ["Off", "LFO1", "LFO2", "LFO3", "LFO4", "Rnd1", "Rnd2", "Rnd3", "Rnd4", "Velocity", "Aftertouch", "LFO5", "LFO6", "LFO7", "LFO8"]
 LROUTES = [dict(
-    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", ["Off", "LFO1", "LFO2", "LFO3", "LFO4", "Rnd1", "Rnd2", "Rnd3", "Rnd4", "Velocity", "Aftertouch"], 0),
+    src = enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", LR_SRC, 0),
     dst = enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),
     amt = pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64),
     # Serum stores the polarity per route (kParamBipolar): Uni adds lfo * amount (the LFO swings 0..1), Bi adds (2 lfo - 1) * amount
@@ -857,6 +859,16 @@ BANKS = [
     # After Vital Formant, for the same reason. Serum's Formant filter models (Filter Type = Formant ONE / TWO / TWB) take the Freq knob and this Var knob (0..127 over Serum's 0..100 %): the resonators sit where the measured
     # tables put them for that Freq and Var (a Freq / Key Track / envelope move slides them along the same axis). Set by the Serum converter.
     ("Serum Formant", False, [row(num("flt_var", "FV1", "Filter Var", 0, 127, 0), num("flt2_var", "FV2", "Filter 2 Var", 0, 127, 0))]),
+    # After Serum Formant, for the same reason. Vital has eight LFOs (Serum four): LFO 5 to 8 carry all the parameters of LFO 1 to 4 (rate, mode, 16 shape points, smooth, Hi-Res switch and 64 points, Delay, Fade In, Phase, Tempo),
+    # CONSECUTIVE per LFO in this order (voice.h reads them through a table, with static_asserts), and are route sources 11 to 14. Routes 9 to 16 are routes 1 to 8 again (source, destination, amount, polarity). Set by the Vital converter.
+    ("Vital LFO 5-8", False, [row(*c) for n in (5, 6, 7, 8) for c in (lambda L: [L[i:i + 8] for i in range(0, len(L), 8)])(
+        [pot(f"lfo{n}_rate", f"L{n}RT", f"LFO{n} Rate", 60), enum(f"lfo{n}_mode", f"L{n}MD", f"LFO{n} Mode", ["Trig", "Free", "Env", "Key", "Key Oct"], 0)] +
+        [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)] + [pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0)] +
+        [enum(f"lfo{n}_hr", f"H{n}R", f"LFO{n} Hi-Res", ["Off", "On"], 0)] + [num(f"lfo{n}_h{k}", f"H{n}{k:02X}", f"LFO{n} Hi-Res {k}", 0, 127, 64) for k in range(64)] +
+        [num(f"lfo{n}_delay", f"VD{n}", f"LFO{n} Delay", 0, 127, 0), num(f"lfo{n}_fade", f"VE{n}", f"LFO{n} Fade In", 0, 127, 0), num(f"lfo{n}_phase", f"VH{n}", f"LFO{n} Phase", 0, 127, 0),
+         enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host"], 0)])]),
+    ("Vital LFO Routes 9-16", False, [row(enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", LR_SRC, 0), enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),
+                                          pot(f"lr{r}_amt", f"R{r}AM", f"LFO Route {r} Amount", 64), enum(f"lr{r}_bip", f"R{r}BP", f"LFO Route {r} Polarity", ["Uni", "Bi"], 0)) for r in range(9, 17)]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

@@ -119,12 +119,16 @@ struct VoiceContext {
     float aftertouch = 0.0f;                /* 0..1  */
     float pitchBendSemis = 0.0f;            /* +/- pb_range already applied */
     float bpm = 120.0f;
-    float lfoFree[4] = {};                  /* where each Free-mode LFO is in its cycle (0..1) */
+    float lfoFree[8] = {};                  /* where each Free-mode LFO is in its cycle (0..1) */
     float *bus[4] = {};                     /* the FX buses' inputs (bus 1 L, R, bus 2 L, R) the voices add their sends to; null: that bus is not in use */
     float *dry[2] = {};                     /* the sources routed Out: past the filter and the effects, added to the output after them (null: nowhere to put them) */
 };
 
-inline constexpr int kLfos = 4, kLfoRoutes = 8, kLfoShape = 16, kLfoHi = 64, kRnds = 4, kRouteSrcs = kLfos + kRnds + 2;      /* sources 1..4 LFOs, 5..8 random, 9 velocity, 10 aftertouch */       /* kRnds: Vital's random modulators, route sources kLfos + 1 ... */
+inline constexpr int kLfos = 8, kLfoRoutes = 16, kLfoShape = 16, kLfoHi = 64, kRnds = 4;
+/* Route sources, by number (a saved preset stores them): 1..4 LFO 1..4, 5..8 random, 9 velocity, 10 aftertouch, 11..14 LFO 5..8. The first four LFOs are Serum's and Vital's; 5..8 are Vital's own. */
+inline constexpr int kLfosA = 4, kSrcVel = kLfosA + kRnds + 1, kSrcAft = kSrcVel + 1, kRouteSrcs = kSrcAft + (kLfos - kLfosA);
+/* LFO l's slot among the route sources (0-based): the first four sit first, LFO 5..8 after aftertouch. */
+inline constexpr int lfoSlot(int l) { return l < kLfosA ? l : kSrcAft + (l - kLfosA); }
 /* The strides the code below walks the parameter table with: if the generator ever reorders them this stops the build. */
 static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 == TB_P_LFO1_RATE + 2 &&
               TB_P_LFO1_MODE == TB_P_LFO1_RATE + 1 && TB_P_LFO1_SMOOTH == TB_P_LFO1_S15 + 1 &&
@@ -132,6 +136,26 @@ static_assert(TB_P_LFO2_RATE - TB_P_LFO1_RATE == 3 + kLfoShape && TB_P_LFO1_S0 =
 static_assert(TB_P_LFO2_TEMPO == TB_P_LFO1_TEMPO + 1 && TB_P_LFO4_TEMPO == TB_P_LFO1_TEMPO + 3, "the LFO Tempo switches are consecutive");
 static_assert(TB_P_LFO1_H0 == TB_P_LFO1_HR + 1 && TB_P_LFO1_H63 - TB_P_LFO1_H0 == kLfoHi - 1 && TB_P_LFO2_HR - TB_P_LFO1_HR == 1 + kLfoHi, "the LFO Hi-Res switch and its 64 points are consecutive");
 static_assert(TB_P_LFO1_S15 - TB_P_LFO1_S0 == kLfoShape - 1, "LFO shape points must be consecutive");
+/* LFO 5..8 (hidden "Vital LFO 5-8" bank): rate, mode, 16 shape points, smooth, Hi-Res switch, 64 points, delay, fade, phase, tempo, in that order, 88 to an LFO */
+static_assert(TB_P_LFO5_MODE == TB_P_LFO5_RATE + 1 && TB_P_LFO5_S0 == TB_P_LFO5_RATE + 2 && TB_P_LFO5_S15 - TB_P_LFO5_S0 == kLfoShape - 1 && TB_P_LFO5_SMOOTH == TB_P_LFO5_S15 + 1 &&
+              TB_P_LFO5_HR == TB_P_LFO5_SMOOTH + 1 && TB_P_LFO5_H0 == TB_P_LFO5_HR + 1 && TB_P_LFO5_H63 - TB_P_LFO5_H0 == kLfoHi - 1 && TB_P_LFO5_DELAY == TB_P_LFO5_H63 + 1 &&
+              TB_P_LFO5_FADE == TB_P_LFO5_DELAY + 1 && TB_P_LFO5_PHASE == TB_P_LFO5_DELAY + 2 && TB_P_LFO5_TEMPO == TB_P_LFO5_DELAY + 3 &&
+              TB_P_LFO6_RATE - TB_P_LFO5_RATE == 88 && TB_P_LFO8_TEMPO - TB_P_LFO5_TEMPO == 3 * 88, "LFO 5..8 parameters must be consecutive, 88 to an LFO");
+static_assert(TB_P_LR9_DST == TB_P_LR9_SRC + 1 && TB_P_LR9_AMT == TB_P_LR9_SRC + 2 && TB_P_LR9_BIP == TB_P_LR9_SRC + 3 && TB_P_LR16_SRC - TB_P_LR9_SRC == 7 * 4, "LFO routes 9..16 are src, dst, amt, bip, consecutive");
+
+/* Where LFO l keeps its parameters in the table, for all eight. */
+struct LfoKeys { int rate, mode, s0, smooth, hr, h0, delay, fade, phase, tempo; };
+inline constexpr LfoKeys lfoKeys(int l)
+{
+    if (l < kLfosA)
+        return { TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE), TB_P_LFO1_MODE + l * (TB_P_LFO2_MODE - TB_P_LFO1_MODE), TB_P_LFO1_S0 + l * (TB_P_LFO2_S0 - TB_P_LFO1_S0),
+                 TB_P_LFO1_SMOOTH + l * (TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH), TB_P_LFO1_HR + l * (TB_P_LFO2_HR - TB_P_LFO1_HR), TB_P_LFO1_H0 + l * (TB_P_LFO2_H0 - TB_P_LFO1_H0),
+                 TB_P_LFO1_DELAY + l, TB_P_LFO1_FADE + l, TB_P_LFO1_PHASE + l, TB_P_LFO1_TEMPO + l };
+    const int b = TB_P_LFO5_RATE + (l - kLfosA) * 88;
+    return { b, b + 1, b + 2, b + 18, b + 19, b + 20, b + 84, b + 85, b + 86, b + 87 };
+}
+/* Route r's source parameter (its destination, amount and polarity follow it): routes 1..8 and 9..16 are two runs of four parameters each. */
+inline constexpr int lrSrc(int r) { return r < 8 ? TB_P_LR1_SRC + r * 4 : TB_P_LR9_SRC + (r - 8) * 4; }
 static_assert(TB_P_RN2_STYLE - TB_P_RN1_STYLE == 3 && TB_P_RN1_RATE == TB_P_RN1_STYLE + 1 && TB_P_RN1_TEMPO == TB_P_RN1_STYLE + 2, "the random modulators' parameters must be style, rate, tempo, consecutive");
 static_assert(TB_P_LR2_SRC - TB_P_LR1_SRC == 4 && TB_P_LR1_DST == TB_P_LR1_SRC + 1 && TB_P_LR1_AMT == TB_P_LR1_SRC + 2 &&
               TB_P_LR1_BIP == TB_P_LR1_SRC + 3, "LFO route parameters must be src, dst, amt, bip, consecutive");
@@ -143,8 +167,8 @@ inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
  * No host tempo (0) counts as 120, the same clamp the delay and the granular oscillator use. */
 inline float lfoHz(const float *P, int l, float bpm)
 {
-    const float hz = potLfoHz(P[TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE)]);
-    if (P[TB_P_LFO1_TEMPO + l] < 0.5f) return hz;
+    const float hz = potLfoHz(P[lfoKeys(l).rate]);
+    if (P[lfoKeys(l).tempo] < 0.5f) return hz;
     return hz * (bpm >= 20.0f ? std::clamp(bpm, 40.0f, 300.0f) : 120.0f) / 120.0f;
 }
 
@@ -153,13 +177,13 @@ inline float lfoHz(const float *P, int l, float bpm)
 inline float potLfoSmoothTau(float v) { return v < 0.5f ? 0.0f : 0.002f * std::pow(350.0f, pot01(v)); }
 
 /* Vital's LFO Delay (0..4 s), Fade In (0..8 s) and Phase (0..1 of a cycle), linear over the pot (hidden "Vital LFO" bank; 0 leaves an LFO as it was). */
-inline float lfoDelaySec(const float *P, int l) { return 4.0f * pot01(P[TB_P_LFO1_DELAY + l]); }
-inline float lfoFadeSec(const float *P, int l) { return 8.0f * pot01(P[TB_P_LFO1_FADE + l]); }
-inline float lfoPhaseOff(const float *P, int l) { return pot01(P[TB_P_LFO1_PHASE + l]); }
+inline float lfoDelaySec(const float *P, int l) { return 4.0f * pot01(P[lfoKeys(l).delay]); }
+inline float lfoFadeSec(const float *P, int l) { return 8.0f * pot01(P[lfoKeys(l).fade]); }
+inline float lfoPhaseOff(const float *P, int l) { return pot01(P[lfoKeys(l).phase]); }
 /* Vital's envelope Delay and Hold: 0..4 s as 4 x (pot/127)^4 (its knobs are a quartic of 0..sqrt 2). */
 inline float potEnvStage(float v) { const float x = pot01(v), x2 = x * x; return 4.0f * x2 * x2; }
 
-inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[TB_P_LFO1_MODE + lfo * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)]); }
+inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[lfoKeys(lfo).mode]); }
 inline bool lfoIsFree(const float *P, int lfo) { return lfoModeOf(P, lfo) == 1; }          /* 0 Trig, 1 Free, 2 Env */
 inline bool lfoIsOneShot(const float *P, int lfo) { return lfoModeOf(P, lfo) == 2; }
 /* Modes 3 and 4 are not oscillators: the LFO is a lookup of the note being played in its Hi-Res table (Vital's Key and Key-in-octave route sources, which a route can bend with a curve of its own).
@@ -169,17 +193,17 @@ inline float lfoKeyValue(const float *P, int lfo, float note)
 {
     const int n = std::clamp((int) std::lround(note), 0, 127);
     const int i = lfoModeOf(P, lfo) == 3 ? std::min(n / 2, kLfoHi - 1) : n % 12;
-    return pot01(P[TB_P_LFO1_H0 + lfo * (TB_P_LFO2_H0 - TB_P_LFO1_H0) + i]);
+    return pot01(P[lfoKeys(lfo).h0 + i]);
 }
 
 /* The shape: 16 points of one cycle, 0..127 for 0..1, read round the loop with linear interpolation; or, with the LFO's Hi-Res switch on, its 64 points read the same way. */
 inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = false)
 {
-    if (P[TB_P_LFO1_HR + lfo * (TB_P_LFO2_HR - TB_P_LFO1_HR)] >= 0.5f) {
+    if (P[lfoKeys(lfo).hr] >= 0.5f) {
         const float x = oneShot ? std::min(phase, 1.0f) * (float) (kLfoHi - 1) : phase * (float) kLfoHi;
         const int i0 = oneShot ? std::min((int) x, kLfoHi - 1) : ((int) x) & (kLfoHi - 1);
         const float fr = x - std::floor(x);
-        const int base = TB_P_LFO1_H0 + lfo * (TB_P_LFO2_H0 - TB_P_LFO1_H0);
+        const int base = lfoKeys(lfo).h0;
         const float a = P[base + i0], b = P[base + (oneShot ? std::min(i0 + 1, kLfoHi - 1) : ((i0 + 1) & (kLfoHi - 1)))];
         return pot01(a + (b - a) * fr);
     }
@@ -187,7 +211,7 @@ inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = fal
     const float x = oneShot ? std::min(phase, 1.0f) * (float) (kLfoShape - 1) : phase * (float) kLfoShape;
     const int i0 = oneShot ? std::min((int) x, kLfoShape - 1) : ((int) x) & (kLfoShape - 1);
     const float fr = x - std::floor(x);
-    const int base = TB_P_LFO1_S0 + lfo * (TB_P_LFO2_S0 - TB_P_LFO1_S0);
+    const int base = lfoKeys(lfo).s0;
     const float a = P[base + i0], b = P[base + (oneShot ? std::min(i0 + 1, kLfoShape - 1) : ((i0 + 1) & (kLfoShape - 1)))];
     return pot01(a + (b - a) * fr);
 }
@@ -797,8 +821,13 @@ private:
          * swinging -1..+1 (the polarity is the route's own, as Serum stores it). */
         {
             float lfoOut[kRouteSrcs] = {};
+            bool srcUsed[kRouteSrcs + 1] = {};        /* LFO 5..8 only run when a route takes them (the first four always did) */
+            for (int r = 0; r < kLfoRoutes; r++)
+                if ((int) P[lrSrc(r) + 1] > MD_NONE) { const int sv = (int) P[lrSrc(r)]; if (sv >= 1 && sv <= kRouteSrcs) srcUsed[sv] = true; }
             for (int l = 0; l < kLfos; l++) {
-                if (lfoIsKey(P, l)) { lfoOut[l] = lfoKeyValue(P, l, noteSmoother.getCurrentValue() * 127.0f); lfoSmInit[l] = false; continue; }
+                if (l >= kLfosA && !srcUsed[lfoSlot(l) + 1]) continue;
+                const int ol = lfoSlot(l);
+                if (lfoIsKey(P, l)) { lfoOut[ol] = lfoKeyValue(P, l, noteSmoother.getCurrentValue() * 127.0f); lfoSmInit[l] = false; continue; }
                 /* Vital's Delay holds the LFO where it started until the time is up; the time that is left over in this block moves it (synth_lfo.cpp processControlRate) */
                 const float full = blockSize > 0 ? (float) blockSize / (float) sampleRate : 0.0f;
                 float adv = full;
@@ -812,35 +841,35 @@ private:
                 const float phOff = lfoPhaseOff(P, l);
                 float ph = lfoPhase[l] + phOff;
                 if (phOff > 0.0f) ph = lfoIsOneShot(P, l) ? std::min(ph, 1.0f) : ph - std::floor(ph);
-                lfoOut[l] = lfoShapeAt(P, l, ph, lfoIsOneShot(P, l));                             // 0..1
-                const float tau = potLfoSmoothTau(P[TB_P_LFO1_SMOOTH + l * (TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH)]);
+                lfoOut[ol] = lfoShapeAt(P, l, ph, lfoIsOneShot(P, l));                             // 0..1
+                const float tau = potLfoSmoothTau(P[lfoKeys(l).smooth]);
                 const float fadeSec = lfoFadeSec(P, l);
                 if (fadeSec > 0.0f && tau <= 0.0f) {                 /* Fade In blends from the LFO's start value to its running value (Vital ignores it while the LFO is smoothed) */
                     lfoFadeAmp[l] = std::min(1.0f, lfoFadeAmp[l] + adv / std::max(adv, fadeSec));
                     const float start = lfoShapeAt(P, l, phOff, lfoIsOneShot(P, l));
-                    lfoOut[l] = start + (lfoOut[l] - start) * lfoFadeAmp[l];
+                    lfoOut[ol] = start + (lfoOut[ol] - start) * lfoFadeAmp[l];
                 }
                 if (tau > 0.0f) {
                     /* Serum's smoother starts at the LFO's first value (measured), then follows it with the block-rate one-pole. Vital's starts at 0, climbs to the value, and stands still while a Delay runs
                      * (its time step is the time since the delay ended) */
                     const bool vital = P[TB_P_LFO_VLAW] >= 0.5f, first = !lfoSmInit[l];
-                    if (first) { lfoSm[l] = vital ? 0.0f : lfoOut[l]; lfoSmInit[l] = true; }
+                    if (first) { lfoSm[l] = vital ? 0.0f : lfoOut[ol]; lfoSmInit[l] = true; }
                     if ((vital || !first) && adv > 0.0f)
-                        lfoSm[l] += (1.0f - std::exp(adv == full ? -(float) blockSize / ((float) sampleRate * tau) : -adv / tau)) * (lfoOut[l] - lfoSm[l]);
-                    lfoOut[l] = lfoSm[l];
+                        lfoSm[l] += (1.0f - std::exp(adv == full ? -(float) blockSize / ((float) sampleRate * tau) : -adv / tau)) * (lfoOut[ol] - lfoSm[l]);
+                    lfoOut[ol] = lfoSm[l];
                 } else lfoSmInit[l] = false;
             }
-            stepRandoms(P, c.bpm, blockSize, lfoOut + kLfos);
-            lfoOut[kLfos + kRnds] = std::clamp(velocity, 0.0f, 1.0f);              /* Velocity: the note's, 0..1, fixed for the note */
-            lfoOut[kLfos + kRnds + 1] = std::clamp(c.aftertouch, 0.0f, 1.0f);     /* Aftertouch: the channel pressure now (0 when the pads do not send it) */
-            const int stride = TB_P_LR2_SRC - TB_P_LR1_SRC;
+            stepRandoms(P, c.bpm, blockSize, lfoOut + kLfosA);
+            lfoOut[kSrcVel - 1] = std::clamp(velocity, 0.0f, 1.0f);              /* Velocity: the note's, 0..1, fixed for the note */
+            lfoOut[kSrcAft - 1] = std::clamp(c.aftertouch, 0.0f, 1.0f);     /* Aftertouch: the channel pressure now (0 when the pads do not send it) */
             for (int r = 0; r < kLfoRoutes; r++) {
-                const int src = (int) P[TB_P_LR1_SRC + r * stride];
-                const int dst = (int) P[TB_P_LR1_DST + r * stride];
+                const int rb = lrSrc(r);
+                const int src = (int) P[rb];
+                const int dst = (int) P[rb + 1];
                 if (src >= 1 && src <= kRouteSrcs && dst > MD_NONE && dst < MD_COUNT) {
                     const float u = lfoOut[src - 1];
-                    const float v = P[TB_P_LR1_BIP + r * stride] >= 1.0f ? 2.0f * u - 1.0f : u;
-                    const float amt = v * potBipolar(P[TB_P_LR1_AMT + r * stride]);
+                    const float v = P[rb + 3] >= 1.0f ? 2.0f * u - 1.0f : u;
+                    const float amt = v * potBipolar(P[rb + 2]);
                     /* Serum moves the volume KNOB, and the knob's taper comes after: a level route is added to the knob
                      * position here and squared with it below. The spare envelopes' level routes are added to the knob
                      * the same way (above). */
@@ -936,8 +965,7 @@ private:
                                         || (int) P[TB_P_ME3_DST] == k.dLvl
                                         || (int) P[TB_P_ME4_DST] == k.dLvl;
             for (int r = 0; r < kLfoRoutes && !on; r++)
-                on = P[TB_P_LR1_SRC + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)] >= 1.0f &&
-                     (int) P[TB_P_LR1_DST + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)] == k.dLvl;
+                on = P[lrSrc(r)] >= 1.0f && (int) P[lrSrc(r) + 1] == k.dLvl;
             unison[o] = on ? std::clamp(std::min((int) P[k.uni], (int) P[TB_P_UNI_CAP]), 1, kMaxUnison) : 0;   /* Unison Cap: the live limit on every stack */
         }
         fitUnison(unison, c.streamBudget);
@@ -1236,8 +1264,8 @@ private:
     {
         bool used[kRnds] = {};
         for (int r = 0; r < kLfoRoutes; r++) {
-            const int src = (int) P[TB_P_LR1_SRC + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)];
-            if (src > kLfos && src <= kLfos + kRnds && (int) P[TB_P_LR1_DST + r * (TB_P_LR2_SRC - TB_P_LR1_SRC)] > MD_NONE) used[src - kLfos - 1] = true;
+            const int src = (int) P[lrSrc(r)];
+            if (src > kLfosA && src <= kLfosA + kRnds && (int) P[lrSrc(r) + 1] > MD_NONE) used[src - kLfosA - 1] = true;
         }
         for (int i = 0; i < kRnds; i++) {
             if (!used[i]) { out[i] = 0.5f; continue; }

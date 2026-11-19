@@ -12,7 +12,7 @@ namespace tb {
 
 class AnalogADSR {
 public:
-    enum class State { idle, attack, decay, sustain, release };
+    enum class State { idle, attack, decay, sustain, release, delay, hold };
 
     AnalogADSR()
     {
@@ -36,10 +36,16 @@ public:
     {
         calculateRelease();
         State orig = state;
+        if (delaySec > 0.0f) {                      /* Vital's Delay stage: silent until it is up, then the attack starts */
+            state = State::delay;
+            output = 0.0f;
+            stageLeft = (float) (sampleRate * delaySec);
+            return;
+        }
         if (attack == 0.0f) {
-            state = State::decay;
             output = 1.0f;
             decayPos = 0.0f;
+            enterHoldOrDecay();
         } else {
             state = State::attack;
             if (orig == State::idle)
@@ -51,6 +57,10 @@ public:
     {
         state = (output > 0.0f) ? State::release : State::idle;
     }
+
+    /* Vital's Delay and Hold stages, in seconds (0 = off, which leaves the envelope exactly as it was). */
+    void setDelay(float d) { delaySec = d; }
+    void setHold(float h) { holdSec = h; }
 
     void setAttack(float a)
     {
@@ -84,7 +94,16 @@ public:
         case State::idle: break;
         case State::attack:
             output = attackOffset + output * attackCoeff;
-            if (output >= 1.0f || attack == 0.0f) { output = 1.0f; state = State::decay; decayPos = 0.0f; }
+            if (output >= 1.0f || attack == 0.0f) { output = 1.0f; decayPos = 0.0f; enterHoldOrDecay(); }
+            break;
+        case State::delay:
+            if (--stageLeft <= 0.0f) {
+                if (attack == 0.0f) { output = 1.0f; decayPos = 0.0f; enterHoldOrDecay(); }
+                else state = State::attack;
+            }
+            break;
+        case State::hold:
+            if (--stageLeft <= 0.0f) { state = State::decay; decayPos = 0.0f; }
             break;
         case State::decay:
             if (decayPow != 0.0f) {
@@ -132,6 +151,11 @@ public:
     }
 
 private:
+    void enterHoldOrDecay()
+    {
+        if (holdSec > 0.0f) { state = State::hold; stageLeft = (float) (sampleRate * holdSec); }
+        else state = State::decay;
+    }
     void calculateAttack()
     {
         float samples = (float) (sampleRate * attack);
@@ -162,6 +186,7 @@ private:
     float attackOffset = 0.0f, decayOffset = 0.0f, releaseOffset = 0.0f;
     float output = 0.0f;
     float decayPow = 0.0f, decayPos = 0.0f, decayStep = 1.0f;
+    float delaySec = 0.0f, holdSec = 0.0f, stageLeft = 0.0f;
 };
 
 /* One-pole value smoother — port of gin::ValueSmoother (glide/noteSmoother). */

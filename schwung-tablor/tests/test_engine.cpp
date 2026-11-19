@@ -1112,6 +1112,46 @@ static void testFxBuses()
     CHECK(serial2(3) < serial2(0) - 3.0 && serial2(3) > -80.0, "Filter 2 into Filter 1 in series is quieter than Filter 2 alone and not silent (%.1f vs %.1f dB)", serial2(3), serial2(0));
 }
 
+/* Vital's envelope Delay and Hold, and its LFO Delay: the amp envelope is silent for the delay, an envelope hold keeps the peak before a decay to a low sustain, and an LFO Delay holds an LFO route back */
+static void testVitalEnvelopeAndLfoDelay()
+{
+    auto segment = [](const std::vector<int16_t> &x, double t0, double t1) {          /* left-channel rms between two times (s) */
+        double a = 0; int n = 0;
+        for (int i = (int) (t0 * 44100); i < (int) (t1 * 44100) && (size_t) i * 2 < x.size(); i++, n++) a += (double) x[(size_t) i * 2] * x[(size_t) i * 2];
+        return std::sqrt(a / std::max(1, n));
+    };
+    {   /* pot 64 is 4 * 0.504^4 = 0.26 s */
+        Engine e; soloWt3(e);
+        e.pots[TB_P_VCA_DELAY] = 64;
+        note(e, 69, 100);
+        auto x = render(e, 400);                                                       /* 1.16 s */
+        CHECK(segment(x, 0.0, 0.2) < 1.0, "an amp envelope Delay of 0.26 s is silent for 0.2 s (rms %.1f)", segment(x, 0.0, 0.2));
+        CHECK(segment(x, 0.4, 0.8) > 500.0, "and plays after it (rms %.1f)", segment(x, 0.4, 0.8));
+    }
+    {   /* hold: a sustain of 0 and a short decay, so without a hold the note is gone in 0.5 s; pot 64 keeps the peak for 0.26 s */
+        auto held = [&](int hold) {
+            Engine e; soloWt3(e);
+            e.pots[TB_P_VCA_S] = 0; e.pots[TB_P_VCA_D] = 40; e.pots[TB_P_VCA_HOLD] = (float) hold;
+            note(e, 69, 100);
+            return segment(render(e, 150), 0.15, 0.25);
+        };
+        CHECK(held(64) > 2.0 * held(0) + 100.0, "an envelope Hold keeps the peak while the decay waits (%.0f against %.0f)", held(64), held(0));
+    }
+    {   /* an LFO route to the level, with the LFO at 1 and then at 0: Delay holds it at its start value (the shape's first point, 0) */
+        auto lvl = [&](int delay, double t0, double t1) {
+            Engine e; soloWt3(e);
+            e.pots[TB_P_WT3_LEVEL] = 20;
+            for (int k = 0; k < 16; k++) e.pots[TB_P_LFO1_S0 + k] = k < 1 ? 0 : 127;      /* 0 at the start of the cycle, then 1 */
+            e.pots[TB_P_LFO1_RATE] = 0; e.pots[TB_P_LFO1_DELAY] = (float) delay;
+            e.pots[TB_P_LR1_SRC] = 1; e.pots[TB_P_LR1_DST] = 19; e.pots[TB_P_LR1_AMT] = 127; e.pots[TB_P_LR1_BIP] = 0;
+            note(e, 69, 100);
+            return segment(render(e, 300), t0, t1);
+        };
+        const double plain = lvl(0, 0.3, 0.6), delayed = lvl(90, 0.3, 0.6);             /* pot 90: 4 * 0.709^4 = 1.0 s */
+        CHECK(plain > 1.5 * delayed, "an LFO Delay of 1 s holds the route at the LFO's start value (%.0f against %.0f)", delayed, plain);
+    }
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1405,6 +1445,7 @@ int main()
     testVelocityLaw();
     testFxBuses();
     testFxFilterLfo();
+    testVitalEnvelopeAndLfoDelay();
     testUtilOutLfo();
     testNoteOnset();
     testMonoTakeover();

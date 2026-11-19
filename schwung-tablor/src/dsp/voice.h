@@ -133,6 +133,13 @@ inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
  * as such a filter, of the same absolute time constant at any LFO rate (calibration/dev/probe_lfo_smooth.py). */
 inline float potLfoSmoothTau(float v) { return v < 0.5f ? 0.0f : 0.002f * std::pow(350.0f, pot01(v)); }
 
+/* Vital's LFO Delay (0..4 s), Fade In (0..8 s) and Phase (0..1 of a cycle), linear over the pot (hidden "Vital LFO" bank; 0 leaves an LFO as it was). */
+inline float lfoDelaySec(const float *P, int l) { return 4.0f * pot01(P[TB_P_LFO1_DELAY + l]); }
+inline float lfoFadeSec(const float *P, int l) { return 8.0f * pot01(P[TB_P_LFO1_FADE + l]); }
+inline float lfoPhaseOff(const float *P, int l) { return pot01(P[TB_P_LFO1_PHASE + l]); }
+/* Vital's envelope Delay and Hold: 0..4 s as 4 x (pot/127)^4 (its knobs are a quartic of 0..sqrt 2). */
+inline float potEnvStage(float v) { const float x = pot01(v), x2 = x * x; return 4.0f * x2 * x2; }
+
 inline int lfoModeOf(const float *P, int lfo) { return (int) std::lround(P[TB_P_LFO1_MODE + lfo * (TB_P_LFO2_MODE - TB_P_LFO1_MODE)]); }
 inline bool lfoIsFree(const float *P, int lfo) { return lfoModeOf(P, lfo) == 1; }          /* 0 Trig, 1 Free, 2 Env */
 inline bool lfoIsOneShot(const float *P, int lfo) { return lfoModeOf(P, lfo) == 2; }
@@ -247,7 +254,7 @@ public:
         /* Serum's noise is mono with a random left/right level imbalance per note (2.3 dB on average, calibration/noise_stereo: correlation 1.000, side/mid -13..-29 dB) */
         noisePan = ((float) rand() / (float) RAND_MAX * 2.0f - 1.0f) * 0.27f;
         for (int l = 0; l < kLfos; l++)             /* Trig restarts at the top of the cycle, Free joins the running one */
-            { lfoPhase[l] = lfoIsFree(P, l) ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; }
+            { lfoPhase[l] = lfoIsFree(P, l) ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
 
         filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
@@ -272,7 +279,7 @@ public:
         bool legato = P[TB_P_LEGATO] > 0.5f && !isReleasing();       /* a releasing voice has to be brought back in whatever the legato switch says */
         if (!legato) {              /* env retrig switches cut: always retrig */
             for (int l = 0; l < kLfos; l++)
-                if (!lfoIsFree(P, l)) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; }
+                if (!lfoIsFree(P, l)) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
             filterADSR.noteOn();
         for (auto &e : modEnv) e.noteOn();
             adsr.noteOn();
@@ -673,12 +680,16 @@ private:
          * the same ratio of time on either envelope, so the two stay in proportion. */
         const float dOff = P[TB_P_DECAY] - 64.0f;
         auto decayPot = [dOff](float v) { return std::min(std::max(v + dOff, 0.0f), 127.0f); };
+        filterADSR.setDelay(potEnvStage(P[TB_P_FLT_DELAY]));
+        filterADSR.setHold(potEnvStage(P[TB_P_FLT_HOLD]));
         filterADSR.setAttack(potAttackTime(P[TB_P_FLT_A]));
         filterADSR.setDecay(potEnvTime(decayPot(P[TB_P_FLT_D])));
         filterADSR.setSustainLevel(pot01(P[TB_P_FLT_S]));
         filterADSR.setRelease(potEnvTime(P[TB_P_FLT_R]));
         if (blockSize > 0) filterADSR.process(blockSize);
 
+        adsr.setDelay(potEnvStage(P[TB_P_VCA_DELAY]));
+        adsr.setHold(potEnvStage(P[TB_P_VCA_HOLD]));
         adsr.setAttack(potAttackTime(P[TB_P_VCA_A]));
         adsr.setDecay(potEnvTime(decayPot(P[TB_P_VCA_D])));
         adsr.setDecayPower(P[TB_P_VCA_DPOW] >= 0.5f ? (P[TB_P_VCA_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f);
@@ -698,6 +709,8 @@ private:
                   TB_P_ME2_DST, TB_P_ME2_AMT },
             };
             for (int i = 0; i < kModEnvs; i++) {
+                modEnv[i].setDelay(potEnvStage(P[TB_P_ME1_DELAY + 2 * i]));
+                modEnv[i].setHold(potEnvStage(P[TB_P_ME1_HOLD + 2 * i]));
                 modEnv[i].setAttack(potAttackTime(P[k[i].a]));
                 modEnv[i].setDecay(potEnvTime(P[k[i].d]));
                 modEnv[i].setSustainLevel(pot01(P[k[i].s]));
@@ -721,17 +734,34 @@ private:
             float lfoOut[kLfos];
             for (int l = 0; l < kLfos; l++) {
                 const int rate = TB_P_LFO1_RATE + l * (TB_P_LFO2_RATE - TB_P_LFO1_RATE);
+                /* Vital's Delay holds the LFO where it started until the time is up; the time that is left over in this block moves it (synth_lfo.cpp processControlRate) */
+                const float full = blockSize > 0 ? (float) blockSize / (float) sampleRate : 0.0f;
+                float adv = full;
+                if (lfoDelayLeft[l] > 0.0f) { const float used = std::min(adv, lfoDelayLeft[l]); lfoDelayLeft[l] -= used; adv -= used; }
                 if (blockSize > 0) {
-                    lfoPhase[l] += potLfoHz(P[rate]) * (float) blockSize / (float) sampleRate;
+                    /* with no Delay running the step is written the way it always was, so Serum presets stay bit-identical */
+                    lfoPhase[l] += adv == full ? potLfoHz(P[rate]) * (float) blockSize / (float) sampleRate : potLfoHz(P[rate]) * adv;
                     if (lfoIsOneShot(P, l)) lfoPhase[l] = std::min(lfoPhase[l], 1.0f);        /* Env: plays once, then holds its end */
                     else lfoPhase[l] -= std::floor(lfoPhase[l]);
                 }
-                lfoOut[l] = lfoShapeAt(P, l, lfoPhase[l], lfoIsOneShot(P, l));                    // 0..1
+                const float phOff = lfoPhaseOff(P, l);
+                float ph = lfoPhase[l] + phOff;
+                if (phOff > 0.0f) ph = lfoIsOneShot(P, l) ? std::min(ph, 1.0f) : ph - std::floor(ph);
+                lfoOut[l] = lfoShapeAt(P, l, ph, lfoIsOneShot(P, l));                             // 0..1
                 const float tau = potLfoSmoothTau(P[TB_P_LFO1_SMOOTH + l * (TB_P_LFO2_SMOOTH - TB_P_LFO1_SMOOTH)]);
+                const float fadeSec = lfoFadeSec(P, l);
+                if (fadeSec > 0.0f && tau <= 0.0f) {                 /* Fade In blends from the LFO's start value to its running value (Vital ignores it while the LFO is smoothed) */
+                    lfoFadeAmp[l] = std::min(1.0f, lfoFadeAmp[l] + adv / std::max(adv, fadeSec));
+                    const float start = lfoShapeAt(P, l, phOff, lfoIsOneShot(P, l));
+                    lfoOut[l] = start + (lfoOut[l] - start) * lfoFadeAmp[l];
+                }
                 if (tau > 0.0f) {
-                    /* the smoother starts at the LFO's first value (measured), then follows it with the block-rate one-pole */
-                    if (!lfoSmInit[l]) { lfoSm[l] = lfoOut[l]; lfoSmInit[l] = true; }
-                    else if (blockSize > 0) lfoSm[l] += (1.0f - std::exp(-(float) blockSize / ((float) sampleRate * tau))) * (lfoOut[l] - lfoSm[l]);
+                    /* Serum's smoother starts at the LFO's first value (measured), then follows it with the block-rate one-pole. Vital's starts at 0, climbs to the value, and stands still while a Delay runs
+                     * (its time step is the time since the delay ended) */
+                    const bool vital = P[TB_P_LFO_VLAW] >= 0.5f, first = !lfoSmInit[l];
+                    if (first) { lfoSm[l] = vital ? 0.0f : lfoOut[l]; lfoSmInit[l] = true; }
+                    if ((vital || !first) && adv > 0.0f)
+                        lfoSm[l] += (1.0f - std::exp(adv == full ? -(float) blockSize / ((float) sampleRate * tau) : -adv / tau)) * (lfoOut[l] - lfoSm[l]);
                     lfoOut[l] = lfoSm[l];
                 } else lfoSmInit[l] = false;
             }
@@ -1042,6 +1072,8 @@ private:
     AnalogADSR modEnv[kModEnvs];        /* the two spare, routable envelopes */
     float modOff[MD_COUNT] = {};        /* their summed offset per destination */
     float lfoPhase[kLfos] = {};
+    float lfoDelayLeft[kLfos] = {};      /* seconds of Vital LFO Delay still to wait, and how far the Fade In has got (0..1) */
+    float lfoFadeAmp[kLfos] = {};
     float lfoSm[kLfos] = {};             /* each LFO's smoothed output, and whether it has started since the note began */
     bool lfoSmInit[kLfos] = {};
     float lfoLvl[MD_COUNT] = {};         /* LFO offsets to the level KNOBS (before the taper) */

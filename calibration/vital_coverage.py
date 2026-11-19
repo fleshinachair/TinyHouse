@@ -45,12 +45,12 @@ def converter_patterns() -> set[str]:
 RULES: list[tuple[str, str, str]] = [
     (r"osc_N_spectral_morph_(type|amount)", "partial", "spectral morph types 2-9 and 11 (formant scale, stretch, inharmonic, smear, random, low pass, high pass, phase disperse, skew) are measured and baked into the wavetable at the saved amount (macros and velocity folded in); vocode, Shepard and live amount modulation are not carried"),
     (r"osc_N_distortion_(type|amount|phase)", "partial", "phase distortion types 1-6 baked into the wavetable at the saved amount; ring modulation by another oscillator (types 10 and 11) runs live through the engine's RM warp with Warp Chain (Vital's depth, measured: calibration/vital_rm_probe.py); FM by another oscillator (types 7 and 8) runs through the PD warp at Vital's law, 6 cycles x amount squared (calibration/vital_fm_probe.py), and a live LFO / envelope route to the amount of an FM or RM oscillator moves it; FM by the sample (9), ring mod by the sample (12) and live amount modulation of types 1-6 are not carried"),
-    (r"osc_N_stack_style", "approx", "unison stack styles other than the plain detune stack are played as the plain stack"),
-    (r"osc_N_unison_detune|osc_N_detune_(range|power)", "approx", "detune law is a guess, checked only by ear and by the spectrum of the nine A/B presets"),
+    (r"osc_N_stack_style", "carried", "stack styles 0-10 measured (unison lines against the plugin) and played by the engine's Vital unison law"),
+    (r"osc_N_(unison_detune|detune_(range|power)|unison_blend|stereo_spread|unison_voices)", "carried", "detune width and voice spacing, blend level, stereo spread and the single-voice level measured through the plugin (calibration/vital_stack_probe.py) and run by the engine's Vital unison law"),
     (r"osc_N_(smooth_interpolation|random_phase|phase|view_2d|dimension.*)", "approx", "phase and frame interpolation are the engine's own"),
     (r"sample_(on|level|loop|keytrack|bounce|transpose|tune|pan|destination)", "carried", "sample oscillator carried as a one-region sample set (root note 60, loop, ping-pong, key tracking, transpose, tune, pan, routing); level measured"),
     (r"sample_.*", "missing", "random start phase and transpose quantize are not carried"),
-    (r"filter_N_mix", "partial", "carried only fully wet; a filter mixed fully dry is left out, a partial dry mix is dropped (macro / velocity routes are folded in at their saved values)"),
+    (r"filter_N_mix", "carried", "a linear dry / wet crossfade, measured (calibration/vital_fmix_probe.py) and run by the engine's hidden Filter Mix (macro / velocity routes are folded in at their saved values)"),
     (r"filter_N_keytrack", "partial", "positive key tracking measured and carried; negative is not"),
     (r"filter_fx_(keytrack|drive)", "missing", "not carried"),
     (r"filter_N_(formant_.*)", "approx", "formant filter is mapped to the nearest engine filter type"),
@@ -59,10 +59,12 @@ RULES: list[tuple[str, str, str]] = [
     (r"filter_N_filter_input", "carried", "serial routing measured and wired (engine routing slot 'Filter')"),
     (r"env_N_(delay|hold)", "missing", "delay and hold stages are not carried"),
     (r"env_N_(attack|decay|sustain|release)(_power)?", "partial", "carried for the amp and filter envelopes and the two spare ones; decay and release times are fitted to the engine's curve from the stage's power, the amp envelope is squared into the gain as Vital does (measured: calibration/vital_env_probe.py), macro and velocity routes to the times and sustain are added at their saved values"),
-    (r"lfo_N_(delay_time|fade_time|phase|stereo|smooth_.*)", "missing", "LFO delay, fade-in, phase offset and smoothing are not carried"),
+    (r"lfo_N_(delay_time|fade_time|phase|smooth_.*)", "carried", "LFO Delay, Fade In, Phase and Smooth follow synth_lfo.cpp and are checked against the plugin (calibration/vital_lfo_delay_probe.py)"),
+    (r"lfo_N_stereo", "missing", "the stereo phase spread between the left and right LFO is not carried"),
     (r"lfo_N_(tempo|sync|frequency|keytrack_.*)", "partial", "rate carried; tempo sync at 120 BPM; keyboard-following LFOs at a fixed rate"),
     (r"random_N_.*", "missing", "random modulators (sample-and-hold, perlin) are not carried"),
-    (r"portamento_.*", "missing", "portamento / glide not carried"),
+    (r"portamento_slope", "missing", "the glide slope (curved glide) is not carried; the glide is a straight ramp"),
+    (r"portamento_.*", "carried", "time, scale and force measured through the plugin (calibration/vital_porta_probe.py) and run by the engine's Vital glide law"),
     (r"compressor_(attack|release)", "carried", "carried into the engine's Vital compressor law (fx.h processCompVital)"),
     (r"voice_(tune|transpose)", "carried", "added to every oscillator's and the sample's tune, as Vital adds it to the note (key tracking and LFO key following do not see it)"),
     (r"voice_(override|priority|amplitude)|velocity_track|sample_tune|stereo_(mode|routing)", "partial", "some voice-level settings are carried (polyphony, legato, pitch bend range), the rest are not"),
@@ -194,7 +196,7 @@ def main() -> None:
     out += ["", "### Destinations", "", "| Destination | Routes | Carried |", "|---|---:|---:|"]
     out += [f"| `{k}` | {v} | {dst_ok.get(k, 0)} |" for k, v in dst_c.most_common(60)]
     out += ["", "## Wavetable modifiers", "", "| Modifier | Uses | Status |", "|---|---:|---|"]
-    out += [f"| `{k}` | {v} | {'carried' if k in ('Wave Source', 'Audio File Source', 'Line Source') else 'not carried (the converter notes it and plays the unmodified source)'} |" for k, v in wt_mod.most_common()]
+    out += [f"| `{k}` | {v} | {'carried' if k in ('Wave Source', 'Audio File Source', 'Line Source', 'Wave Folder', 'Frequency Filter', 'Wave Warp', 'Phase Shift') else 'not carried (the converter notes it and plays the unmodified source)'} |" for k, v in wt_mod.most_common()]
     Path(a.out).write_text("\n".join(out) + "\n", encoding="utf-8")
     print(f"wrote {a.out}: {len(rows)} families, {n} presets")
     for st in order:

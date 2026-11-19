@@ -146,6 +146,35 @@ def test_portamento_is_carried_in_vitals_law():
     assert not any("portamento" in n and "not carried" in n for n in m["notes"])
 
 
+def test_lfo_delay_fade_phase_and_smooth_are_carried():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import vital_lfo_probe as LP
+    d = LP.base_preset()
+    s = d["settings"]
+    s.update(lfo_1_delay_time=1.0, lfo_1_fade_time=4.0, lfo_1_phase=0.5, lfo_1_smooth_mode=0.0)
+    P = VI.map_vital(d, "p", Path("/nonexistent"), "Probe")["params"]
+    assert P["lfo1_delay"] == 32 and P["lfo1_fade"] == 64 and P["lfo1_phase"] == 64 and P["lfo1_smooth"] == 0
+    s.update(lfo_1_smooth_mode=1.0, lfo_1_smooth_time=-2.0)                    # smoothing on: a 0.072 s time constant, and Vital ignores the fade
+    P = VI.map_vital(d, "p", Path("/nonexistent"), "Probe")["params"]
+    tau = 0.002 * 350.0 ** (P["lfo1_smooth"] / 127.0)
+    assert abs(tau - 0.0721) / 0.0721 < 0.06 and "lfo1_fade" not in P
+
+
+def test_wavetable_modifiers_follow_vitals_algorithms():
+    import vital_wtmod as WM
+    x = 0.8 * np.sin(2 * np.pi * np.arange(2048) / 2048.0)
+    pos = np.array([0.0])
+    fold = lambda boost: WM.apply_modifier({"type": "Wave Folder", "keyframes": [{"position": 0, "fold_boost": boost}]}, x[None], pos)[0]
+    assert np.abs(fold(1.0) - x).max() < 1e-9                                  # a boost of 1 leaves a wave under full scale alone
+    harm = lambda w: np.abs(np.fft.rfft(w))[2:].sum() / np.abs(np.fft.rfft(w))[1]
+    assert harm(fold(3.0)) > harm(x) + 0.3                                     # more boost folds in harmonics
+    lp = WM.apply_modifier({"type": "Frequency Filter", "style": 0, "normalize": False, "keyframes": [{"position": 0, "cutoff": 0.0, "shape": 0.0}]},
+                           (np.sin(2 * np.pi * np.arange(2048) * 5 / 2048.0) + x)[None], pos)[0]
+    assert np.abs(np.fft.rfft(lp))[5] < 1e-6 and np.abs(np.fft.rfft(lp))[1] > 100       # a low pass at bin 1 removes the 5th harmonic and keeps the first
+    ph = WM.apply_modifier({"type": "Phase Shift", "style": 4, "keyframes": [{"position": 0, "phase": 0.0, "mix": 1.0}]}, x[None], pos)[0]
+    assert np.allclose(np.abs(np.fft.rfft(ph)), np.abs(np.fft.rfft(x)), atol=1e-6)      # Clear keeps every harmonic's level
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

@@ -2,20 +2,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 Mathew Taylor. This file is part of TinyHouse's Vital import and contains code derived from Vital
 # (https://github.com/mtytel/vital), Copyright 2013-2019 Matt Tytel, GNU GPL version 3 or later. See THIRD-PARTY.md and LICENSE-GPL-3.0.
-"""Vital preset (.vital) -> Tablor preset for the Ableton Move (Schwung). FIRST PASS: the static patch and the FX chain.
+"""Vital preset (.vital) and bank (.vitalbank) -> Tablor preset for the Ableton Move (Schwung), a second front end on the same engine.
 
     python converter/vital_import.py "My Preset.vital" [more.vital ...] -o out/vital
 
-Written from Vital's file format and by measuring the plugin (calibration/vital_render.py), not from Vital's source: the
-parameters are plain numbers in real units in the preset's "settings", and the wavetables are inside the file.
+Written from Vital's file format and by measuring the plugin (calibration/vital_render.py and the vital_*_probe.py scripts), with Vital's source read for the exact laws:
+the parameters are plain numbers in real units in the preset's "settings", and the wavetables are inside the file.
 
-Carried:    oscillators 1-3 (wavetable, frame, level, pan, tune, unison voices, detune, stereo spread, filter routing), amp envelope,
-            filter 1 (cutoff, resonance, drive, type from model / style / blend) with an envelope-2 route into its cutoff,
-            and the FX chain onto the engine's own FX block: reverb, delay, chorus, flanger, phaser, distortion, EQ.
-Not yet:    LFOs, macros and every other modulation route; the sample oscillator; filter 2 and the filter FX; the compressor;
-            wavetable modifiers (Wave Folder, Wave Warp ...); spectral morph, phase distortion and unison stack modes.
-Everything not carried is listed in the preset's report so nothing is dropped silently. Laws marked GUESS below are first
-estimates that calibration/vital_ab.py is there to check against Vital's own renders.
+Carried:    oscillators 1-3 (wavetable frames and their modifiers, spectral morph, phase distortion, unison laws and stack styles, FM / ring mod), the sample oscillator, both voice filters
+            (models, serial routing, dry / wet mix), the amp, filter and two spare envelopes (with delay and hold), four LFOs (delay, fade, phase, smooth), macros, velocity, mod wheel and
+            random modulators (as their average), the Filter FX, portamento, and the FX chain (reverb, delay, chorus, flanger, phaser, distortion, compressor, EQ).
+Not yet:    random modulators as a live signal, the wavetable "stereo" LFO spread, the Filter FX drive, wavetable component types beyond the sources and the four modifiers.
+Everything not carried is listed in the preset's report so nothing is dropped silently. Laws marked GUESS below are first estimates that calibration/vital_ab.py is there to check
+against Vital's own renders.
 """
 from __future__ import annotations
 
@@ -36,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deephouse2move as d2m                                     # TABLOR_DEFAULTS, pot_time / pot_attack, MOVE_WT_ROOT, MOVE_PRESET_DIR
 import sample_export as SE
 import vital_morph as VM
+import vital_wtmod as WM
 
 FRAME = 2048
 FRAMES_OUT = 128                      # the engine's position pot has 128 steps, so more frames than that cannot be told apart
@@ -121,14 +121,25 @@ def _audio_wave(comp: dict, kf: dict, audio: np.ndarray) -> np.ndarray:
 
 
 def render_group(group: dict, notes: list[str]) -> np.ndarray | None:
-    """One group of a wavetable as (128, 2048) frames: its source, which is all this pass renders. Modifiers are named in `notes`."""
+    """One group of a wavetable as (128, 2048) frames: its source, then its modifiers in order (Wave Folder, Frequency Filter, Wave Warp, Phase Shift: vital_wtmod.py).
+    Any other modifier is named in `notes`."""
     comps = group.get("components", [])
     src = next((c for c in comps if c.get("type") in ("Wave Source", "Line Source", "Audio File Source")), None)
-    for c in comps:
-        if c is not src:
-            notes.append(f"wavetable modifier '{c.get('type')}' not carried")
-    if src is None:
+    frames = _render_source(src, notes) if src is not None else None
+    if frames is None:
         return None
+    pos = np.arange(FRAMES_OUT) * 255.0 / (FRAMES_OUT - 1)
+    for c in comps:
+        if c is src:
+            continue
+        if c.get("type") in WM.MODIFIERS:
+            frames = WM.apply_modifier(c, frames, pos)
+        else:
+            notes.append(f"wavetable modifier '{c.get('type')}' not carried")
+    return frames
+
+
+def _render_source(src: dict, notes: list[str]) -> np.ndarray | None:
     kfs = sorted(src.get("keyframes", []), key=lambda k: k.get("position", 0))
     keys: list[tuple[float, np.ndarray]] = []
     audio = None
@@ -280,6 +291,8 @@ FX_FOLD_RANGE = {
     "compressor_mix": (0.0, 1.0), "compressor_attack": (0.0, 1.0), "compressor_release": (0.0, 1.0),
     **{f"compressor_{b}_{k}": r for b in ("low", "band", "high") for k, r in (("upper_threshold", (-80.0, 0.0)), ("lower_threshold", (-80.0, 0.0)), ("upper_ratio", (0.0, 1.0)), ("lower_ratio", (-1.0, 1.0)), ("gain", (-30.0, 30.0)))},
     **{f"eq_{b}_{k}": r for b in ("low", "band", "high") for k, r in (("cutoff", (8.0, 136.0)), ("gain", (-15.0, 15.0)), ("resonance", (0.0, 1.0)))},
+    # an LFO's own controls moved by a macro, velocity or a random modulator (taken at its average): the LFO runs at the moved value
+    **{f"lfo_{n}_{k}": r for n in range(1, 9) for k, r in (("frequency", (-7.0, 9.0)), ("smooth_time", (-10.0, 4.0)), ("delay_time", (0.0, 4.0)), ("fade_time", (0.0, 8.0)), ("phase", (0.0, 1.0)))},
 }
 
 # Effect mix loudness, measured by calibration/vital_mix_probe.py (tail level 0.3-1.5 s after a short pluck, dB re the dry note).
@@ -332,6 +345,14 @@ VELOCITY_NOMINAL = 100 / 127.0
 DPOW_HOLD, DPOW_FAST = 3.0, -8.0                                                # amp decay power from which (a positive one holds and then plunges, a very negative one drops at once) the engine draws Vital's own decay curve (adsr.h setDecayPower); the one-pole fit does better between: -5 to 2 measured
 
 
+def env_stage_pot(s: dict, k: int, stage: str) -> int:
+    """An envelope's Delay or Hold as the engine's hidden pot: Vital stores 0..sqrt 2 and plays its fourth power in seconds (0..4 s); the engine's pot is 4 * (pot / 127)^4 s."""
+    return pot(127.0 * max(float(s.get(f"env_{k}_{stage}", 0.0)), 0.0) / 1.41421356)
+
+
+RANDOM_AS_MEAN = True
+
+
 def static_source_value(s: dict, src: str):
     """The value of a route's source when it does not move during a note: a macro at its saved position, velocity at the nominal value, and the mod wheel at the position saved in the preset (the plugin loads it:
     Moving Harmonics at wheel 1 renders 12 dB louder than at 0). None for a source that moves (LFOs, envelopes, random...)."""
@@ -341,6 +362,8 @@ def static_source_value(s: dict, src: str):
         return VELOCITY_NOMINAL
     if src == "mod_wheel":
         return float(s.get("mod_wheel", 0.0))
+    if src.startswith("random_") and RANDOM_AS_MEAN:
+        return 0.5                                           # a random modulator (0..1, a new value each time) cannot be replayed: its average, which is the middle of its range
     return None
 # Seconds per LFO cycle at 120 BPM for lfo_N_sync = 1 Tempo / 2 Dotted / 3 Triplets, from the tempo index: the same ladder the delay measured (calibration/vital_lfo_probe.py checks it)
 LFO_SYNC_MULT = {1: 1.0, 2: 1.5, 3: 2.0 / 3.0}
@@ -348,6 +371,9 @@ LFO_SYNC_MULT = {1: 1.0, 2: 1.5, 3: 2.0 / 3.0}
 
 def lfo_period_s(sync: int, tempo: float) -> float:
     return 2.0 ** (7 - round(tempo)) * LFO_SYNC_MULT.get(sync, 1.0)
+
+
+LFO_LINE_SMOOTH = True
 
 
 def lfo_shape(lfo: dict) -> list[int]:
@@ -363,6 +389,8 @@ def lfo_shape(lfo: dict) -> list[int]:
             if xs[j] <= x < xs[j + 1] or (x >= xs[-1] and j == len(xs) - 2):
                 t = (x - xs[j]) / (xs[j + 1] - xs[j])
                 p = pw[j] if j < len(pw) else 0.0
+                if lfo.get("smooth") and LFO_LINE_SMOOTH:                                   # the line's Smooth switch eases every segment (LineGenerator::smoothTransition: a half sine) before its power bends it
+                    t = 0.5 * math.sin((t - 0.5) * math.pi) + 0.5
                 if abs(p) > 1e-3:
                     t = (math.exp(p * t) - 1.0) / (math.exp(p) - 1.0)
                 y = ys[j] + (ys[j + 1] - ys[j]) * t
@@ -590,10 +618,21 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         for j, v in enumerate(shape):
             P[f"lfo{slot}_s{j}"] = v
         P[f"lfo{slot}_smooth"] = 0
-        if lf.get("smooth"):
-            notes.append(f"LFO {k} 'smooth' shape not carried")
-        if s.get(f"lfo_{k}_delay_time", 0) > 0 or s.get(f"lfo_{k}_fade_time", 0) > 0 or abs(s.get(f"lfo_{k}_phase", 0)) > 1e-3:
-            notes.append(f"LFO {k} delay / fade-in / phase offset not carried")
+        # Vital's LFO Smooth (synth_lfo.cpp: a one-pole low-pass with half life 0.2 * 2^smooth_time seconds, so a time constant of 0.2885 * 2^smooth_time), Delay, Fade In and Phase. Fade In is
+        # skipped by Vital while Smooth is on (the one-pole replaces the fade blend); the engine's smoother has the same law as Serum's, 2 ms to 0.7 s.
+        P["lfo_vlaw"] = 1
+        smooth_on = bool(s.get(f"lfo_{k}_smooth_mode", 1.0))
+        tau = 0.2885 * 2.0 ** s.get(f"lfo_{k}_smooth_time", -7.5)
+        if smooth_on and tau >= 0.0025:
+            P[f"lfo{slot}_smooth"] = pot(max(1.0, 127.0 * math.log(tau / 0.002) / math.log(350.0)))
+            if tau > 0.7:
+                notes.append(f"LFO {k} smoothing {tau:.1f} s is past the engine's 0.7 s: shortened")
+        if s.get(f"lfo_{k}_delay_time", 0.0) > 0:
+            P[f"lfo{slot}_delay"] = pot(127.0 * CLAMP(s[f"lfo_{k}_delay_time"] / 4.0, 0.0, 1.0))
+        if s.get(f"lfo_{k}_fade_time", 0.0) > 0 and not smooth_on:
+            P[f"lfo{slot}_fade"] = pot(127.0 * CLAMP(s[f"lfo_{k}_fade_time"] / 8.0, 0.0, 1.0))
+        if abs(s.get(f"lfo_{k}_phase", 0.0)) > 1e-3:
+            P[f"lfo{slot}_phase"] = pot(127.0 * CLAMP(s[f"lfo_{k}_phase"], 0.0, 1.0))
     slot_of = {k: i for i, k in enumerate(chosen, 1)}
     lr = sorted([r for r in lr if r[1] in slot_of], key=lambda r: -r[0])
     for n, (w, k, dst, x, bip) in enumerate(lr[:8], 1):
@@ -615,6 +654,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"me{n}_d"] = d2m.pot_time(t4(f"env_{k}_decay"))
         P[f"me{n}_s"] = pot(127 * CLAMP(s[f"env_{k}_sustain"], 0, 1))
         P[f"me{n}_r"] = d2m.pot_time(t4(f"env_{k}_release"))
+        P[f"me{n}_delay"], P[f"me{n}_hold"] = env_stage_pot(s, k, "delay"), env_stage_pot(s, k, "hold")
     for w, k, dst, x, dn in me[2:]:
         drop("envelope routes past the engine's 2")
         LAST_DROPPED_ENV.append((k, dn))
@@ -768,6 +808,19 @@ def static_route_offset(s: dict, routes: list, dest: str) -> float:
     return off
 
 
+def lfo_route_mean(s: dict, routes: list, dest: str) -> float:
+    """What the LFO routes to a control that the engine cannot move live add to it on average, in the control's own 0..1 units: each LFO at the mean of its shape over a cycle."""
+    off = 0.0
+    for src, d, a, bip in routes:
+        mo = re.fullmatch(r"lfo_([1-8])", src)
+        if d != dest or not mo:
+            continue
+        lf = (s.get("lfos") or [{}] * 8)[int(mo.group(1)) - 1]
+        mean = sum(lfo_shape(lf)) / (16 * 127.0)
+        off += a * ((mean - 0.5) if bip else mean)
+    return off
+
+
 VITAL_ENV_RANGE = {"attack": 2.37842, "decay": 2.37842, "release": 2.37842, "sustain": 1.0}      # the stored range of an envelope control (SynthParameters): times are the value ** 4 seconds
 
 
@@ -855,7 +908,10 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P[f"{k}_uni"] = int(CLAMP(voices, 1, 16))
         # measured (calibration/vital_stack_probe.py): the stack's half-width in semitones is range * (detune / 10)^2, whatever the power; the power shapes the spacing of the voices, (e^(p|x|) - 1) / (e^p - 1).
         # The engine's Vital unison law reads the Detune pot as 48 * (pot / 127)^2 semitones (with decimals: a pot of 9.87 is a stored value, the knob shows it rounded) and the power from its own parameter
-        semis = s[f"osc_{o}_detune_range"] * CLAMP(s[f"osc_{o}_unison_detune"] / 10.0, 0.0, 1.0) ** 2
+        # the engine's detune does not move live: an LFO route to the detune range is folded in at the LFO's mean over a cycle (Vital's range is 0..48 st, a route's amount a fraction of it). A range pushed below 0
+        # spreads the stack as far the other way (measured), so its size is what counts. Space Station: LFO 1 shrinks oscillator 1's range and widens oscillator 3's.
+        rng = s[f"osc_{o}_detune_range"] + 48.0 * lfo_route_mean(s, routes, f"osc_{o}_detune_range")
+        semis = min(abs(rng), 48.0) * CLAMP(s[f"osc_{o}_unison_detune"] / 10.0, 0.0, 1.0) ** 2
         P["uni_vital"] = 1
         P[f"{k}_detune"] = round(127.0 * math.sqrt(CLAMP(semis, 0.0, 48.0) / 48.0), 3)
         P[f"{k}_upow"] = round(float(CLAMP(s[f"osc_{o}_detune_power"], -8.0, 8.0)), 3)
@@ -897,8 +953,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["vca_d"] = d2m.pot_time(env_seconds(s, "env_1_decay", True))
     P["vca_s"] = pot(127 * CLAMP(s["env_1_sustain"], 0, 1) ** 2)                        # Vital squares the amplitude envelope into the gain (measured: sustain 0.5 plays at 0.25); the engine sustain is the gain itself
     P["vca_r"] = d2m.pot_time(env_seconds(s, "env_1_release", True))
-    if s.get("env_1_hold") or s.get("env_1_delay"):
-        notes.append("amp envelope delay / hold not carried")
+    P["vca_delay"], P["vca_hold"] = env_stage_pot(s, 1, "delay"), env_stage_pot(s, 1, "hold")
 
     # --- the two voice filters (cutoff is a MIDI note, 8..136, the same space the engine uses)
     for fi, pre, ecut in ((1, "flt", env_cut), (2, "flt2", env_cut2)):
@@ -937,6 +992,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             P["flt_d"] = d2m.pot_time(t("env_2_decay"))
             P["flt_s"] = pot(127 * CLAMP(s["env_2_sustain"], 0, 1))
             P["flt_r"] = d2m.pot_time(t("env_2_release"))
+            P["flt_delay"], P["flt_hold"] = env_stage_pot(s, 2, "delay"), env_stage_pot(s, 2, "hold")
     if s.get("filter_2_on") and s.get("filter_2_mix", 1.0) >= 0.02:
         carried.append("filter 2")
     if s.get("filter_fx_on"):
@@ -951,7 +1007,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["fxf_wet"] = pot(127 * CLAMP(s["filter_fx_mix"], 0.0, 1.0))
         carried.append("filter FX")
         if abs(s.get("filter_fx_keytrack", 0)) > 1e-3:
-            notes.append("filter FX key tracking not carried")
+            P["fxf_key"] = pot(64 + 63 * CLAMP(float(s["filter_fx_keytrack"]), -1.0, 1.0))             # measured (calibration/vital_fxkey_probe.py): the cutoff moves by keytrack x (the last note - 60) semitones
         if s.get("filter_fx_drive", 0) > 0.5:
             notes.append("filter FX drive not carried")
 

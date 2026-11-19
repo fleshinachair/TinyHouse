@@ -794,6 +794,20 @@ BANKS = [
                                 row(num("wt1_ublend", "VB1", "Osc A Unison Blend", 0, 100, 80), num("wt2_ublend", "VB2", "Osc B Unison Blend", 0, 100, 80), num("wt3_ublend", "VB3", "Osc C Unison Blend", 0, 100, 80))]),
     # After Vital Unison, for the same reason. Vital's voice filter Mix (calibration/vital_fmix_probe.py): a linear crossfade, (1 - mix) of the filter's input plus mix of its output (pot 127 = fully wet, the engine's own behaviour).
     ("Vital Filter", False, [row(num("flt1_mix", "VF1", "Filter 1 Mix", 0, 127, 127), num("flt2_mix", "VF2", "Filter 2 Mix", 0, 127, 127))]),
+    # After Vital Filter, for the same reason. Vital's LFO Delay, Fade In and Phase (modulators/synth_lfo.cpp, checked with calibration/vital_lfo_delay_probe.py): the LFO holds its start value for Delay (0 to 4 s, linear over
+    # the pot), then runs; Fade In (0 to 8 s, linear) blends from that start value to the running LFO over that time; Phase (0..1 of a cycle) is added to the LFO's position. All default to 0, which leaves every LFO as it was. LFO Law Vital also makes the LFO's Smooth start from 0 and climb to the LFO's value (Serum's starts at the value), and hold at 0 through a Delay.
+    ("Vital LFO", False, [row(enum("lfo_vlaw", "VLL", "LFO Law", ["Serum", "Vital"], 0)),
+                          row(*[num(f"lfo{n}_delay", f"VD{n}", f"LFO{n} Delay", 0, 127, 0) for n in (1, 2, 3, 4)]),
+                          row(*[num(f"lfo{n}_fade", f"VE{n}", f"LFO{n} Fade In", 0, 127, 0) for n in (1, 2, 3, 4)]),
+                          row(*[num(f"lfo{n}_phase", f"VH{n}", f"LFO{n} Phase", 0, 127, 0) for n in (1, 2, 3, 4)])]),
+    # After Vital LFO, for the same reason. Vital's envelope Delay (silent for that long before the attack) and Hold (the peak held before the decay): 0 to 4 s over the pot as 4 * (pot / 127)^4, the same law as Vital's own
+    # knobs (a quartic of 0..sqrt(2)). 0 leaves the envelope as it was. Amp envelope, filter envelope and the two spare envelopes.
+    ("Vital Envelope", False, [row(num("vca_delay", "VAD", "Amp Delay", 0, 127, 0), num("vca_hold", "VAH", "Amp Hold", 0, 127, 0), num("flt_delay", "VFD", "Filter Env Delay", 0, 127, 0),
+                                   num("flt_hold", "VFH", "Filter Env Hold", 0, 127, 0)),
+                               row(num("me1_delay", "VM1", "Env 1 Delay", 0, 127, 0), num("me1_hold", "VM2", "Env 1 Hold", 0, 127, 0), num("me2_delay", "VM3", "Env 2 Delay", 0, 127, 0),
+                                   num("me2_hold", "VM4", "Env 2 Hold", 0, 127, 0))]),
+    # After Vital Envelope, for the same reason. Vital's Filter FX Key Track (calibration/vital_fxkey_probe.py): the cutoff moves by Key Track x (the last played note - 60) semitones; pot 64 is 0, 127 is +1, 1 is -1.
+    ("Vital Filter FX", False, [row(num("fxf_key", "VFK", "FX Filter Key Track", 0, 127, 64))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

@@ -1113,7 +1113,9 @@ void Engine::renderBlock(int16_t *out, int frames)
             uint32_t newest = 0;
             for (auto &v : voices)
                 if (v.isActive() && v.serialNumber() >= newest) { newest = v.serialNumber(); fxfMod = v.fxfCutoffMod(); fxfWet = v.fxfWetMod(); }
-            const float note = potFilterNote(pots[TB_P_FXF_FREQ]) + env * potBipolar(pots[TB_P_FXF_ENV]) * filterWidth + fxfMod * filterWidth;
+            /* Vital's Filter FX Key Track: the cutoff moves by the track amount x (the last played note - 60) semitones (0 = off, the pot's middle) */
+            const float fxfKey = std::clamp((pots[TB_P_FXF_KEY] - 64.0f) / 63.0f, -1.0f, 1.0f) * (lastPlayedNote >= 0.0f ? lastPlayedNote - 60.0f : 0.0f);
+            const float note = potFilterNote(pots[TB_P_FXF_FREQ]) + env * potBipolar(pots[TB_P_FXF_ENV]) * filterWidth + fxfMod * filterWidth + fxfKey;
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
             fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f), pots[TB_P_FXF_WET] / 127.0f + fxfWet);

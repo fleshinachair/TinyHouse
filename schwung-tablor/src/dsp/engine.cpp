@@ -146,6 +146,9 @@ void Engine::noteOn(int note, float vel)
 
     const bool mono = (int) pots[TB_P_VOICE_MODE] == 1;
     const bool glideOn = (int) pots[TB_P_GLIDE_MODE] != 0;
+    /* Law Vital: a glide starts only while the previous key is still down, unless Force is Always (Law Serum glides always, as it did) */
+    const bool glideNow = pots[TB_P_GLIDE_VLAW] < 0.5f || pots[TB_P_GLIDE_VFORCE] >= 0.5f || keysHeld > 0;
+    if (note >= 0 && note < 128 && !keyHeld[note]) { keyHeld[note] = true; keysHeld++; }
 
     if (mono) {
         if (monoStackLen < kStackMax)
@@ -156,9 +159,9 @@ void Engine::noteOn(int note, float vel)
             /* A note arriving while the previous one is still releasing takes its voice over where it is: the amplitude envelope re-attacks from its current level and the
              * oscillator phases and filters carry on. A fresh start() zeroes the envelope, which is a step down from the release level (a click: a mono preset with short notes,
              * Lead - Rollin, had 20 dB more sub-bass than Serum's from those steps). */
-            v.retrigger(c, note, vel);          /* legato / retrig path */
+            v.retrigger(c, note, vel, glideNow);          /* legato / retrig path */
         } else {
-            float from = glideOn ? lastPlayedNote : -1.0f;
+            float from = glideOn && glideNow ? lastPlayedNote : -1.0f;
             v.start(c, note, vel, ++serialCounter, from);
         }
     } else {
@@ -173,7 +176,7 @@ void Engine::noteOn(int note, float vel)
             v = findVoiceToSteal();
         if (!v) return;
 
-        float from = glideOn ? lastPlayedNote : -1.0f;
+        float from = glideOn && glideNow ? lastPlayedNote : -1.0f;
         v->start(c, note, vel, ++serialCounter, from);
     }
 
@@ -182,6 +185,7 @@ void Engine::noteOn(int note, float vel)
 
 void Engine::noteOff(int note)
 {
+    if (note >= 0 && note < 128 && keyHeld[note]) { keyHeld[note] = false; keysHeld--; }
     const bool mono = (int) pots[TB_P_VOICE_MODE] == 1;
 
     if (sustainDown) {
@@ -243,6 +247,8 @@ void Engine::allNotesOff(bool allowTail)
             allowTail ? v.stop(true) : v.kill();
     monoStackLen = 0;
     std::memset(sustained, 0, sizeof sustained);
+    std::memset(keyHeld, 0, sizeof keyHeld);
+    keysHeld = 0;
 }
 
 /* ---------------------------------------------------------------- clip player */
@@ -754,9 +760,28 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.hydDetune = pot01(pots[TB_P_HYD_DET]);
     s.hydRate = pot01(pots[TB_P_HYD_RATE]);
     s.hydWet = all ? pot01(pots[TB_P_HYD_WET]) : 0.0f;
-    s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 4);
+    s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 5);
     s.distHold = 1 + (int) pots[TB_P_DIST_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one (1..128 samples; calibration/dev/probe_dist_downsample.py) */
-    s.distCal = pots[TB_P_DIST_CAL] >= 1.0f;
+    s.distVital = pots[TB_P_DIST_CAL] >= 2.0f;
+    s.distCal = pots[TB_P_DIST_CAL] >= 1.0f && !s.distVital;
+    if (s.distVital) {
+        /* Vital's distortion: Drive is the gain in dB (-30..+30), Mix a linear crossfade, and the filter's Cutoff a MIDI note (8..136) */
+        s.distDriveDb = -30.0f + pots[TB_P_DIST_DRIVE] * (60.0f / 127.0f);
+        s.distGain = std::pow(10.0f, s.distDriveDb / 20.0f);
+        if (!all) s.distMix = 0.0f;
+        s.distDrive = 1.0f;
+        s.distFlt = std::clamp((int) pots[TB_P_DIST_FLT], 0, 2);
+        s.distFltNote = 8.0f + pots[TB_P_DIST_FLT_CUT] * (128.0f / 127.0f);
+        s.distFltRes = pots[TB_P_DIST_FLT_RES] / 127.0f;
+        s.distFltBlend = pots[TB_P_DIST_FLT_BLEND] * (2.0f / 127.0f);
+        s.distAudio = pots[TB_P_VDL_ON] >= 0.5f;
+        if (s.distAudio) {
+            s.distAudioTrans = (pots[TB_P_VDL_TRANS] - 64.0f) * 0.75f;
+            const int amtP[4] = { TB_P_VDL_DRIVE, TB_P_VDL_CUT, TB_P_VDL_RES, TB_P_VDL_BLEND };
+            for (int k = 0; k < 4; k++) s.distAudioAmt[k] = potBipolar(pots[amtP[k]]);
+            for (int k = 0; k < 16; k++) s.distAudioShape[k] = pot01(pots[TB_P_VDL_S0 + k]);
+        }
+    }
     if (s.distCal) {
         /* Drive is the pre-gain in dB (-16..+54), Wet Gain the curve's output gain (-36..+12 dB), Level a gain on the sum (-24..+24 dB). Off with FX Enable. */
         s.distGain = std::pow(10.0f, (-16.0f + pots[TB_P_DIST_DRIVE] * (70.0f / 127.0f)) / 20.0f);
@@ -776,6 +801,22 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.compRatio = std::pow(100.0f, pot01(pots[TB_P_COMP_RATIO]));
     s.compKneeDb = 48.0f * pot01(pots[TB_P_COMP_KNEE]);
     s.compMulti = pots[TB_P_COMP_MULTI] >= 1.0f;
+    s.compVital = pots[TB_P_COMP_MULTI] >= 2.0f;                       /* Comp Multiband = Vital: the Vital compressor's law (fx.h processCompVital) */
+    if (s.compVital) {
+        s.vcBands = std::clamp((int) pots[TB_P_VC_BANDS], 0, 3);
+        const int ut[3] = { TB_P_VC_UT1, TB_P_VC_UT2, TB_P_VC_UT3 }, lt[3] = { TB_P_VC_LT1, TB_P_VC_LT2, TB_P_VC_LT3 };
+        const int ur[3] = { TB_P_VC_UR1, TB_P_VC_UR2, TB_P_VC_UR3 }, lr[3] = { TB_P_VC_LR1, TB_P_VC_LR2, TB_P_VC_LR3 }, gn[3] = { TB_P_VC_G1, TB_P_VC_G2, TB_P_VC_G3 };
+        for (int b = 0; b < 3; b++) {
+            s.vcUpThrDb[b] = -100.0f + 112.0f * pot01(pots[ut[b]]);
+            s.vcLoThrDb[b] = -100.0f + 112.0f * pot01(pots[lt[b]]);
+            s.vcUpRatio[b] = pot01(pots[ur[b]]);
+            s.vcLoRatio[b] = std::clamp((pots[lr[b]] - 64.0f) / 63.5f, -1.0f, 1.0f);
+            const float g = pots[gn[b]];
+            s.vcGainDb[b] = g >= 64.0f ? (g - 64.0f) / 63.0f * 30.0f : (g - 64.0f) / 64.0f * 30.0f;
+        }
+        s.vcAttack = pot01(pots[TB_P_VC_ATT]);
+        s.vcRelease = pot01(pots[TB_P_VC_REL]);
+    }
     s.compThreshBandDb[0] = s.compThreshDb;
     s.compThreshBandDb[1] = -90.0f + 120.0f * pot01(pots[TB_P_COMP_THRESH2]);
     s.compThreshBandDb[2] = -90.0f + 120.0f * pot01(pots[TB_P_COMP_THRESH3]);
@@ -784,6 +825,8 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.compBandGainDb[b] = g >= 64.0f ? (g - 64.0f) / 63.0f * 24.0f : (g - 64.0f) / 64.0f * 24.0f;
     }
     s.compBelow = pot01(pots[TB_P_COMP_BELOW]);
+    s.fxOrder = std::clamp((int) pots[TB_P_FX_ORDER], 0, 5039);
+    s.compBoostDb = std::clamp(pots[TB_P_COMP_BOOST], 0.0f, 48.0f);
     s.compAttackMs = 0.1f * std::pow(1000.0f, pot01(pots[TB_P_COMP_ATTACK]));
     s.compReleaseMs = 10.0f * std::pow(300.0f, pot01(pots[TB_P_COMP_RELEASE]));
     s.compMakeupDb = 24.0f * pot01(pots[TB_P_COMP_MAKEUP]);
@@ -797,6 +840,15 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.chorFb = 0.8f * pot01(pots[TB_P_CHOR_FB]);
     s.chorFiltHz = potEqFreq(pots[TB_P_CHOR_FILT]);
     s.chorHpf = pots[TB_P_CHOR_FMODE] >= 1.0f;
+    s.chorVital = pots[TB_P_CHOR_VITAL] >= 1.0f;
+    if (s.chorVital) {                                    /* Vital's chorus: Delay 1 / 2 are log2 seconds, -10..-5.64 over the pot; Feedback bipolar; the loop filter a MIDI note and a spread */
+        s.chorD1Ms = 1000.0f * std::pow(2.0f, -10.0f + 4.35614f * pot01(pots[TB_P_CHOR_D1]));
+        s.chorD2Ms = 1000.0f * std::pow(2.0f, -10.0f + 4.35614f * pot01(pots[TB_P_CHOR_D2]));
+        s.chorFb = 0.95f * (2.0f * pot01(pots[TB_P_CHOR_FB]) - 1.0f);
+        s.chorVoices = std::clamp((int) (pots[TB_P_CHOR_VOICES] + 0.5f), 1, 4);
+        s.chorVCutNote = 8.0f + 128.0f * pot01(pots[TB_P_CHOR_VCUT]);
+        s.chorVSpread = pot01(pots[TB_P_CHOR_VSPREAD]);
+    }
     s.flanMix = all && pots[TB_P_FLAN_ON] >= 1.0f ? pot01(pots[TB_P_FLAN_MIX]) : 0.0f;
     s.flanRate = rateHz(pots[TB_P_FLAN_RATE]);
     s.flanDepth = pot01(pots[TB_P_FLAN_DEPTH]);
@@ -809,6 +861,17 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.phasFreqHz = potEqFreq(pots[TB_P_PHAS_FREQ]);
     s.phasFb = 0.8f * pot01(pots[TB_P_PHAS_FB]);
     s.phasPhase = pot01(pots[TB_P_PHAS_PHASE]);
+    s.flanVital = pots[TB_P_FLAN_VITAL] >= 1.0f;
+    if (s.flanVital) {                                    /* Vital's flanger: Feedback bipolar, the centre a MIDI note (pot 0..127 = 8..136) */
+        s.flanFb = 2.0f * pot01(pots[TB_P_FLAN_FB]) - 1.0f;
+        s.flanVCenterNote = 8.0f + 128.0f * pot01(pots[TB_P_FLAN_VCENTER]);
+    }
+    s.phasVital = pots[TB_P_PHAS_VITAL] >= 1.0f;
+    if (s.phasVital) {                                    /* Vital's phaser: Feedback -1..1 over the pot (the resonance is its positive part), the centre a MIDI note, Blend 0..2 */
+        s.phasFb = 2.0f * pot01(pots[TB_P_PHAS_FB]) - 1.0f;
+        s.phasVCenterNote = 8.0f + 128.0f * pot01(pots[TB_P_PHAS_VCENTER]);
+        s.phasVBlend = 2.0f * pot01(pots[TB_P_PHAS_VBLEND]);
+    }
     s.phasPoles = (int) pots[TB_P_PHAS_POLES];
     s.wideMix = wideOn ? pot01(pots[TB_P_FX_WIDE]) : 0.0f;
     s.wideRate = 0.05f * std::pow(100.0f, pot01(pots[TB_P_FX_WRATE]));
@@ -837,6 +900,21 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.revDampHz = potEqFreq(pots[TB_P_REV_DAMP]);
     s.revLoHz = potEqFreq(pots[TB_P_REV_LO]);
     s.revWidth = pot01(pots[TB_P_REV_WIDTH]);
+    s.revVital = pots[TB_P_REV_VITAL] >= 1.0f;
+    s.revVDelayS = 0.3f * pot01(pots[TB_P_REV_PREDELAY]);                 /* the pre-delay is shared: Serum's reverb takes it too (0 leaves it as it was) */
+    if (s.revVital) {                                     /* Vital's reverb shares Decay, Damp and Lo cut with Serum's: Decay is the T60, Damp the top of the input band (Vital's Pre High), Lo cut its bottom (Pre Low) */
+        auto note = [](float hz) { return 69.0f + 12.0f * std::log2(std::max(hz, 1.0f) / 440.0f); };
+        s.revVDecay = s.revT60;
+        s.revVSize = pot01(pots[TB_P_REV_VSIZE]);
+        s.revVPreLo = note(s.revLoHz);
+        s.revVPreHi = note(s.revDampHz);
+        s.revVLoNote = 130.0f * pot01(pots[TB_P_REV_VLOCUT]);
+        s.revVLoDb = -24.0f * pot01(pots[TB_P_REV_VLOGAIN]);
+        s.revVHiNote = 130.0f * pot01(pots[TB_P_REV_VHICUT]);
+        s.revVHiDb = -24.0f * pot01(pots[TB_P_REV_VHIGAIN]);
+        s.revVChorus = pot01(pots[TB_P_REV_VCHORUS]);
+        s.revVChorusHz = std::pow(2.0f, -8.0f + 11.0f * pot01(pots[TB_P_REV_VCHORUSF]));
+    }
 
     for (int b = 0; b < 4; b++) {
         const int base = TB_P_EQ1_TYPE + b * 4;
@@ -868,7 +946,7 @@ void Engine::refreshFx()
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
         std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 &&
-        std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX] && std::memcmp(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen) == 0) return;
+        std::memcmp(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen) == 0 && std::memcmp(vdistSeen, pots + TB_P_FX_ORDER, sizeof vdistSeen) == 0 && std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX] && std::memcmp(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen) == 0) return;
     convSeen = pots[TB_P_CONV_MIX];
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
@@ -878,6 +956,8 @@ void Engine::refreshFx()
     std::memcpy(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen);
     std::memcpy(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen);
     std::memcpy(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen);
+    std::memcpy(vdistSeen, pots + TB_P_FX_ORDER, sizeof vdistSeen);
+    std::memcpy(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen);
     std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
     std::memcpy(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen);
     fxSeenValid = true;
@@ -1054,6 +1134,15 @@ void Engine::renderBlock(int16_t *out, int frames)
                 uint32_t newestE = 0;
                 for (auto &v : voices)
                     if (v.isActive() && v.serialNumber() >= newestE) { newestE = v.serialNumber(); for (int i = 0; i < 8; i++) eqModNow[i] = v.eqMod(i); }
+                uint32_t newestV = 0;
+                for (auto &v : voices)
+                    if (v.isActive() && v.serialNumber() >= newestV) { newestV = v.serialNumber(); for (int i = 0; i < 4; i++) distVModNow[i] = v.distVMod(i); }
+                fx.setVitalDistMod(distVModNow);
+                {                                       /* the audio-rate distortion LFO follows the newest voice's note */
+                    uint32_t newestN = 0;
+                    for (auto &v : voices)
+                        if (v.isActive() && v.serialNumber() >= newestN && v.currentNote() >= 0) { newestN = v.serialNumber(); fx.setVitalAudioNote((float) v.currentNote()); }
+                }
                 fx.setEqMod(eqModNow);                  /* the master EQ's bands moved by an envelope / LFO route (the newest voice's, kept while none sounds) */
             }
             /* The buses' racks have the same Filter FX (the "b1.fxf_*" / "b2.fxf_*" keys), moved by the same envelope: Lead - Other Side's bus 1 filters

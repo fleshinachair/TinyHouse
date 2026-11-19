@@ -309,6 +309,7 @@ private:
     float widthCur = 1.0f, monoSeen = -1.0f;
     float busWidthCur[2] = {1.0f, 1.0f};              /* a bus rack's own Utils width (the "bN.mwidth" key), smoothed */
     float utilOutCur[3] = {1.0f, 1.0f, 1.0f};        /* the gain a route on a rack's ending Utils Level Out has put on it (main, bus 1, bus 2), ramped across each block */
+    float distVModNow[4] = {};                       /* the Vital distortion's drive / filter route offsets, read from the newest voice once per block */
     float eqModNow[8] = {};                          /* the master EQ's route offsets, read from the newest voice once per block (the last ones stay while no voice sounds) */
     float utilOutMod[3] = {0.0f, 0.0f, 0.0f};        /* the routes' offsets on that knob, read from the newest voice once per block */
     bool  monoActive = false;
@@ -331,6 +332,8 @@ private:
     void applyUtilOut(int rack, float *l, float *r, int n);       /* the gain of a route on the Level Out of the Utils that ends a rack (0 main, 1 and 2 buses) */
     float fxSeen[TB_P_REV_ON - TB_P_DLY_MIX + 1] = {};
     float distSeen[TB_P_COMP_BELOW - TB_P_DIST_DRIVE + 1] = {};      /* the distortion and compressor pots are contiguous */
+    float vitalFxSeen[TB_P_VDL_S15 - TB_P_VC_UT1 + 1] = {};          /* the Vital compressor and distortion LFO pots are contiguous at the end of the table */
+    float vdistSeen[TB_P_DIST_FLT_BLEND - TB_P_FX_ORDER + 1] = {};   /* FX Order, Comp Boost and the Vital distortion filter pots are contiguous */
     float compOnSeen = -1.0f;
     float convSeen = -1.0f;
     uint32_t ditherState = 2463534242u;                                /* the output dither's generator */
@@ -352,6 +355,8 @@ private:
     int  monoStackLen = 0;
 
     float lastPlayedNote = -1.0f;
+    bool  keyHeld[128] = {};                    /* keys down now (not counting the sustain pedal): Vital's portamento glides from the last note only while one is */
+    int   keysHeld = 0;
     uint32_t serialCounter = 0;
 
     /* controller state */

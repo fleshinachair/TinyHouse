@@ -1342,6 +1342,48 @@ static void testFxSleep()
     CHECK(rb > 0.7 * ra && rb < 1.4 * ra, "and has the same energy with its reverb and delay tails (%.3g / %.3g)", ra, rb);
 }
 
+/* Warp Chain: Vital's ring modulation by another oscillator (calibration/vital_rm_probe.py). Off, every Serum preset, is the measured Serum warp; On is Vital's g = (1 - a) + a m, m the other oscillator's own output
+ * (a table that peaks at 0.9, the loader's scale, gives amplitude 1), and the other oscillator keeps its own warps. */
+static double toneAt(const std::vector<int16_t> &x, double hz)
+{
+    const int frames = (int) x.size() / 2, from = frames / 2;
+    double re = 0.0, im = 0.0;
+    for (int i = from; i < frames; i++) {
+        const double ph = 2.0 * M_PI * hz * i / 44100.0;
+        re += x[(size_t) i * 2] * std::cos(ph); im += x[(size_t) i * 2] * std::sin(ph);
+    }
+    return 2.0 * std::sqrt(re * re + im * im) / (frames - from);
+}
+
+static void testWarpChain()
+{
+    printf("\nWarp Chain\n");
+    auto sine = sineTable();
+    auto make = [&](int chain, int amount, bool oscCToo) {
+        auto e = std::make_unique<Engine>();
+        for (int s = 0; s < 3; s++) e->setTable(s, sine);
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VOLUME] = 40;
+        e->pots[TB_P_WT1_LEVEL] = 100; e->pots[TB_P_WT2_LEVEL] = 0; e->pots[TB_P_WT3_LEVEL] = 0;
+        e->pots[TB_P_WT2_TUNE] = 24;                                              /* the modulator: 4 x the carrier */
+        e->pots[TB_P_WT1_XW] = amount ? 5 : 0; e->pots[TB_P_WT1_XS] = 2; e->pots[TB_P_WT1_XA] = (float) amount;
+        if (oscCToo) { e->pots[TB_P_WT3_TUNE] = 12; e->pots[TB_P_WT2_XW] = 5; e->pots[TB_P_WT2_XS] = 3; e->pots[TB_P_WT2_XA] = 500; }
+        e->pots[TB_P_XCHAIN] = (float) chain;
+        srand(5);                                                                 /* the random start phases the same on every render */
+        note(*e, 45);                                                             /* 110 Hz */
+        render(*e, 300);
+        return render(*e, 600);
+    };
+    const double plain = toneAt(make(0, 0, false), 110.0);
+    const auto on = make(1, 1000, false);
+    const double car = toneAt(on, 110.0) / plain, s3 = toneAt(on, 330.0) / plain, s5 = toneAt(on, 550.0) / plain;
+    CHECK(car < 0.03, "Warp Chain on, RM amount 1: the carrier is gone (%.3f of the plain tone)", car);
+    CHECK(std::fabs(s3 - 0.556) < 0.02 && std::fabs(s5 - 0.556) < 0.02, "Warp Chain on: the sidebands are a * 1.1115 / 2 of the carrier for this peak-1 table (0.5 for a loaded one: Vital's depth) (%.3f, %.3f)", s3, s5);
+    const auto offBare = make(0, 1000, false), offChained = make(0, 1000, true);
+    CHECK(offBare == offChained, "Warp Chain off: a modulator's own warps are not applied (Serum's behaviour, bit for bit)");
+    const auto onBare = make(1, 1000, false), onChained = make(1, 1000, true);
+    CHECK(onBare != onChained, "Warp Chain on: a modulator keeps its own RM from the third oscillator (the render changes)");
+}
+
 int main()
 {
     testFxSleep();
@@ -1371,6 +1413,7 @@ int main()
     testSample2();
     testSamplePan();
     testArp();
+    testWarpChain();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

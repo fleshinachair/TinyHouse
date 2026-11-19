@@ -392,7 +392,9 @@ MOD_DST = ["None",
            # An oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob, 0..1), moved by an LFO / envelope route.
            "WT1 Warp", "WT2 Warp", "WT3 Warp",
            # The master EQ bands' Freq and Gain knobs, moved by an LFO / envelope route (fx.h setEqMod).
-           "EQ1 Freq", "EQ1 Gain", "EQ2 Freq", "EQ2 Gain", "EQ3 Freq", "EQ3 Gain", "EQ4 Freq", "EQ4 Gain"]
+           "EQ1 Freq", "EQ1 Gain", "EQ2 Freq", "EQ2 Gain", "EQ3 Freq", "EQ3 Gain", "EQ4 Freq", "EQ4 Gain",
+           # The Vital distortion's Drive (a fraction of its 60 dB range), and its filter's Cutoff (a fraction of 128 notes), Res and Blend (a fraction of 0..2), moved by an LFO / envelope route (fx.h setVitalDistMod).
+           "Dist Drive", "Dist Flt Cut", "Dist Flt Res", "Dist Flt Blend"]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -534,12 +536,14 @@ TONE = dict(
     # tanh, Asym adds a bias (even harmonics, the diode/tube/overdrive family), Hard clips. No page on the device:
     # the converter sets it from a Serum Distortion effect and fits it.
     ddrive = pot("dist_drive", "DDRV", "Distortion Drive", 0),
-    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine", "Hold"], 0),
+    dmode  = enum("dist_mode", "DMDE", "Distortion Mode", ["Soft", "Asym", "Hard", "Sine", "Hold", "Fold"], 0),
     dmix   = pot("dist_mix",   "DMIX", "Distortion Mix",   127),
+    # Calibrated distortion = Vital (2): Vital's measured law (calibration/vital_dist_probe.py): Drive is the gain in dB (-30..+30), Mode the curve (Soft tanh, Hard clip, Fold = a triangle fold, Sine = sin(pi/2 x), Hold),
+    # Mix a LINEAR crossfade of the dry and the curve's output, and the curve works on the signal against Vital's own full scale (the engine's pre-master level is 6.7 dB under it). The filter (below the FX Order bank) is Vital's.
     # Calibrated distortion (Serum's measured transfer curves; the converter's Serum Distortion translation). On: Drive is the pre-gain G
     # (-16..+54 dB), Mode adds Sine (3), Wet Gain is the curve's output gain K (-36..+12 dB, 64 = -12), Mix is the wet part s with the dry part
     # (1 - s^2), and Level is a gain on the sum (-24..+24 dB, 64 = 0). Off is the earlier law (drive 0 off, 1/sqrt(g) scaling, linear mix).
-    dcal   = enum("dist_cal",  "DCAL", "Distortion Calibrated", ["Off", "On"], 0),
+    dcal   = enum("dist_cal",  "DCAL", "Distortion Calibrated", ["Off", "On", "Vital"], 0),
     dout   = pot("dist_out",   "DOUT", "Distortion Wet Gain", 64),
     dlvl   = pot("dist_level", "DLVL", "Distortion Level",    64),
     # The Distortion effect's own filter when it sits BEFORE the distorting (Serum's PrePost 2): a 12 dB/octave low-pass or high-pass ahead of the
@@ -560,7 +564,7 @@ TONE = dict(
     # Multiband mode: three bands (crossovers 120 Hz and 2.4 kHz, Linkwitz-Riley), each with its own threshold (band 1 uses Comp Threshold,
     # bands 2 and 3 these), a gain of -24..+24 dB (64 = 0), and upward compression below a threshold 11 dB under the band's own, with
     # slope Below/127 (0 = none, 127 = the signal is pulled up to the floor). Ratio, Attack, Release, Makeup and Mix are shared.
-    cmulti = enum("comp_multi", "CMUL", "Comp Multiband", ["Off", "On"], 0),
+    cmulti = enum("comp_multi", "CMUL", "Comp Multiband", ["Off", "On", "Vital"], 0),
     ct2    = pot("comp_thresh2", "CTH2", "Comp Threshold Mid",  127),
     ct3    = pot("comp_thresh3", "CTH3", "Comp Threshold High", 127),
     cg1    = pot("comp_gain1",   "CGN1", "Comp Gain Low",  64),
@@ -726,6 +730,70 @@ BANKS = [
     # The older Effects and Mod FX rows above stay as they were (they fix the parameters' numbers); these only reorder keys that are in the table already.
     ("Effects Page", False, [row(FX["eqon"], FX["wideon"], FX["dlyon"], FX["revon"], FX["compon"], FX["fxon"], FX["dtime"], FX["rdec"])]),
     ("Mod FX Page", False, [row(MODFX["con"], MODFX["fon"], MODFX["pon"], MODFX["crate"], MODFX["cmix"], MODFX["fmix"], MODFX["pmix"], MODFX["cdep"])]),
+    # After the Mod FX Page, for the same reason. The order of the main effects chain (distortion, Filter FX, comp, chorus / flanger / phaser, delay, conv and reverb, EQ) as the rank of
+    # a permutation of that list: 0 is the order above, which every Serum preset uses. Set by the Vital converter (Vital lets a preset reorder its effects); no page on the device.
+    # Comp Boost Cap: the most dB the multiband compressor's upward part may add to a quiet band (12 = the engine's own; Vital's goes to about 43, so its converter sets more).
+    ("FX Order", False, [row(num("fx_order", "FXOD", "FX Order", 0, 5039, 0), num("comp_boost", "CBST", "Comp Boost Cap", 0, 48, 12),
+                       # The Vital distortion's own filter (calibration/vital_distfilt_probe.py): Off / Pre / Post the curve, on the wet part only; a two-pole state-variable filter whose Cutoff is a MIDI note
+                       # (pot 0..127 = note 8..136), Res maps to a Q of 0.5..14 and Blend morphs low-pass (0) to band-pass (64) to high-pass (127). Used with Distortion Calibrated = Vital.
+                       enum("dist_flt", "DFLT", "Distortion Filter", ["Off", "Pre", "Post"], 0), pot("dist_flt_cut", "DFCT", "Distortion Filter Cutoff", 64),
+                       pot("dist_flt_res", "DFRS", "Distortion Filter Res", 0), pot("dist_flt_blend", "DFBL", "Distortion Filter Blend", 0))]),
+    # After FX Order, for the same reason. Vital's oscillator-to-oscillator ring modulation uses the other oscillator's output with that oscillator's own modulation applied (osc 2 ring-modulated by
+    # osc 3, then osc 1 by osc 2). Off (every Serum preset) renders a warp source bare, as Serum does; On lets an oscillator that is a warp source keep its own warps. Set by the Vital converter.
+    ("Warp Chain", False, [row(enum("xchain", "XCH", "Warp Source Keeps Warps", ["Off", "On"], 0))]),
+    # After Warp Chain, for the same reason. The Vital comb (Comb +, Flange + and Flange - read Vital's comb_filter law instead of Serum's): the model (Serum / Vital Blend / Vital Band),
+    # its Blend knob (0..2 over the pot) and its Blend Transpose (-48..+48 semitones over the pot, 64 = 0) for each of the two voice filters. Set by the Vital converter; Serum presets leave them at 0.
+    ("Vital Comb", False, [row(enum("vcomb", "VC1", "Filter Comb Law", ["Serum", "Vital Blend", "Vital Band"], 0), num("cblend", "CB1", "Filter Comb Blend", 0, 127, 0), num("ctrans", "CT1", "Filter Comb Transpose", 0, 127, 64),
+                                       enum("vcomb2", "VC2", "Filter 2 Comb Law", ["Serum", "Vital Blend", "Vital Band"], 0), num("cblend2", "CB2", "Filter 2 Comb Blend", 0, 127, 0), num("ctrans2", "CT2", "Filter 2 Comb Transpose", 0, 127, 64))]),
+    # After Vital Comb, for the same reason. The Vital compressor (Comp Multiband = Vital): per band (low, mid, high) an upper threshold and ratio (downward), a lower threshold and ratio (upward when
+    # above 64, expanding below it) and a gain, the shared attack and release (0..1 over the pot) and which bands are split off. Thresholds -100..+12 dB over the pot, gains -30..+30 dB. Set by the Vital converter.
+    ("Vital Comp", False, [row(*[num(f"vc_ut{b}", f"VU{b}", f"Vital Comp Upper Threshold {n}", 0, 127, 127) for b, n in ((1, "Low"), (2, "Mid"), (3, "High"))],
+                              *[num(f"vc_ur{b}", f"VR{b}", f"Vital Comp Upper Ratio {n}", 0, 127, 0) for b, n in ((1, "Low"), (2, "Mid"), (3, "High"))],
+                              enum("vc_bands", "VBD", "Vital Comp Bands", ["Three", "Low + Rest", "Rest + High", "One"], 0), num("vc_att", "VAT", "Vital Comp Attack", 0, 127, 64)),
+                         row(*[num(f"vc_lt{b}", f"VL{b}", f"Vital Comp Lower Threshold {n}", 0, 127, 0) for b, n in ((1, "Low"), (2, "Mid"), (3, "High"))],
+                              *[num(f"vc_lr{b}", f"VW{b}", f"Vital Comp Lower Ratio {n}", 0, 127, 64) for b, n in ((1, "Low"), (2, "Mid"), (3, "High"))],
+                              num("vc_rel", "VRL", "Vital Comp Release", 0, 127, 64)),
+                         row(*[num(f"vc_g{b}", f"VG{b}", f"Vital Comp Gain {n}", 0, 127, 64) for b, n in ((1, "Low"), (2, "Mid"), (3, "High"))])]),
+    # After Vital Comp, for the same reason. An audio-rate LFO on the Vital distortion: Vital's keyboard-following LFO runs at the note's own pitch, which the block-rate LFOs cannot do, so this one
+    # is stepped every few samples inside the distortion stage. Its frequency is the newest note's plus Transpose (-48..+48 semitones, 64 = 0); Drive / Cutoff / Res / Blend are its route amounts
+    # (a fraction of each control's range, 64 = 0); the 16 shape points are one cycle, 0..1. Set by the Vital converter.
+    ("Vital Dist LFO", False, [row(enum("vdl_on", "VDL", "Dist Audio LFO", ["Off", "On"], 0), num("vdl_trans", "VDT", "Dist Audio LFO Transpose", 0, 127, 64),
+                                   num("vdl_drive", "VDD", "Dist Audio LFO Drive", 0, 127, 64), num("vdl_cut", "VDC", "Dist Audio LFO Cutoff", 0, 127, 64), num("vdl_res", "VDR", "Dist Audio LFO Res", 0, 127, 64), num("vdl_blend", "VDN", "Dist Audio LFO Blend", 0, 127, 64)),
+                              row(*[num(f"vdl_s{i}", f"VS{i}", f"Dist Audio LFO Shape {i + 1}", 0, 127, 0) for i in range(8)]),
+                              row(*[num(f"vdl_s{i}", f"VS{i}", f"Dist Audio LFO Shape {i + 1}", 0, 127, 0) for i in range(8, 16)])]),
+    # After Vital Dist LFO, for the same reason. Vital's amplitude-envelope decay curve: 0 keeps the analog decay, 1..127 is a curve power of (pot - 64) * 10 / 63 (a positive power holds the level and
+    # then plunges, as Vital's Kick Drum 1 does; the analog decay only falls fast first). Set by the Vital converter.
+    ("Vital Env", False, [row(num("vca_dpow", "VDP", "Vital Amp Decay Curve", 0, 127, 0))]),
+    # After Vital Env, for the same reason. Vital's chorus (calibration/vital_chorus_probe.py): Off keeps Serum's. On runs Vital's module: 1-4 voice pairs of two delay lines each (Delay 1 and Delay 2 are log2 seconds over the
+    # pot's 0..127 = -10..-5.64), Depth adds up to 30 ms on top of the sweep, Feedback is bipolar (pot 0..127 = -0.95..+0.95) and a band-pass (Cutoff = a MIDI note, pot 0..127 = 8..136, Spread 0..1) sits in the loop. Mix is an equal-power crossfade.
+    ("Vital Chorus", False, [row(enum("chor_vital", "VCH", "Vital Chorus", ["Off", "On"], 0), num("chor_voices", "VCV", "Vital Chorus Voices", 1, 4, 1),
+                                 num("chor_vcut", "VCC", "Vital Chorus Cutoff", 0, 127, 0), num("chor_vspread", "VCS", "Vital Chorus Spread", 0, 127, 127))]),
+    # After Vital Chorus, for the same reason. Vital's flanger and phaser (Off keeps Serum's). Flanger On: a stereo delay of 1 / the Center note's frequency (about 0.5 to 10.5 ms, Depth scaling it) swept by a triangle, bipolar Feedback
+    # (hard-limited), an equal-power Mix, the Phase knob the right side's offset. Phaser On: 4 / 8 / 12 first-order all-pass stages (Blend 0 / 1 / 2) around a cutoff of Center +- Depth (0..48 semitones), Feedback as resonance, a linear Mix.
+    ("Vital Mod FX", False, [row(enum("flan_vital", "VFL", "Vital Flanger", ["Off", "On"], 0), num("flan_vcenter", "VFC", "Vital Flanger Center", 0, 127, 64),
+                                 enum("phas_vital", "VPH", "Vital Phaser", ["Off", "On"], 0), num("phas_vcenter", "VPC", "Vital Phaser Center", 0, 127, 64), num("phas_vblend", "VPB", "Vital Phaser Blend", 0, 127, 64))]),
+    # After Vital Mod FX, for the same reason. Reverb Type Vital runs Vital's reverb (a 16-line feedback network) behind the same Mix, Decay (T60), Damp (the top of its input band) and Lo cut as Serum's; Mix is then an
+    # equal-power crossfade. Size, the two shelves (MIDI-note frequency, pot 0..127 = 0..130, and gain, pot 0..127 = 0..-24 dB) and the Chorus act only with Type Vital; Pre-delay (0..0.3 s) works with both.
+    ("Vital Reverb", False, [row(enum("rev_vital", "VRV", "Reverb Type", ["Serum", "Vital"], 0), num("rev_vsize", "VRS", "Reverb Size", 0, 127, 64), num("rev_predelay", "VRY", "Reverb Pre-delay", 0, 127, 0),
+                                 num("rev_vlocut", "VRC", "Reverb Low Shelf Freq", 0, 127, 0), num("rev_vlogain", "VRG", "Reverb Low Shelf Gain", 0, 127, 0),
+                                 num("rev_vhicut", "VRK", "Reverb High Shelf Freq", 0, 127, 88), num("rev_vhigain", "VRT", "Reverb High Shelf Gain", 0, 127, 5),
+                                 num("rev_vchorus", "VRO", "Reverb Chorus", 0, 127, 25)),
+                             row(num("rev_vchorusf", "VRF", "Reverb Chorus Rate", 0, 127, 58))]),
+    # After Vital Reverb, for the same reason. Vital's portamento (calibration/vital_porta_probe.py): Law Vital makes the Glide knob (with Glide Mode Portamento) a time of 0.001 to 16 s (log over the pot) for the whole glide
+    # (Scale Fixed) or for each octave (Scale Per octave), a linear ramp in pitch, and a glide starts from the previous note only while its key is still held (Force Held) or after any note (Force Always).
+    # Law Serum keeps Serum's glide as it was.
+    ("Vital Glide", False, [row(enum("glide_vlaw", "VGL", "Glide Law", ["Serum", "Vital"], 0), enum("glide_vscale", "VGS", "Glide Scale", ["Fixed", "Per octave"], 0),
+                                enum("glide_vforce", "VGF", "Glide Force", ["Held", "Always"], 0))]),
+    # After Vital Glide, for the same reason. Vital's unison (calibration/vital_stack_probe.py): Law Vital reads each oscillator's Detune knob as the half-width of the stack in semitones (48 * (pot / 127)^2, the importer writes it
+    # with decimals) and spreads the voices at half-width * (e^(p|x|) - 1) / (e^p - 1) for x evenly over -1..1, p the oscillator's Detune Power (the inner voices sit closer in than Serum's even spacing); Stack Style adds a semitone
+    # offset to each voice by its distance group from the middle (0 Normal, 1 / 2 Center Drop 12 / 24, 3 Octave Up, 4 Octaves, 5 Power Chord, 6 Power Chord Up, 7 Major, 8 Minor, 9 Harmonic Series, 10 Odd Harmonics). Law Serum keeps
+    # the unison as it was. Unison Blend (0..100 %) sets the level of the middle voice(s) against the others (a measured table, vitalBlendGains).
+    ("Vital Unison", False, [row(enum("uni_vital", "VUV", "Unison Law", ["Serum", "Vital"], 0), num("wt1_ustack", "VU1", "Osc A Stack Style", 0, 10, 0), num("wt2_ustack", "VU2", "Osc B Stack Style", 0, 10, 0),
+                                 num("wt3_ustack", "VU3", "Osc C Stack Style", 0, 10, 0)),
+                                row(num("wt1_upow", "VP1", "Osc A Detune Power", -8, 8, 2), num("wt2_upow", "VP2", "Osc B Detune Power", -8, 8, 2), num("wt3_upow", "VP3", "Osc C Detune Power", -8, 8, 2)),
+                                row(num("wt1_ublend", "VB1", "Osc A Unison Blend", 0, 100, 80), num("wt2_ublend", "VB2", "Osc B Unison Blend", 0, 100, 80), num("wt3_ublend", "VB3", "Osc C Unison Blend", 0, 100, 80))]),
+    # After Vital Unison, for the same reason. Vital's voice filter Mix (calibration/vital_fmix_probe.py): a linear crossfade, (1 - mix) of the filter's input plus mix of its output (pot 127 = fully wet, the engine's own behaviour).
+    ("Vital Filter", False, [row(num("flt1_mix", "VF1", "Filter 1 Mix", 0, 127, 127), num("flt2_mix", "VF2", "Filter 2 Mix", 0, 127, 127))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

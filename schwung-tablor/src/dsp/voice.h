@@ -27,6 +27,15 @@
 
 namespace tb {
 
+/* The glide smoother's time (seconds to cross the whole note range, 127 semitones) for a glide of `semis` semitones. Law Serum: the Glide knob as it always was. Law Vital (glide_vlaw,
+ * measured on the plugin, calibration/vital_porta_probe.py): the knob is 0.001..16 s (log) for the whole glide, or for each octave when Scale is Per octave. */
+inline float glideSmootherTime(const float *P, float semis)
+{
+    if (P[TB_P_GLIDE_VLAW] < 0.5f) return potGlideTime(P[TB_P_GLIDE]);
+    const float t = 0.001f * std::pow(16000.0f, pot01(P[TB_P_GLIDE]));
+    return P[TB_P_GLIDE_VSCALE] >= 0.5f ? t * (127.0f / 12.0f) : t * (127.0f / std::max(semis, 0.01f));
+}
+
 inline float velocityToGain(float velocity, float sensitivity)
 {
     float v = velocity * sensitivity + 1.0f - sensitivity;
@@ -80,6 +89,7 @@ enum ModDst {
     MD_WT1_PITCH, MD_WT2_PITCH, MD_WT3_PITCH,     /* an oscillator's pitch in semitones, 48 per unit of the route (a pitch envelope: a kick's drop is 24 st, past the +-12 st of the Tune destinations) */
     MD_WT1_WARP, MD_WT2_WARP, MD_WT3_WARP,     /* an oscillator's FM / PD / RM / AM / filter warp amount (Serum's Warp knob 0..1, added to wtN_xa), moved by an LFO / envelope route */
     MD_EQ1_FREQ, MD_EQ1_GAIN, MD_EQ2_FREQ, MD_EQ2_GAIN, MD_EQ3_FREQ, MD_EQ3_GAIN, MD_EQ4_FREQ, MD_EQ4_GAIN,     /* the master EQ's band Freq (a fraction of the log scale) and Gain (a fraction of 48 dB): read by the engine from the newest voice (eqMod) */
+    MD_DISTV_DRIVE, MD_DISTV_CUT, MD_DISTV_RES, MD_DISTV_BLEND,     /* the Vital distortion's Drive and filter Cutoff, Res and Blend, each a fraction of the control's range: read by the engine from the newest voice (distVMod) */
     MD_COUNT
 };
 
@@ -165,6 +175,7 @@ public:
     float distWetMod() const { return modOff[MD_DIST_WET]; }            /* LFO / spare-envelope routes to the Distortion's Wet */
     float compWetMod() const { return modOff[MD_COMP_WET]; }            /* LFO / spare-envelope routes to the Comp's Wet */
     float utilOutMod(int rack) const { return modOff[MD_UTIL_OUT + rack]; }   /* rack 0 main, 1 and 2 the buses: the Level Out knob's offset */
+    float distVMod(int i) const { return modOff[MD_DISTV_DRIVE + i]; }          /* 0..3: Drive, filter Cutoff, Res, Blend */
     float eqMod(int i) const { return modOff[MD_EQ1_FREQ + i]; }          /* 0..7: band 1 Freq, band 1 Gain, band 2 Freq ... */
     float fxfWetMod() const { return modOff[MD_FXF_WET]; }              /* LFO / spare-envelope routes to the Filter FX's Wet */
     float fxfCutoffMod() const { return modOff[MD_FXF_FREQ]; }          /* LFO / spare-envelope routes to the Filter FX cutoff, as a fraction of the filter's width */
@@ -200,7 +211,7 @@ public:
         glissando  = glideMode == 1;
         portamento = glideMode == 2;
         if (glideFromNote >= 0.0f && (glissando || portamento)) {
-            noteSmoother.setTime(potGlideTime(P[TB_P_GLIDE]));
+            noteSmoother.setTime(glideSmootherTime(P, std::fabs((float) note - glideFromNote)));
             noteSmoother.setValueUnsmoothed(glideFromNote / 127.0f);
             noteSmoother.setValue((float) note / 127.0f);
         } else {
@@ -246,14 +257,14 @@ public:
     }
 
     /* Mono-mode retrigger without phase reset. */
-    void retrigger(const VoiceContext &c, int note, float vel)
+    void retrigger(const VoiceContext &c, int note, float vel, bool glideNow = true)
     {
         const float *P = c.pots;
         midiNote = note;
         velocity = vel;
         startSamples(c, note, std::clamp((int) std::lround(vel * 127.0f), 1, 127));
-        if (glissando || portamento) {
-            noteSmoother.setTime(potGlideTime(P[TB_P_GLIDE]));
+        if ((glissando || portamento) && glideNow) {
+            noteSmoother.setTime(glideSmootherTime(P, std::fabs((float) note - noteSmoother.getCurrentValue() * 127.0f)));
             noteSmoother.setValue((float) note / 127.0f);
         } else {
             noteSmoother.setValueUnsmoothed((float) note / 127.0f);
@@ -390,6 +401,15 @@ public:
             if (vp[o].xwarp >= 3 && vp[o].xwarp <= 6 && vp[o].xamount > 0.0f) needSrc[vp[o].xsrc] = true;
             if (vp[o].xwarp2 >= 3 && vp[o].xwarp2 <= 6 && vp[o].xamount2 > 0.0f) needSrc[vp[o].xsrc2] = true;
         }
+        /* Warp Chain (Vital's oscillator-to-oscillator ring modulation): a modulator keeps its own FM / PD / RM / AM warps, so the sources it reads are needed too. */
+        const bool chain = P[TB_P_XCHAIN] > 0.5f;
+        if (chain)
+            for (int pass = 0; pass < kOscs; pass++)
+                for (int j = 0; j < kOscs; j++) {
+                    if (!needSrc[j + 1]) continue;
+                    if (vp[j].xwarp >= 3 && vp[j].xwarp <= 6 && vp[j].xamount > 0.0f) needSrc[vp[j].xsrc] = true;
+                    if (vp[j].xwarp2 >= 3 && vp[j].xwarp2 <= 6 && vp[j].xamount2 > 0.0f) needSrc[vp[j].xsrc2] = true;
+                }
         const bool subSigOn = needSrc[0];
         float noiseSig[kBlock];
         if (needSrc[4]) {                                          /* the Noise as a modulator: white, unit standard deviation, whatever the Noise level (Serum's noise warps work at level 0) */
@@ -405,16 +425,24 @@ public:
             sub.processAdding(subNote, unit, subSig, unusedR, n);
             srcs[0] = subSig;
         }
-        for (int j = 0; j < kOscs; j++) {
-            if (!needSrc[j + 1]) continue;
-            VoicedWTParams m = vp[j];
-            m.voices = 1; m.gain = 1.0f; m.pan = 0.0f; m.spread = 0.0f; m.xwarp = m.xwarp2 = 0;
-            float unusedR[kBlock];
-            clr(unusedR);
-            for (int i = 0; i < n; i++) oscSig[j][i] = 0.0f;
-            modOsc[j].processAdding(oscNote[j], m, oscSig[j], unusedR, n);
-            srcs[j + 1] = oscSig[j];
-        }
+        bool modDone[kOscs] = {};
+        for (int pass = 0; pass < kOscs; pass++)                   /* with Warp Chain, a modulator waits for the modulators it reads (a cycle is cut on the last pass) */
+            for (int j = 0; j < kOscs; j++) {
+                if (!needSrc[j + 1] || modDone[j]) continue;
+                VoicedWTParams m = vp[j];
+                m.voices = 1; m.gain = 1.0f; m.pan = 0.0f; m.spread = 0.0f;
+                if (!chain) m.xwarp = m.xwarp2 = 0;
+                else {
+                    const auto waits = [&](int w, float a, int s) { return w >= 3 && w <= 6 && a > 0.0f && s >= 1 && s - 1 != j && !modDone[s - 1] && pass < kOscs - 1; };
+                    if (waits(m.xwarp, m.xamount, m.xsrc) || waits(m.xwarp2, m.xamount2, m.xsrc2)) continue;
+                }
+                float unusedR[kBlock];
+                clr(unusedR);
+                for (int i = 0; i < n; i++) oscSig[j][i] = 0.0f;
+                modOsc[j].processAdding(oscNote[j], m, oscSig[j], unusedR, n, chain ? srcs : nullptr);
+                srcs[j + 1] = oscSig[j];
+                modDone[j] = true;
+            }
         for (int o = 0; o < kOscs; o++)
             if (oscGain[o] > 0.0f)
                 addSource(P[kOscPost[o]], kOscBal[o], TB_P_WT1_BUS1 + 2 * o, [&](float *l, float *r) { osc[o].processAdding(oscNote[o], vp[o], l, r, n, srcs); });
@@ -544,10 +572,15 @@ public:
          * step would otherwise be a level step. */
         /* Filter 2 in series into Filter 1 (Serum's routing slot 6 sent to the other filter): Filter 2 runs first and its output is added to Filter 1's input. */
         const bool f2First = (int) P[TB_P_FLT2_OUT] == 3;
+        float dryAL[kBlock], dryAR[kBlock], dryBL[kBlock], dryBR[kBlock];        /* a voice filter's input, kept when its Mix (Vital's, hidden) is below 100 % */
+        const float mixA = P[TB_P_FLT1_MIX] * (1.0f / 127.0f), mixB = P[TB_P_FLT2_MIX] * (1.0f / 127.0f);
         auto runF2 = [&]() {
+            const bool mixing2 = mixB < 0.999f;
+            if (mixing2) for (int i = 0; i < n; i++) { dryBL[i] = pre2L[i]; dryBR[i] = pre2R[i]; }
             const bool driving2 = drive2Mix > 0.0f || drive2MixTarget > 0.0f;
             if (driving2) driveIn(pre2L, pre2R, n, drive2Gain, drive2GainTarget, drive2Mix, drive2MixTarget);
             if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
+            else if (combType2 && vcMode2) comb2.processVital(pre2L, pre2R, n, combType2 <= 2 ? 0 : combType2 - 2, combRes2, fltTarget2, vcBlend2, vcTrans2, vcMode2 == 2);
             else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
             else runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
             if (driving2) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
@@ -555,15 +588,19 @@ public:
                 const float g = std::pow(10.0f, P[TB_P_FLT2_GAIN] / 127.0f * 24.0f / 20.0f);
                 for (int i = 0; i < n; i++) { pre2L[i] *= g; pre2R[i] *= g; }
             }
+            if (mixing2) for (int i = 0; i < n; i++) { pre2L[i] = dryBL[i] + (pre2L[i] - dryBL[i]) * mixB; pre2R[i] = dryBR[i] + (pre2R[i] - dryBR[i]) * mixB; }
         };
         if (f2First) {
             usesF2 = true;
             runF2();
             for (int i = 0; i < n; i++) { preL[i] += pre2L[i]; preR[i] += pre2R[i]; }
         }
+        const bool mixing = mixA < 0.999f;
+        if (mixing) for (int i = 0; i < n; i++) { dryAL[i] = preL[i]; dryAR[i] = preR[i]; }
         const bool driving = driveMix > 0.0f || driveMixTarget > 0.0f;
         if (driving) driveIn(preL, preR, n, driveGain, driveGainTarget, driveMix, driveMixTarget);
         if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
+        else if (combType && vcMode) comb.processVital(preL, preR, n, combType <= 2 ? 0 : combType - 2, combRes, fltTarget, vcBlend, vcTrans, vcMode == 2);
         else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
         else runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
         if (driving) driveOut(preL, preR, n, driveMix, driveMixTarget);
@@ -571,6 +608,7 @@ public:
             const float g = std::pow(10.0f, P[TB_P_FLT_GAIN] / 127.0f * 24.0f / 20.0f);
             for (int i = 0; i < n; i++) { preL[i] *= g; preR[i] *= g; }
         }
+        if (mixing) for (int i = 0; i < n; i++) { preL[i] = dryAL[i] + (preL[i] - dryAL[i]) * mixA; preR[i] = dryAR[i] + (preR[i] - dryAR[i]) * mixA; }
         driveGain = driveGainTarget;
         driveMix = driveMixTarget;
 
@@ -643,6 +681,7 @@ private:
 
         adsr.setAttack(potAttackTime(P[TB_P_VCA_A]));
         adsr.setDecay(potEnvTime(decayPot(P[TB_P_VCA_D])));
+        adsr.setDecayPower(P[TB_P_VCA_DPOW] >= 0.5f ? (P[TB_P_VCA_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f);
         adsr.setSustainLevel(pot01(P[TB_P_VCA_S]));
         adsr.setRelease(fastKill ? 0.01f : potEnvTime(P[TB_P_VCA_R]));
 
@@ -745,6 +784,7 @@ private:
               MD_WT3_POS, MD_WT3_LEVEL, MD_NONE, MD_NONE, MD_NONE, MD_NONE, MD_WT3_SYNC, MD_WT3_PITCH, MD_WT3_WARP, TB_P_WT3_WSHAPE, TB_P_WT3_SGAIN, TB_P_WT3_SOUT, TB_P_WT3_XW, TB_P_WT3_XA, TB_P_WT3_XS, TB_P_WT3_XW2, TB_P_WT3_XA2, TB_P_WT3_XS2 },
         };
 
+        static const int kUStack[kOscs] = { TB_P_WT1_USTACK, TB_P_WT2_USTACK, TB_P_WT3_USTACK }, kUPow[kOscs] = { TB_P_WT1_UPOW, TB_P_WT2_UPOW, TB_P_WT3_UPOW }, kUBlend[kOscs] = { TB_P_WT1_UBLEND, TB_P_WT2_UBLEND, TB_P_WT3_UBLEND };
         int unison[kOscs];
         for (int o = 0; o < kOscs; o++) {
             const OscKeys &k = kOsc[o];
@@ -761,7 +801,12 @@ private:
                 v.gain = std::clamp(knob * knob + modOff[k.dLvl], 0.0f, 1.0f);
             }
             v.pan      = std::clamp(potBipolar(P[k.pan]) + modOff[k.dPan], -1.0f, 1.0f);
-            v.detune   = potDetune(P[k.det]);
+            v.vitalLaw = P[TB_P_UNI_VITAL] >= 0.5f;                    /* Vital's unison: the Detune knob is the stack's half-width, 24 * (pot / 127)^2 semitones, and the stack style applies */
+            v.detune   = v.vitalLaw ? 48.0f * pot01(P[k.det]) * pot01(P[k.det]) : potDetune(P[k.det]);
+            v.detPower = P[kUPow[o]];
+            v.blend = std::clamp(P[kUBlend[o]] * 0.01f, 0.0f, 1.0f);
+            v.voicesWanted = std::clamp((int) P[k.uni], 1, 16);
+            v.stackStyle = v.vitalLaw ? std::clamp((int) P[kUStack[o]], 0, 10) : 0;
             v.spread   = pot01(P[k.spread]);
             v.sync     = std::clamp(pot01(P[k.sync]) + modOff[k.dSync], 0.0f, 1.0f);
             v.bend     = k.bend < 0 ? 0.0f
@@ -783,6 +828,7 @@ private:
             v.xwarp2 = std::clamp((int) P[k.xw2], 0, 7);
             v.xamount2 = std::clamp(P[k.xa2] * 0.001f, 0.0f, 1.0f);
             v.xsrc2 = std::clamp((int) P[k.xs2], 0, 4);
+            v.xvital = P[TB_P_XCHAIN] > 0.5f;
             oscGain[o] = v.gain;
 
             /* An oscillator counts from its pot and its routing, not its live
@@ -882,6 +928,7 @@ private:
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
                 Filter::bandpass, Filter::bandpass, Filter::notch, Filter::notch };
             combRes = res;
+            vcMode = (int) P[TB_P_VCOMB]; vcBlend = P[TB_P_CBLEND] * (2.0f / 127.0f); vcTrans = (P[TB_P_CTRANS] - 64.0f) * 0.75f;   /* the Vital comb's blend and transpose (comb.h processVital) */
             int t = ft >= 8 ? 1 : ft & 7;
             filter.setType(kTypes[t]);
             filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
@@ -898,6 +945,7 @@ private:
             if (combType2) n2 += (P[TB_P_FLT2_CFINE] - 64.0f) * 0.01f;
             fltTarget2 = std::clamp(midiNoteToHz(n2), combType2 ? 3.0f : 4.0f, maxFreq);
             combRes2 = std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f);
+            vcMode2 = (int) P[TB_P_VCOMB2]; vcBlend2 = P[TB_P_CBLEND2] * (2.0f / 127.0f); vcTrans2 = (P[TB_P_CTRANS2] - 64.0f) * 0.75f;
             fltQ2 = kFilterQ / (1.0f - std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f) * 0.99f);
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
             filter2.setType(kTypes[t2]);
@@ -985,6 +1033,8 @@ private:
     PhaserFilter phaser, phaser2;
     int combType = 0, combType2 = 0;
     float combRes = 0.0f, combRes2 = 0.0f;
+    int vcMode = 0, vcMode2 = 0;                  /* 0 Serum's comb law, 1 Vital blend, 2 Vital band spread */
+    float vcBlend = 0.0f, vcBlend2 = 0.0f, vcTrans = 0.0f, vcTrans2 = 0.0f;
     float noiseHpHz = 0.0f, noiseHpSet = 0.0f, noiseLpHz = 0.0f, noiseLpSet = 0.0f, noisePan = 0.0f;
     SamplePlayer smp, smp2, smp3;
     GrainCloud gran, gran2, gran3;      /* the same slots in their Granular kind */

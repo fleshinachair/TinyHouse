@@ -19,12 +19,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 PY = ["import_web.py", "deephouse2move.py", "fxmap.py", "fxmetrics.py", "sample_export.py", "serum_paths.py"]
+VITAL = ["vital_import.py", "vital_morph.py", "vital_pd_table.npz"]     # the Vital import: GPL-3.0-or-later, so the bundle carries the licence text and the notice with it (--no-vital leaves it out)
+VITAL_DOCS = ["LICENSE-GPL-3.0", "THIRD-PARTY.md"]
 DATA = ["dist_curves", "dist_scales", "filter_models", "filter_res", "fxfilter_drive_probe2", "fxfilter_models_probe", "fx_laws", "fxf_cutoff", "level_law", "lfo_scales", "warp_curve_modes", "warp_dist_curves"]
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=HERE.parent / "build/import_bundle.zip")
+    ap.add_argument("--no-vital", action="store_true", help="leave the GPL Vital importer out (Serum presets only)")
     a = ap.parse_args()
     a.out.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -37,6 +40,11 @@ def main() -> None:
     with zipfile.ZipFile(a.out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for f in PY:
             z.write(REPO / "converter" / f, f); n += 1
+        if not a.no_vital:
+            for f in VITAL:
+                z.write(REPO / "converter" / f, f); n += 1
+            for f in VITAL_DOCS:
+                z.write(REPO / f, f"licenses/{f}"); n += 1
         for d in DATA:
             # minified: the page downloads this
             z.writestr(f"calibration/{d}.json", json.dumps(json.loads((REPO / "calibration" / f"{d}.json").read_text(encoding="utf-8")), separators=(",", ":"))); n += 1

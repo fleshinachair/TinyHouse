@@ -12,8 +12,9 @@ mapping (deephouse2move.map_to_tablor) with what a user's machine does not have 
   r["presets"][i]  {name, json, tier, gaps, approx, not_carried, missing_tables, fx, error}
   r["files"]       {path under /data/UserData: base64}   wavetables written by this call, to be uploaded beside the presets
 
-Files named *.SerumPreset are presets; *.wav are wavetables (looked up by the path Serum stored, then by file name); *.SerumPack and *.zip are
-opened and their presets and wavetables taken the same way.
+Files named *.SerumPreset are presets; *.wav are wavetables (looked up by the path Serum stored, then by file name); *.SerumPack, *.vitalbank (a Vital bank: a zip of .vital presets) and *.zip are
+opened and their presets and wavetables taken the same way. *.vital (Vital presets: plain JSON that carries its own wavetables and sample) are presets too,
+converted by vital_import.py (GPL-3.0-or-later: when it is in the bundle, so is the licence text).
 """
 from __future__ import annotations
 
@@ -28,6 +29,11 @@ from pathlib import Path
 import deephouse2move as d2m
 import sample_export as SE
 from serum2_preset_loader.codec import decode_preset_file
+
+try:                                                  # the Vital path is GPL-3.0-or-later and needs numpy: a bundle without it still imports Serum presets
+    import vital_import as VI
+except Exception:                                    # pragma: no cover
+    VI = None
 
 # Samples: the page decodes the audio files the presets name and writes them (as "<name>.dec", see sample_export) under /smp in Pyodide's file system, in the layout of
 # Serum's own folder. Only where Python has no soundfile (Pyodide); a PC run reads Serum's folder itself.
@@ -79,6 +85,8 @@ def _store(rel: str, data: bytes) -> None:
     w = _work()
     if low.endswith(".serumpreset"):
         (w / "presets" / (Path(rel).name[:-len(".SerumPreset")] + ".SerumPreset")).write_bytes(data)      # Pyodide's file system is case-sensitive and the globs below look for this spelling
+    elif low.endswith(".vital"):
+        (w / "presets" / (Path(rel).name[:-len(".vital")] + ".vital")).write_bytes(data)
     elif low.endswith(".wav"):
         for pre in ("s2 tables/", "tables/"):          # the path Serum stores starts under Tables; a folder pick adds its own prefix
             i = low.find("/" + pre)
@@ -91,7 +99,7 @@ def _store(rel: str, data: bytes) -> None:
         dest = w / "tables" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
-    elif low.endswith((".serumpack", ".zip")):
+    elif low.endswith((".serumpack", ".vitalbank", ".zip")):
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             for n in z.namelist():
                 nl = n.lower()
@@ -105,7 +113,7 @@ def _store(rel: str, data: bytes) -> None:
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         dest.write_bytes(z.read(n))
                         continue
-                if nl.endswith((".serumpreset", ".wav")):
+                if nl.endswith((".serumpreset", ".vital", ".wav")):
                     _store(n, z.read(n))
 
 
@@ -118,11 +126,17 @@ def pack_audio_json() -> str:
     return json.dumps([[f.relative_to(base).as_posix(), f.as_posix()] for f in sorted(base.rglob("*")) if f.is_file()] if base.is_dir() else [])
 
 
+def _preset_files() -> list[Path]:
+    """The presets added so far, Serum's and Vital's, by name."""
+    d = _work() / "presets"
+    return sorted(list(d.glob("*.SerumPreset")) + list(d.glob("*.vital")), key=lambda p: (p.stem.lower(), p.suffix))
+
+
 def add_files(files) -> int:
     """Add files (a dict path -> bytes, as the page reads them). Returns how many presets are now waiting."""
     for rel, data in dict(files).items():
         _store(str(rel), bytes(data))
-    return len(list((_work() / "presets").glob("*.SerumPreset")))
+    return len(_preset_files())
 
 
 def add_dir(path: str) -> int:
@@ -132,7 +146,7 @@ def add_dir(path: str) -> int:
         if f.is_file():
             _store(f.relative_to(root).as_posix(), f.read_bytes())
             f.unlink()
-    return len(list((_work() / "presets").glob("*.SerumPreset")))
+    return len(_preset_files())
 
 
 def sample_needs(tree: dict) -> list[dict]:
@@ -197,7 +211,7 @@ def new_sample_files_json() -> str:
 
 
 def preset_names() -> list[str]:
-    return sorted(p.stem for p in (_work() / "presets").glob("*.SerumPreset"))
+    return sorted({p.stem for p in _preset_files()})
 
 
 def _list(x) -> list:
@@ -244,6 +258,23 @@ def _level_law(m: dict) -> list:
     return [f"Volume set by a general rule ({off:+.1f} dB), not matched to Serum: adjust by ear"]
 
 
+VITAL_LEVEL_NOTE = "Volume is not matched to Vital's level (that needs Vital and the native engine): adjust by ear"
+
+
+def _convert_vital(p: Path, name: str, r: dict, wt_out: Path, subdir: str) -> None:
+    """A Vital preset (plain JSON; its wavetables and sample are inside) through vital_import.map_vital into the entry `r`."""
+    if VI is None:
+        raise RuntimeError("this bundle has no Vital importer")
+    d = json.loads(p.read_text(encoding="utf-8"))
+    m = VI.map_vital(d, name, wt_out, subdir)
+    notes = list(m["notes"])
+    silent = [x for x in notes if x.startswith("SILENT")]
+    left = [x for x in notes if "not carried" in x and x not in silent]
+    r.update(json=json.dumps({"name": name, "module": "tinyhouse", "version": 1, "state": VI.blob(m)}) + "\n",
+             tier="vital", gaps=silent, approx=[x for x in notes if x not in silent and x not in left] + [VITAL_LEVEL_NOTE], not_carried=left,
+             fx=sorted({x for x in m["carried_fx"] if not x.startswith("osc")}))
+
+
 def convert(bank: str = "Imports", only=None) -> dict:
     w = _work()
     tables_dir, wt_out = w / "tables", w / "Wavetables"
@@ -251,7 +282,7 @@ def convert(bank: str = "Imports", only=None) -> dict:
     subdir = d2m.ascii_name(bank) or "Imports"
     want = set(only) if only is not None else None
     out, used = [], set()
-    for p in sorted((w / "presets").glob("*.SerumPreset")):
+    for p in _preset_files():
         if want is not None and p.stem not in want:
             continue
         base = d2m.ascii_name(p.stem)[:MAX_NAME].rstrip() or "Preset"
@@ -261,6 +292,10 @@ def convert(bank: str = "Imports", only=None) -> dict:
         used.add(name.lower())
         r = {"file": p.stem, "name": name, "json": None, "tier": "", "gaps": [], "approx": [], "not_carried": [], "missing_tables": [], "fx": [], "samples": [], "missing_samples": [], "error": ""}
         try:
+            if p.suffix == ".vital":
+                _convert_vital(p, name, r, wt_out, subdir)
+                out.append(r)
+                continue
             header, tree = decode_preset_file(p)
             needs = sample_needs(tree)
             r["samples"] = [n for n in needs]
@@ -304,7 +339,7 @@ if __name__ == "__main__":
     srcs = [Path(a) for a in sys.argv[1:]]
     for s in srcs:
         for f in ([s] if s.is_file() else sorted(s.rglob("*"))):
-            if f.is_file() and f.suffix.lower() in (".serumpreset", ".wav", ".serumpack", ".zip"):
+            if f.is_file() and f.suffix.lower() in (".serumpreset", ".vital", ".wav", ".serumpack", ".vitalbank", ".zip"):
                 add_files({str(f.relative_to(s.parent)): f.read_bytes()})
     res = convert("Imports")
     for r in res["presets"]:

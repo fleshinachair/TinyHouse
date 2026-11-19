@@ -147,6 +147,19 @@ static void testADSR()
     CHECK(env.getState() == AnalogADSR::State::idle && env.getOutput() == 0.0f,
           "ends idle at 0");
 
+    /* Vital's decay curve: power 5.5 holds the level, then plunges at the set time; squared into the gain, ending on the sustain */
+    {
+        AnalogADSR k;
+        k.setSampleRate(44100.0);
+        k.setAttack(0.0f); k.setDecay(0.1f); k.setSustainLevel(0.0f); k.setRelease(0.1f);
+        k.setDecayPower(5.5f);
+        k.noteOn();
+        k.process(2205);                                         /* half way: v = 1 - (exp(2.75) - 1) / (exp(5.5) - 1) = 0.9355, gain 0.875 */
+        CHECK(std::fabs(k.getOutput() - 0.875f) < 0.01f, "Vital decay power 5.5 holds the level half way (%.3f)", k.getOutput());
+        k.process(2300);
+        CHECK(k.getState() == AnalogADSR::State::sustain && k.getOutput() == 0.0f, "Vital decay curve ends on the sustain at the set time");
+    }
+
     /* attack==0 fast path */
     AnalogADSR fast;
     fast.setSampleRate(44100.0);
@@ -1085,9 +1098,26 @@ static void testPresetDigest()
     CHECK(tb::presetDigest({}, {}) == "{\"b\":[]}", "an empty store is an empty list");
 }
 
+/* Vital's unison stack styles, measured on the plugin (calibration/vital_stack_probe.py): a voice's offset by its distance group c from the middle of the stack. */
+static void testVitalStackStyles()
+{
+    CHECK(tb::stackOffset(0, 3) == 0.0f, "Normal adds nothing");
+    CHECK(tb::stackOffset(1, 0) == -12.0f && tb::stackOffset(1, 1) == 0.0f, "Center Drop 12 drops only the middle");
+    CHECK(tb::stackOffset(2, 0) == -24.0f, "Center Drop 24");
+    CHECK(tb::stackOffset(3, 1) == 12.0f && tb::stackOffset(3, 2) == 0.0f, "Octave Up on odd groups");
+    CHECK(tb::stackOffset(4, 2) == 24.0f && tb::stackOffset(4, 3) == 0.0f, "Octaves cycle 0, 12, 24");
+    CHECK(tb::stackOffset(5, 1) == 7.0f && tb::stackOffset(5, 2) == 12.0f && tb::stackOffset(5, 3) == 0.0f, "Power Chord cycles 0, 7, 12");
+    CHECK(tb::stackOffset(6, 3) == 19.0f && tb::stackOffset(6, 4) == 24.0f, "Power Chord Up stacks 0, 7, 12, 19, 24");
+    CHECK(tb::stackOffset(7, 1) == 4.0f && tb::stackOffset(7, 3) == 12.0f, "Major chord");
+    CHECK(tb::stackOffset(8, 1) == 3.0f && tb::stackOffset(8, 4) == 15.0f, "Minor chord");
+    CHECK(std::fabs(tb::stackOffset(9, 2) - 19.0196f) < 1e-3f, "Harmonic series: the 3rd harmonic is 19.02 semitones up");
+    CHECK(std::fabs(tb::stackOffset(10, 3) - 33.6883f) < 1e-3f, "Odd harmonics: the 7th harmonic is 33.69 semitones up");
+}
+
 int main()
 {
     testFilter();
+    testVitalStackStyles();
     testADSR();
     testShortWavetables();
     testShortFrameTables();

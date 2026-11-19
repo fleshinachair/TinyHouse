@@ -659,11 +659,85 @@ private:
 /* Unison wrapper — gin::VoicedStereoOscillator, WT flavour            */
 /* ------------------------------------------------------------------ */
 
+/* Vital's stack styles (calibration/vital_stack_probe.py): a voice's semitone offset by its distance group c = floor(|i - (n - 1) / 2|) from the middle of the stack. */
+inline float stackOffset(int style, int c)
+{
+    static const int kPower[3] = { 0, 7, 12 }, kMajor[3] = { 0, 4, 7 }, kMinor[3] = { 0, 3, 7 };
+    switch (style) {
+    case 1:  return c == 0 ? -12.0f : 0.0f;
+    case 2:  return c == 0 ? -24.0f : 0.0f;
+    case 3:  return 12.0f * (float) (c % 2);
+    case 4:  return 12.0f * (float) (c % 3);
+    case 5:  return (float) kPower[c % 3];
+    case 6:  return 7.0f * (float) (c % 2) + 12.0f * (float) (c / 2);
+    case 7:  return (float) kMajor[c % 3] + 12.0f * (float) (c / 3);
+    case 8:  return (float) kMinor[c % 3] + 12.0f * (float) (c / 3);
+    case 9:  return 12.0f * std::log2((float) (c + 1));
+    case 10: return 12.0f * std::log2((float) (2 * c + 1));
+    default: return 0.0f;
+    }
+}
+
+/* Vital's unison blend (calibration/vital_stack_probe.py, measured on the plugin): the amplitude of each voice relative to one voice, for the middle group of the stack (the one voice of an odd stack, the two of an even one) and
+ * for the others, by the number of voices (rows) and the Blend setting at 0, .2 ... 1 (columns). The outer voices all share one level. */
+inline void vitalBlendGains(int voices, float blend, float &center, float &outer)
+{
+    static const float kCenter[17][6] = {
+    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+    { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f },
+    { 0.4670f, 0.4670f, 0.4670f, 0.4670f, 0.4670f, 0.4670f },
+    { 1.0000f, 0.9713f, 0.8927f, 0.7859f, 0.6704f, 0.5551f },
+    { 0.4852f, 0.4713f, 0.4333f, 0.3815f, 0.3255f, 0.2695f },
+    { 1.0000f, 0.9448f, 0.8138f, 0.6684f, 0.5384f, 0.4267f },
+    { 0.4618f, 0.4363f, 0.3757f, 0.3085f, 0.2485f, 0.1969f },
+    { 1.0000f, 0.9205f, 0.7529f, 0.5917f, 0.4626f, 0.3597f },
+    { 0.4986f, 0.4587f, 0.3750f, 0.2945f, 0.2302f, 0.1788f },
+    { 1.0000f, 0.8980f, 0.7039f, 0.5366f, 0.4121f, 0.3169f },
+    { 0.5107f, 0.4584f, 0.3591f, 0.2736f, 0.2100f, 0.1614f },
+    { 1.0000f, 0.8769f, 0.6632f, 0.4943f, 0.3749f, 0.2862f },
+    { 0.5104f, 0.4475f, 0.3383f, 0.2521f, 0.1911f, 0.1459f },
+    { 1.0000f, 0.8571f, 0.6285f, 0.4603f, 0.3459f, 0.2627f },
+    { 0.4883f, 0.4183f, 0.3066f, 0.2244f, 0.1685f, 0.1279f },
+    { 1.0000f, 0.8384f, 0.5986f, 0.4323f, 0.3225f, 0.2439f },
+    { 0.5004f, 0.4195f, 0.2996f, 0.2163f, 0.1614f, 0.1220f }
+    };
+    static const float kOuter[17][6] = {
+    { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+    { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+    { 0.0000f, 0.0000f, 0.0000f, 0.0000f, 0.0000f, 0.0000f },
+    { 0.0005f, 0.1115f, 0.2108f, 0.2891f, 0.3468f, 0.3887f },
+    { 0.0005f, 0.1115f, 0.2108f, 0.2891f, 0.3468f, 0.3887f },
+    { 0.0007f, 0.1129f, 0.2002f, 0.2563f, 0.2904f, 0.3116f },
+    { 0.0005f, 0.1081f, 0.1917f, 0.2453f, 0.2780f, 0.2983f },
+    { 0.0008f, 0.1100f, 0.1852f, 0.2268f, 0.2493f, 0.2624f },
+    { 0.0007f, 0.1109f, 0.1868f, 0.2289f, 0.2517f, 0.2649f },
+    { 0.0009f, 0.1090f, 0.1756f, 0.2085f, 0.2250f, 0.2342f },
+    { 0.0002f, 0.1041f, 0.1680f, 0.1996f, 0.2155f, 0.2243f },
+    { 0.0010f, 0.1030f, 0.1601f, 0.1859f, 0.1982f, 0.2049f },
+    { 0.0002f, 0.1032f, 0.1606f, 0.1864f, 0.1988f, 0.2055f },
+    { 0.0011f, 0.1029f, 0.1555f, 0.1775f, 0.1876f, 0.1930f },
+    { 0.0009f, 0.1018f, 0.1538f, 0.1755f, 0.1856f, 0.1908f },
+    { 0.0011f, 0.1013f, 0.1490f, 0.1679f, 0.1762f, 0.1806f },
+    { 0.0006f, 0.0986f, 0.1449f, 0.1631f, 0.1712f, 0.1754f }
+    };
+    const int n = std::clamp(voices, 0, 16);
+    const float pos = std::clamp(blend, 0.0f, 1.0f) * 5.0f;
+    const int i = std::min((int) pos, 4);
+    const float f = pos - (float) i;
+    center = kCenter[n][i] + (kCenter[n][i + 1] - kCenter[n][i]) * f;
+    outer  = kOuter[n][i] + (kOuter[n][i + 1] - kOuter[n][i]) * f;
+}
+
 struct VoicedWTParams {
     int   voices = 1;
     float pan = 0.0f;       /* -1..1 */
     float spread = 0.0f;    /*  0..1 */
-    float detune = 0.0f;    /* semitones across the stack */
+    float detune = 0.0f;    /* semitones across the stack (Law Vital: the half-width of the stack) */
+    bool  vitalLaw = false; /* Vital's unison: voices at detune * (e^(p|x|) - 1) / (e^p - 1), signed, for x evenly over -1..1 (p = detPower), plus the stack style's offsets */
+    float detPower = 1.5f;
+    float blend = 0.8f;     /* Vital's unison blend 0..1 (vitalBlendGains) */
+    int   voicesWanted = 0; /* the stack Vital would play (voices may be fewer: the engine's stream budget): the gains are Vital's for that many, rescaled so the power is the same */
+    int   stackStyle = 0;   /* Vital's stack style 0..10 (stackOffset) */
     float gain = 1.0f;
     /* WT params forwarded to every voice */
     float position = 0.0f, bend = 0.0f, formant = 0.0f, asym = 0.0f, fold = 0.0f;
@@ -680,6 +754,7 @@ struct VoicedWTParams {
     int   xwarp2 = 0;                     /* the oscillator's second warp (Serum has two), applied after the first */
     float xamount2 = 0.0f;
     int   xsrc2 = 0;
+    bool  xvital = false;                 /* Warp Chain: ring modulation by an oscillator at Vital's depth (a unit table gives a modulator of amplitude 1) */
 };
 
 /* What each warp does at an amount, from Serum:
@@ -702,6 +777,8 @@ inline constexpr float kXwarpPdCycles = 33.6f / 6.28318530718f;   /* PD index in
 inline constexpr float kXwarpFmHz     = 58200.0f;                  /* FM deviation at amount 1, Hz (x a^4) */
 inline constexpr float kXwarpRmGain   = 1.314f;
 inline constexpr float kXwarpOscScale = 1.52f;
+inline constexpr float kVitalPmCycles = 6.0f;                      /* Vital's FM by an oscillator is a phase modulation of 6 cycles x amount^2 x the modulator (synth_oscillator.cpp: kFmPhaseMult * kMaxFmModulation = 1/8 x 48 of a cycle; the squared amount is measured, calibration/vital_fm_probe.py: the first sideband of a sine pair gives 0.015, 0.09, 0.34 rad at amounts 0.02, 0.05, 0.1), whatever the pitches */
+inline constexpr float kVitalRmOscGain = 1.1115f;                  /* RM by an oscillator, Vital's law g = (1 - a) + a m with m the oscillator's own output: calibration/vital_rm_probe.py (the engine's 1.797 -> Vital's 1.000) */
 /* The Noise as the modulator (calibration/dev/probe_noise_warp_law.py, averaged over renders, calibration/dev/validate_noise_warps.py).
  *  - FM from the Noise is a real FM by white noise: the carrier becomes a Lorentzian line (the power stays) whose half width H grows exponentially with the amount (about x 3.3 per 0.1), read from the
  *    share of the power left in the carrier's +-1.4 Hz (H = 1.4 / tan(pi share / 2)). A white frequency noise of standard deviation d cycles per sample has H = pi d^2 fs, so d = sqrt(H / (pi fs)).
@@ -782,7 +859,7 @@ public:
     /* `src[0..3]` are the modulators' waveforms at unit level for the block (the Sub, then oscillators A..C), null where not rendered; the FM / PD / RM / AM warps read them. */
     void processAdding(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *const *src = nullptr)
     {
-        struct Slot { int kind = 0; float a = 0.0f, gain = 1.0f, g = 0.0f; const float *sig = nullptr; bool noise = false; };
+        struct Slot { int kind = 0; float a = 0.0f, gain = 1.0f, g = 0.0f; const float *sig = nullptr; bool noise = false, vitalPm = false; };
         Slot s[2];
         float selfPd = 0.0f;
         for (int k = 0; k < 2; k++) {
@@ -797,6 +874,8 @@ public:
                 const int si = std::min(std::max(k ? vp.xsrc2 : vp.xsrc, 0), 4);
                 if (!src || !src[si]) continue;
                 s[k].sig = src[si]; s[k].gain = si == 0 ? 1.0f : kXwarpOscScale;
+                if (vp.xvital && si != 0 && si != 4 && (w == 5 || w == 6)) s[k].gain = kVitalRmOscGain / kXwarpRmGain;
+                if (vp.xvital && si != 0 && si != 4 && w == 4) { s[k].vitalPm = true; s[k].gain = kVitalRmOscGain; }      /* Warp Chain: PD by an oscillator is Vital's FM, linear in the amount */
                 if (si == 4) {
                     if (w == 6) continue;                      /* AM from the Noise is not measured */
                     s[k].noise = true; s[k].gain = 1.0f;
@@ -822,6 +901,7 @@ public:
                 bool &has = fmk ? hasFm : hasPm;
                 if (!has) { for (int i = 0; i < todo; i++) dst[i] = 0.0f; has = true; }
                 const float depth = s[k].noise ? (fmk ? noiseFmSdCycles(s[k].a, (float) sampleRate) : noisePdSigmaCycles(s[k].a))
+                                                : s[k].vitalPm ? kVitalPmCycles * s[k].a * s[k].a * s[k].gain
                                                 : (fmk ? kXwarpFmHz / (float) sampleRate : kXwarpPdCycles) * a4 * s[k].gain;
                 for (int i = 0; i < todo; i++) dst[i] += depth * s[k].sig[i];
             }
@@ -866,8 +946,9 @@ private:
 
         const int voices = std::clamp(vp.voices, 1, (int) oscs.size());
         if (voices == 1) {
-            p.leftGain  = vp.gain * (1.0f - vp.pan);
-            p.rightGain = vp.gain * (1.0f + vp.pan);
+            const float one = vp.vitalLaw ? std::cos(0.7853982f * std::clamp(vp.spread, 0.0f, 1.0f)) : 1.0f;     /* Vital's stereo spread also scales a single voice, by cos(pi spread / 4): -3 dB at full spread */
+            p.leftGain  = vp.gain * (1.0f - vp.pan) * one;
+            p.rightGain = vp.gain * (1.0f + vp.pan) * one;
             oscs[0].processAdding(note, p, l, r, n);
             return;
         }
@@ -875,6 +956,13 @@ private:
         const float baseNote  = note - vp.detune / 2.0f;
         const float noteDelta = vp.detune / (float) (voices - 1);
         const float comp      = 1.0f / std::sqrt((float) voices);
+        float blendCenter = comp, blendOuter = comp;
+        if (vp.vitalLaw) {
+            const int want = std::max(voices, vp.voicesWanted);
+            vitalBlendGains(want, vp.blend, blendCenter, blendOuter);
+            const float keep = std::sqrt((float) want / (float) voices);       /* fewer voices than Vital's: the same power */
+            blendCenter *= keep; blendOuter *= keep;
+        }
 
         /* Streams alternate between the two sides, with the middle one of an odd stack
          * in the centre. Evenly spaced pans could not get wider than side/mid -4.8 dB
@@ -885,9 +973,36 @@ private:
             const bool middle = (voices & 1) && i == voices / 2;
             const float side = middle ? 0.0f : (i & 1) ? 1.0f : -1.0f;
             float pan = std::clamp(vp.pan + vp.spread * side, -1.0f, 1.0f);
-            p.leftGain  = vp.gain * (1.0f - pan) * comp;
-            p.rightGain = vp.gain * (1.0f + pan) * comp;
-            oscs[(size_t) i].processAdding(baseNote + noteDelta * (float) i, p, l, r, n);
+            if (vp.vitalLaw) {
+                /* Vital's stereo spread (measured, calibration/vital_stack_probe.py): an equal-power pan of sqrt(2) cos / sin (pi / 4 (1 +- spread)); the middle voice of an odd stack stays at the centre,
+                 * scaled by cos(pi spread / 4); the others alternate left and right along the stack, starting on the left when the count is 1 or 2 mod 4 and on the right otherwise. */
+                const float vg = (std::fabs((float) i - 0.5f * (float) (voices - 1)) < 1.0f) ? blendCenter : blendOuter;
+                const bool odd = (voices & 1) != 0;
+                const float sp = std::clamp(vp.spread, 0.0f, 1.0f), quarter = 0.7853982f;
+                float gl, gr;
+                if (odd && i == voices / 2) { gl = gr = std::cos(quarter * sp); }
+                else {
+                    const int j = i - ((odd && i > voices / 2) ? 1 : 0);
+                    const bool startLeft = (voices % 4 == 1 || voices % 4 == 2);
+                    const bool left = (((j & 1) == 0) == startLeft);
+                    const float ang = quarter * (1.0f + (left ? -sp : sp));
+                    gl = 1.4142136f * std::cos(ang);
+                    gr = 1.4142136f * std::sin(ang);
+                }
+                p.leftGain  = vp.gain * (1.0f - vp.pan) * vg * gl;
+                p.rightGain = vp.gain * (1.0f + vp.pan) * vg * gr;
+            } else {
+                p.leftGain  = vp.gain * (1.0f - pan) * comp;
+                p.rightGain = vp.gain * (1.0f + pan) * comp;
+            }
+            float voiceNote = baseNote + noteDelta * (float) i;
+            if (vp.vitalLaw) {
+                const float x = 2.0f * (float) i / (float) (voices - 1) - 1.0f;
+                const float ax = std::fabs(x);
+                const float shape = std::fabs(vp.detPower) < 1e-3f ? ax : (std::exp(vp.detPower * ax) - 1.0f) / (std::exp(vp.detPower) - 1.0f);
+                voiceNote = note + vp.detune * (x < 0.0f ? -shape : shape) + stackOffset(vp.stackStyle, (int) std::floor(std::fabs((float) i - 0.5f * (float) (voices - 1))));
+            }
+            oscs[(size_t) i].processAdding(voiceNote, p, l, r, n);
         }
     }
 

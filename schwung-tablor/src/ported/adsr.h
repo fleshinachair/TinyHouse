@@ -39,6 +39,7 @@ public:
         if (attack == 0.0f) {
             state = State::decay;
             output = 1.0f;
+            decayPos = 0.0f;
         } else {
             state = State::attack;
             if (orig == State::idle)
@@ -63,6 +64,10 @@ public:
     {
         if (release != r) { release = r; calculateRelease(); }
     }
+    /* Vital's own decay shape for the amplitude envelope: when `p` is not 0 the decay stage is the curve Vital draws, 1 - (1 - sustain_gain) * (exp(p x) - 1) / (exp(p) - 1) over x = 0..1 of
+     * the decay time, squared into the gain as Vital squares its amplitude envelope (the sustain level is the gain, so the curve ends on it). 0 keeps the analog one-pole stage. */
+    void setDecayPower(float p) { decayPow = p; }
+
     void setSustainLevel(float s)
     {
         if (sustain != s) {
@@ -79,9 +84,19 @@ public:
         case State::idle: break;
         case State::attack:
             output = attackOffset + output * attackCoeff;
-            if (output >= 1.0f || attack == 0.0f) { output = 1.0f; state = State::decay; }
+            if (output >= 1.0f || attack == 0.0f) { output = 1.0f; state = State::decay; decayPos = 0.0f; }
             break;
         case State::decay:
+            if (decayPow != 0.0f) {
+                decayPos += decayStep;
+                if (decayPos >= 1.0f) { output = sustain; state = State::sustain; }
+                else {
+                    const float sl = std::sqrt(sustain);
+                    const float v = sl + (1.0f - sl) * (1.0f - (std::exp(decayPow * decayPos) - 1.0f) / (std::exp(decayPow) - 1.0f));
+                    output = v * v;
+                }
+                break;
+            }
             output = decayOffset + output * decayCoeff;
             if (output <= sustain) state = State::sustain;
             break;
@@ -130,6 +145,7 @@ private:
         float tco = std::exp(-5.0f);
         decayCoeff = std::exp(-std::log((1.0f + tco) / tco) / samples);
         decayOffset = (sustain - tco) * (1.0f - decayCoeff);
+        decayStep = samples > 1.0f ? 1.0f / samples : 1.0f;
     }
     void calculateRelease()
     {
@@ -145,6 +161,7 @@ private:
     float attackCoeff = 0.0f, decayCoeff = 0.0f, releaseCoeff = 0.0f;
     float attackOffset = 0.0f, decayOffset = 0.0f, releaseOffset = 0.0f;
     float output = 0.0f;
+    float decayPow = 0.0f, decayPos = 0.0f, decayStep = 1.0f;
 };
 
 /* One-pole value smoother — port of gin::ValueSmoother (glide/noteSmoother). */

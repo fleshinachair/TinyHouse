@@ -126,6 +126,43 @@ struct StereoBiquad {
     void clear() { z1[0] = z1[1] = z2[0] = z2[1] = 0; }
 };
 
+/* Vital's distortion filter (calibration/vital_distfilt_probe.py): a two-pole state-variable filter. Measured against a saw through the real plugin: the corner is the MIDI note's
+ * frequency, the Q follows the resonance by the table below (0.5 .. 14.2), and the blend mixes the low-pass (1 - b), the band-pass peaking at Q and the high-pass so that their POWER
+ * weights are (1 - b)^2 and 1 - (1 - b)^2 (a real mix of the two quadrature outputs does exactly that), which keeps the peak at the corner at Q across the blend. */
+struct VitalDistFilter {
+    float a1 = 0, a2 = 0, a3 = 0, k = 2, wl = 1, wb = 0, wh = 0;
+    float ic1[2] = { 0, 0 }, ic2[2] = { 0, 0 };
+
+    static float qOfRes(float res)
+    {
+        static const float q[21] = { 0.500f, 0.502f, 0.515f, 0.552f, 0.624f, 0.742f, 0.918f, 1.164f, 1.490f, 1.909f, 2.430f, 3.063f, 3.818f, 4.700f, 5.714f, 6.860f, 8.133f, 9.522f, 11.009f, 12.572f, 14.179f };
+        const float x = std::min(std::max(res, 0.0f), 1.0f) * 20.0f;
+        const int i = std::min((int) x, 19);
+        const float f = x - (float) i;
+        return q[i] * std::pow(q[i + 1] / q[i], f);
+    }
+    void set(float note, float res, float blend, float sr)
+    {
+        const float hz = std::min(440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f), 0.45f * sr);
+        const float g = std::tan(3.14159265f * hz / sr);
+        k = 1.0f / qOfRes(res);
+        a1 = 1.0f / (1.0f + g * (g + k)); a2 = g * a1; a3 = g * a2;
+        const float b = std::min(std::max(blend, 0.0f), 2.0f);
+        if (b <= 1.0f) { wl = 1.0f - b; wh = 0.0f; wb = std::sqrt(1.0f - wl * wl); }
+        else           { wh = b - 1.0f; wl = 0.0f; wb = std::sqrt(1.0f - wh * wh); }
+    }
+    inline float tick(int c, float x)
+    {
+        const float v3 = x - ic2[c];
+        const float v1 = a1 * ic1[c] + a2 * v3;
+        const float v2 = ic2[c] + a2 * ic1[c] + a3 * v3;
+        ic1[c] = sanitize(2.0f * v1 - ic1[c]);
+        ic2[c] = sanitize(2.0f * v2 - ic2[c]);
+        return wl * v2 + wb * v1 + wh * (x - k * v1 - v2);
+    }
+    void clear() { ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0; }
+};
+
 /* ------------------------------------------------------------------ wet and dry laws */
 
 /* Serum's wet knob is not a straight crossfade, and neither law below is a guess: both were
@@ -147,6 +184,9 @@ struct FxSettings {
     float delay2Mix = 0, delay2Ms = 250, delay2RMs = 250, delay2Fb = 0.4f, delay2LoHz = 20, delay2HiHz = 16000;   /* a second delay after the first (Serum racks with two) */
     int   delay2Ping = 0;
     float revMix = 0, revT60 = 2.0f, revDampHz = 8000, revLoHz = 20, revWidth = 1.0f;
+    /* Vital's reverb (processReverbVital): Off keeps Serum's. Mix is an equal-power crossfade; Decay a T60 in seconds; the notes are MIDI notes. */
+    bool  revVital = false;
+    float revVSize = 0.5f, revVDecay = 2.0f, revVPreLo = 0, revVPreHi = 110, revVLoNote = 0, revVLoDb = 0, revVHiNote = 90, revVHiDb = -1, revVChorus = 0.2f, revVChorusHz = 0.25f, revVDelayS = 0;
     float convMix = 0;        /* Serum's Conv Wet 0..1: the dry part cos(pi w / 2), the convolved part sin^2(pi w / 2) of the Wet-100 level (calibration/probe_conv_blend.py) */
     struct Band { int type = EQ_OFF; float hz = 1000, gainDb = 0, q = 1; } band[4];
     Band msBand[2][4];        /* the EQs inside a SplitMS node: [0] the Mid branch, [1] the Side branch (fxmap.ms_branches) */
@@ -156,15 +196,38 @@ struct FxSettings {
     int   distHold = 1;                     /* mode 4: Serum's Downsample, a sample-and-hold of this many samples */
     bool  distCal = false;                  /* the calibrated law: out = level (1 - s^2) x + s out curve(gain x), s = distMix */
     float distGain = 1, distOut = 1, distLevel = 1;
+    bool  distVital = false;                /* Vital's measured law (calibration/vital_dist_probe.py): out = (1 - mix) x + mix curve(gain x), the curve against Vital's own full scale; distGain is its gain, distMode its curve (0 tanh, 2 hard clip, 3 sine fold, 4 hold, 5 linear fold) */
+    float distDriveDb = 0;                  /* the Vital law's drive in dB (distGain is its linear gain) */
+    int   distFlt = 0;                      /* Vital's distortion filter: 0 off, 1 before the curve, 2 after it; on the wet part only */
+    float distFltNote = 60, distFltRes = 0, distFltBlend = 0;      /* cutoff as a MIDI note, resonance 0..1, blend 0 low-pass .. 1 band-pass .. 2 high-pass */
+    bool  distAudio = false;                /* Vital's keyboard-following LFO on the distortion, run at audio rate inside the stage (the voices' LFOs only step once per block) */
+    float distAudioAmt[4] = { 0, 0, 0, 0 }; /* its route amounts to Drive, filter Cutoff, Res, Blend (a fraction of each control's range) */
+    float distAudioTrans = 0;               /* semitones added to the newest note for its frequency */
+    float distAudioShape[16] = {};          /* one cycle, 0..1 */
     int   distPre = 0;                      /* a filter before the curve, on the distorted part: 0 off, 1 low-pass, 2 high-pass (the calibrated law only) */
     float distPreHz = 1000, distPreQ = 1;
     float compMix = 0;                      /* compressor: parallel part 0..1 (0 is off) */
     float compThreshDb = 0, compRatio = 1, compAttackMs = 10, compReleaseMs = 100, compMakeupDb = 0, compKneeDb = 12;
+    float compBoostDb = 12;                 /* Comp Boost Cap: the most the multiband compressor's upward part may add to a band, dB */
+    int   fxOrder = 0;                      /* FX Order: the rank of the main chain's stage order among the 7! permutations (0 = the default order) */
     bool  compMulti = false;                /* three bands, each with its own threshold and gain, and upward compression below */
     float compThreshBandDb[3] = { 0, 0, 0 }, compBandGainDb[3] = { 0, 0, 0 }, compBelow = 0;
+    /* Vital's compressor (processCompVital, derived from Vital's effects/compressor.cpp): per band an upper threshold and ratio (downward) and a lower threshold and ratio (upward when positive,
+     * downward expansion when negative), a gain, the shared attack / release knobs, and which of the bands are split off. Levels are the engine's, converted by the Vital converter. */
+    bool  compVital = false;
+    int   vcBands = 0;                      /* 0 three bands, 1 low + (mid and high as one), 2 (low and mid as one) + high, 3 one band */
+    float vcUpThrDb[3] = { 12, 12, 12 }, vcLoThrDb[3] = { -100, -100, -100 }, vcUpRatio[3] = { 0, 0, 0 }, vcLoRatio[3] = { 0, 0, 0 }, vcGainDb[3] = { 0, 0, 0 };
+    float vcAttack = 0.5f, vcRelease = 0.5f;
     /* Serum's Chorus, Flanger and Phaser. Each mix is 0 when its switch is off (the stage then fades out and is skipped). */
     float chorMix = 0, chorRate = 0.5f, chorD1Ms = 5.0f, chorD2Ms = 5.2f, chorDepth = 0.5f, chorFb = 0, chorFiltHz = 20000;
     bool  chorHpf = false;
+    bool  flanVital = false;                 /* Vital's flanger (processFlangerVital): Depth scales the delay, Feedback bipolar, Phase the right side's offset */
+    float flanVCenterNote = 64;              /* its centre: the delay is 1 / this note's frequency (a MIDI note) */
+    bool  phasVital = false;                 /* Vital's phaser (processPhaserVital): 4 / 8 / 12 all-pass stages, Depth in semitones (0..48), Feedback the resonance, a linear Mix */
+    float phasVCenterNote = 64, phasVBlend = 1;      /* the sweep's centre as a MIDI note, and Blend 0..2 (the stage count: 4, 8, 12) */
+    bool  chorVital = false;                 /* Vital's chorus module (processChorusVital): Mix an equal-power crossfade, Delay 1 / 2 exponential, Feedback bipolar, a band-pass in the loop */
+    int   chorVoices = 1;                    /* its voice pairs, 1..4 */
+    float chorVCutNote = 8, chorVSpread = 1; /* the loop filter: centre as a MIDI note, spread 0..1 (a radius of 96 notes at 1) */
     float flanMix = 0, flanRate = 0.5f, flanDepth = 0.5f, flanFb = 0, flanPhase = 0;
     float phasMix = 0, phasRate = 0.5f, phasDepth = 0.5f, phasDepth2 = 0, phasFreqHz = 300, phasFb = 0, phasPhase = 0;
     int   phasPoles = 4;
@@ -253,11 +316,11 @@ public:
 
     void process(float *L, float *R, int n)
     {
-        if (st.chorMix > 0 || chorCur > 0) { processChorus(L, R, n); chorRan = true; }
+        if (st.chorMix > 0 || chorCur > 0) { if (st.chorVital) processChorusVital(L, R, n); else processChorus(L, R, n); chorRan = true; }
         else if (chorRan) { clearChorus(); chorRan = false; }
-        if (st.flanMix > 0 || flanCur > 0) { processFlanger(L, R, n); flanRan = true; }
+        if (st.flanMix > 0 || flanCur > 0) { if (st.flanVital) processFlangerVital(L, R, n); else processFlanger(L, R, n); flanRan = true; }
         else if (flanRan) { clearFlanger(); flanRan = false; }
-        if (st.phasMix > 0 || phasCur > 0) { processPhaser(L, R, n); phasRan = true; }
+        if (st.phasMix > 0 || phasCur > 0) { if (st.phasVital) processPhaserVital(L, R, n); else processPhaser(L, R, n); phasRan = true; }
         else if (phasRan) { clearPhaser(); phasRan = false; }
     }
 
@@ -272,9 +335,104 @@ private:
         return a + (c - a) * fr;
     }
 
-    void clearChorus() { for (int c = 0; c < 2; c++) { std::fill(chBuf[c].begin(), chBuf[c].end(), 0.0f); chFb[c] = chLp[c] = chLp2[c] = 0.0f; } chorCur = 0.0f; }
-    void clearFlanger() { for (int c = 0; c < 2; c++) { std::fill(flBuf[c].begin(), flBuf[c].end(), 0.0f); flFb[c] = 0.0f; } flanCur = 0.0f; }
-    void clearPhaser() { for (int c = 0; c < 2; c++) { for (int k = 0; k < kMaxPoles; k++) apX[c][k] = apY[c][k] = 0.0f; phFb[c] = 0.0f; } phasCur = 0.0f; }
+    void clearChorus()
+    {
+        for (int c = 0; c < 2; c++) { std::fill(chBuf[c].begin(), chBuf[c].end(), 0.0f); chFb[c] = chLp[c] = chLp2[c] = 0.0f; }
+        for (auto &l : vl) { if (!l.buf.empty()) std::fill(l.buf.begin(), l.buf.end(), 0.0f); l.lp = l.hp = 0.0f; l.fresh = true; }
+        vWetPrev = 0.0f; vDryPrev = 1.0f; chorCur = 0.0f;
+    }
+
+    /* Vital's chorus, derived from Vital's synthesis/modules/chorus_module.cpp and (mono style) effects/delay.cpp, https://github.com/mtytel/vital, Copyright 2013-2019 Matt Tytel, GNU GPL version 3 or later (see THIRD-PARTY.md). Per block of 64 samples: the sweep phase moves on by rate x block, and each of the
+     * 1..4 voice pairs has two taps (Delay 1, Delay 2) per side, the right side a quarter cycle on, the second tap half a cycle on, the voices spread by i / 4 / voices of a cycle. A tap's delay is the mix of its own
+     * base and the two bases' mean (voice 0 its own, the last voice the mean) plus depth x 30 ms x (1 + sin / 2) (so depth also lengthens the delay). The delay's FREQUENCY chases its target with a 20 ms half-life.
+     * Each line: read, write hardTanh(in + fb read) with a +-8 ceiling, through two one-poles whose difference is a band-pass (gain 1 + f_low / f_high), and the wet part is half the sum of the taps over all the voice pairs. */
+    struct VLine { std::vector<float> buf; int wp = 0; float lp = 0, hp = 0, freq = 100, period = 100; bool fresh = true; };
+    void processChorusVital(float *L, float *R, int n)
+    {
+        const int nv = std::min(std::max(st.chorVoices, 1), 4);
+        const float depth = std::min(std::max(st.chorDepth, 0.0f), 1.0f) * 0.03f;
+        const float fb = std::min(std::max(st.chorFb, -1.0f), 1.0f);
+        const float w = std::min(std::max(st.chorMix, 0.0f), 1.0f);
+        const float wetNew = std::sin(w * 1.5707963f), dryNew = std::cos(w * 1.5707963f);
+        const float d1 = st.chorD1Ms * 0.001f, d2 = st.chorD2Ms * 0.001f, avg = 0.5f * (d1 + d2);
+        const float minNy = 0.48f * sr;
+        const float radius = std::max(st.chorVSpread * 96.0f, 0.0f);
+        const float fLow = std::min(std::max(440.0f * std::pow(2.0f, (st.chorVCutNote + radius - 69.0f) / 12.0f), 1.0f), minNy);       /* the loop's first one-pole corner (Vital's low_frequency) */
+        const float fHigh = std::min(std::max(440.0f * std::pow(2.0f, (st.chorVCutNote - radius - 69.0f) / 12.0f), 1.0f), minNy);      /* the corner of the second one-pole, which is subtracted */
+        auto coef = [&](float f) { const float x = f * 3.14159265f / sr; return std::tan(x / (x + 1.0f)); };
+        const float cLow = coef(fLow), cHigh = coef(fHigh), gain = fHigh / fLow + 1.0f;
+        for (auto &l : vl) if (l.buf.empty()) l.buf.assign(kBuf, 0.0f);
+        const float maxPeriod = (float) (kBuf - 4);
+        int done = 0;
+        while (done < n) {
+            const int m = std::min(64, n - done);
+            vPh += st.chorRate * (float) m / sr;
+            vPh -= std::floor(vPh);
+            const float decay = std::pow(0.5f, (float) m / (0.02f * sr));
+            const float wetA = vWetPrev, dryA = vDryPrev, dW = (wetNew - wetA) / (float) m, dD = (dryNew - dryA) / (float) m;
+            float per0[4][2][2], per1[4][2][2];
+            for (int i = 0; i < nv; i++) {
+                const float pairOff = (float) i * 0.25f / (float) nv, t = i > 0 ? (float) i / ((float) nv - 1.0f) : 0.0f;
+                for (int k = 0; k < 2; k++)
+                    for (int c = 0; c < 2; c++) {
+                        VLine &l = vl[(i * 2 + k) * 2 + c];
+                        const float ph = vPh + (c ? 0.25f : 0.0f) + (k ? 0.5f : 0.0f) + pairOff;
+                        const float mod = std::sin(ph * 6.2831853f) * 0.5f + 1.0f;
+                        const float own = k ? d2 : d1;
+                        const float base = own + (avg - own) * t;
+                        const float target = 1.0f / std::max(0.00001f, mod * depth + base);
+                        if (l.fresh) { l.freq = target; l.period = std::min(std::max(sr / target, 3.0f), maxPeriod); l.fresh = false; }
+                        l.freq = target + decay * (l.freq - target);
+                        const float p = std::min(std::max(sr / l.freq, 3.0f), maxPeriod);
+                        per0[i][k][c] = l.period; per1[i][k][c] = 0.5f * (l.period + p);
+                        l.period = per1[i][k][c];
+                    }
+            }
+            for (int s = 0; s < m; s++) {
+                const float fr = (float) (s + 1) / (float) m;
+                const float wetG = wetA + dW * (float) (s + 1), dryG = dryA + dD * (float) (s + 1);
+                float *io[2] = { &L[done + s], &R[done + s] };
+                for (int c = 0; c < 2; c++) {
+                    const float x = *io[c];
+                    float acc = 0.0f;
+                    for (int i = 0; i < nv; i++)
+                        for (int k = 0; k < 2; k++) {
+                            VLine &l = vl[(i * 2 + k) * 2 + c];
+                            const float per = per0[i][k][c] + (per1[i][k][c] - per0[i][k][c]) * fr;
+                            float *const b = l.buf.data();
+                            const float rp = (float) l.wp - per + (float) kBuf;
+                            const int i1 = (int) rp;
+                            const float f = rp - (float) i1;
+                            const float y0 = b[(size_t) ((i1 - 1) & (kBuf - 1))], y1 = b[(size_t) (i1 & (kBuf - 1))];
+                            const float y2 = b[(size_t) ((i1 + 1) & (kBuf - 1))], y3 = b[(size_t) ((i1 + 2) & (kBuf - 1))];
+                            const float c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+                            const float rd = ((c3 * f + c2) * f + c1) * f + y1;
+                            acc += 0.5f * rd;
+                            float wr = (x + rd * fb) * 0.125f;
+                            wr = std::min(std::max(wr, -1.0f), 1.0f) * 8.0f;                                                     /* hardTanh(x / 8) * 8 */
+                            float d = cLow * (wr * gain - l.lp); l.lp += d; const float lo = l.lp; l.lp += d;                  /* Vital's one-pole (tickBasic) */
+                            d = cHigh * (lo - l.hp); l.hp += d; const float hi = l.hp; l.hp += d;
+                            b[(size_t) l.wp] = sanitize(lo - hi);
+                            l.wp = (l.wp + 1) & (kBuf - 1);
+                        }
+                    *io[c] = dryG * x + wetG * acc;
+                }
+            }
+            vWetPrev = wetNew; vDryPrev = dryNew;
+            done += m;
+        }
+        chorCur = w;
+    }
+    void clearFlanger()
+    {
+        for (int c = 0; c < 2; c++) { std::fill(flBuf[c].begin(), flBuf[c].end(), 0.0f); flFb[c] = 0.0f; vfl[c].fresh = true; if (!vfl[c].buf.empty()) std::fill(vfl[c].buf.begin(), vfl[c].buf.end(), 0.0f); }
+        vFlWetPrev = 0.0f; vFlDryPrev = 1.0f; flanCur = 0.0f;
+    }
+    void clearPhaser()
+    {
+        for (int c = 0; c < 2; c++) { for (int k = 0; k < kMaxPoles; k++) apX[c][k] = apY[c][k] = 0.0f; phFb[c] = 0.0f; for (float &x : vphSt[c]) x = 0.0f; vphLows[c] = vphHighs[c] = vphOut[c] = 0.0f; }
+        phasCur = 0.0f;
+    }
 
     /* Four voices: two per side, the left pair half a cycle apart and the right pair a quarter cycle behind them, so the sides
      * decorrelate (Serum's default chorus measures a left/right correlation of 0). */
@@ -307,6 +465,114 @@ private:
             if (chPh >= 1.0f) chPh -= 1.0f;
         }
         chorCur = target;
+    }
+
+    /* Vital's flanger, derived from Vital's synthesis/modules/flanger_module.cpp and (unfiltered style) effects/delay.cpp, https://github.com/mtytel/vital, Copyright 2013-2019 Matt Tytel, GNU GPL version 3 or later
+     * (see THIRD-PARTY.md). Per block of 64 samples: the sweep phase advances, the left side's phase is minus half the Phase knob, the right side's plus half; a triangle (0..1 over a cycle) scales the delay
+     * (1 / the centre note's frequency less 0.5 ms) by 1 + depth (2 tri - 1), and 0.5 ms is added back; the delay's FREQUENCY chases its target with a 20 ms half-life; the line writes hardTanh(in + fb read). */
+    struct VFlLine { std::vector<float> buf; int wp = 0; float freq = 100, period = 100; bool fresh = true; };
+    static float vtri(float x) { x -= std::floor(x); return 1.0f - std::fabs(2.0f * x - 1.0f); }
+    void processFlangerVital(float *L, float *R, int n)
+    {
+        const float depth = std::min(std::max(st.flanDepth, 0.0f), 1.0f);
+        const float fb = std::min(std::max(st.flanFb, -1.0f), 1.0f);
+        const float w = std::min(std::max(st.flanMix, 0.0f), 1.0f);
+        const float wetNew = std::sin(w * 1.5707963f), dryNew = std::cos(w * 1.5707963f);
+        const float off = std::min(std::max(st.flanPhase, 0.0f), 1.0f);
+        const float centerDelay = 1.0f / (440.0f * std::pow(2.0f, (st.flanVCenterNote - 69.0f) / 12.0f));
+        const float maxPeriod = (float) (kBuf - 4);
+        for (auto &l : vfl) if (l.buf.empty()) l.buf.assign(kBuf, 0.0f);
+        int done = 0;
+        while (done < n) {
+            const int m = std::min(64, n - done);
+            vFlPh += st.flanRate * (float) m / sr;
+            vFlPh -= std::floor(vFlPh);
+            const float decay = std::pow(0.5f, (float) m / (0.02f * sr));
+            const float wetA = vFlWetPrev, dryA = vFlDryPrev, dW = (wetNew - wetA) / (float) m, dD = (dryNew - dryA) / (float) m;
+            float per0[2], per1[2];
+            for (int c = 0; c < 2; c++) {
+                VFlLine &l = vfl[c];
+                const float ph = vFlPh - off * 0.5f + (c ? off : 0.0f);
+                const float mod = depth * (vtri(ph) * 2.0f - 1.0f) + 1.0f;
+                const float delay = (centerDelay - 0.0005f) * mod + 0.0005f;
+                const float target = 1.0f / std::max(delay, 1.0f / 20000.0f);
+                if (l.fresh) { l.freq = target; l.period = std::min(std::max(sr / target, 3.0f), maxPeriod); l.fresh = false; }
+                l.freq = target + decay * (l.freq - target);
+                const float p = std::min(std::max(sr / l.freq, 3.0f), maxPeriod);
+                per0[c] = l.period; per1[c] = 0.5f * (l.period + p); l.period = per1[c];
+            }
+            for (int s = 0; s < m; s++) {
+                const float fr = (float) (s + 1) / (float) m;
+                const float wetG = wetA + dW * (float) (s + 1), dryG = dryA + dD * (float) (s + 1);
+                float *io[2] = { &L[done + s], &R[done + s] };
+                for (int c = 0; c < 2; c++) {
+                    VFlLine &l = vfl[c];
+                    const float x = *io[c];
+                    const float per = per0[c] + (per1[c] - per0[c]) * fr;
+                    float *const b = l.buf.data();
+                    const float rp = (float) l.wp - per + (float) kBuf;
+                    const int i1 = (int) rp;
+                    const float f = rp - (float) i1;
+                    const float y0 = b[(size_t) ((i1 - 1) & (kBuf - 1))], y1 = b[(size_t) (i1 & (kBuf - 1))];
+                    const float y2 = b[(size_t) ((i1 + 1) & (kBuf - 1))], y3 = b[(size_t) ((i1 + 2) & (kBuf - 1))];
+                    const float c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+                    const float rd = ((c3 * f + c2) * f + c1) * f + y1;
+                    b[(size_t) l.wp] = sanitize(std::min(std::max(x + rd * fb, -1.0f), 1.0f));
+                    l.wp = (l.wp + 1) & (kBuf - 1);
+                    *io[c] = dryG * x + wetG * 0.618f * rd;       /* measured on the plugin: the delayed part reaches the output 4.2 dB under the input at Wet 100 (dry 1, coherent sum 1 + 0.618 s at the other mixes), feedback unchanged */
+                }
+            }
+            vFlWetPrev = wetNew; vFlDryPrev = dryNew;
+            done += m;
+        }
+        flanCur = w;
+    }
+
+    /* Vital's phaser, derived from Vital's synthesis/effects/phaser.cpp and filters/phaser_filter.cpp (same notice). The cutoff note is centre + depth x a triangle (-1..1) per sample; the left side's phase is
+     * a quarter of the Phase knob behind and the right side's ahead; the filter is 4 / 8 / 12 first-order all-pass stages (Blend 0 / 1 / 2 picks which tap), fed the input (drive 1 + resonance / 2) plus the tanh of the
+     * resonance times the band left after removing the lows and highs of the last all-pass output; the wet is half the sum of the input and the all-pass output, mixed LINEARLY with the input. */
+    void processPhaserVital(float *L, float *R, int n)
+    {
+        const float depthSemis = std::min(std::max(st.phasDepth, 0.0f), 1.0f) * 48.0f;
+        const float res = std::min(std::max(st.phasFb, 0.0f), 1.0f);
+        const float drive = res * 0.5f + 1.0f;
+        const float blend = std::min(std::max(st.phasVBlend, 0.0f), 2.0f);
+        const float p1 = std::min(std::max(1.0f - blend, 0.0f), 1.0f), p5 = std::min(std::max(blend - 1.0f, 0.0f), 1.0f), p3 = 1.0f - p1 - p5;
+        const float off = std::min(std::max(st.phasPhase, 0.0f), 1.0f);
+        const float mixNew = std::min(std::max(st.phasMix, 0.0f), 1.0f);
+        const float mixA = vPhMixPrev, dMix = (mixNew - mixA) / (float) n;
+        const float dph = st.phasRate / sr;
+        auto coef = [&](float hz) { const float x = 3.14159265f * std::min(hz / sr, 1.0f); return std::tan(x / (x + 1.0f)); };
+        for (int i = 0; i < n; i++) {
+            const float mixG = mixA + dMix * (float) (i + 1);
+            float *io[2] = { &L[i], &R[i] };
+            for (int c = 0; c < 2; c++) {
+                const float ph = vPhPh + (c ? 0.25f : -0.25f) * off;
+                const float mod = vtri(ph) * 2.0f - 1.0f;
+                const float note = st.phasVCenterNote + mod * depthSemis;
+                const float cf = coef(440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f));
+                const float x = *io[c];
+                float *S = vphSt[c];
+                auto one = [&](float &s, float in, float cc) { const float d = cc * (in - s); s += d; const float o = s; s += d; return o; };
+                const float lows = one(vphLows[c], vphOut[c], std::min(cf * 20.0f, 0.9f));
+                const float highs = one(vphHighs[c], lows, cf * (1.0f / 20.0f));
+                const float fs = std::tanh(res * (lows - highs));
+                float a = drive * x + fs;
+                for (int k = 0; k < 4; k++) { const float so = one(S[k], a, cf); a -= 2.0f * so; }
+                const float o1 = a;
+                for (int k = 4; k < 8; k++) { const float so = one(S[k], a, cf); a -= 2.0f * so; }
+                const float o3 = a;
+                for (int k = 8; k < 12; k++) { const float so = one(S[k], a, cf); a -= 2.0f * so; }
+                const float o5 = a;
+                vphOut[c] = sanitize(p1 * o1 + p3 * o3 + p5 * o5);
+                const float wet = (x + vphOut[c]) * 0.5f;
+                *io[c] = x + (wet - x) * mixG;
+            }
+            vPhPh += dph;
+            if (vPhPh >= 1.0f) vPhPh -= std::floor(vPhPh);
+        }
+        vPhMixPrev = mixNew;
+        phasCur = mixNew;
     }
 
     /* A short swept delay added to the signal (the comb), with feedback; the stereo phase offsets the right side's sweep. */
@@ -383,6 +649,11 @@ private:
     float apA[2][kMaxPoles] = {}, apX[2][kMaxPoles] = {}, apY[2][kMaxPoles] = {};
     float chorCur = 0, flanCur = 0, phasCur = 0;
     bool chorRan = false, flanRan = false, phasRan = false;
+    VLine vl[16];
+    float vPh = 0, vWetPrev = 0, vDryPrev = 1;
+    VFlLine vfl[2];
+    float vFlPh = 0, vFlWetPrev = 0, vFlDryPrev = 1;
+    float vphSt[2][12] = {}, vphLows[2] = {}, vphHighs[2] = {}, vphOut[2] = {}, vPhPh = 0, vPhMixPrev = 0;
 };
 
 /* ------------------------------------------------------------------ HyperD ahead of the distortion */
@@ -510,11 +781,30 @@ public:
         convWetCur = 0.0f; convDryCur = 1.0f; convRan = false;
     }
 
+    /* The stage order as a lexicographic permutation rank over the default list (0 dist, 1 Filter FX, 2 comp, 3 chorus / flanger / phaser, 4 delay, 5 conv and reverb, 6 EQ). */
+    void setFxOrder(int rank)
+    {
+        rank = std::min(std::max(rank, 0), 5039);
+        int pool[7] = { 0, 1, 2, 3, 4, 5, 6 }, left = 7, f = 720;
+        for (int k = 0; k < 7; k++) {
+            const int d = rank / f;
+            rank %= f;
+            fxSeq[k] = pool[d];
+            for (int j = d; j < left - 1; j++) pool[j] = pool[j + 1];
+            left--;
+            if (k < 6) f /= (6 - k);
+        }
+    }
+
     void set(const FxSettings &s)
     {
         st = s;
+        setFxOrder(s.fxOrder);
         distMixBase = s.distMix; distWetModSeen = 0.0f;
         compMixBase = s.compMix; compWetModSeen = 0.0f;
+        if (s.distVital && s.distFlt) distVf.set(s.distFltNote, s.distFltRes, s.distFltBlend, sr);
+        distGainNow = s.distGain;
+        for (float &x : distVModSeen) x = 0.0f;
         if (s.distPre) distPreBq.c.set(s.distPre == 1 ? EQ_LOPASS : EQ_HIPASS, s.distPreHz, 0.0f, s.distPreQ, sr);
         mod.set(s);
         hyper.set(s);
@@ -522,12 +812,16 @@ public:
             for (int i = 0; i < 2; i++) { spLp[i].set(false, s.splitHz, sr); spHp[i].set(true, s.splitHz, sr); }
         }
         eqTarget = s.eqEnable ? 1.0f : 0.0f;
-        distTarget = s.distCal ? (s.distMix > 0.0f || std::fabs(s.distLevel - 1.0f) > 1e-3f ? 1.0f : 0.0f) : (s.distDrive > 0.0f ? s.distMix : 0.0f);
+        distTarget = s.distVital ? (s.distMix > 0.0f ? 1.0f : 0.0f) : s.distCal ? (s.distMix > 0.0f || std::fabs(s.distLevel - 1.0f) > 1e-3f ? 1.0f : 0.0f) : (s.distDrive > 0.0f ? s.distMix : 0.0f);
         compTarget = (s.compRatio > 1.001f || s.compMulti) ? s.compMix : 0.0f;
         compDet = 1.0f - std::exp(-1.0f / (0.020f * sr));                       /* 20 ms rms window */
         compAtt = std::exp(-1.0f / (std::max(s.compAttackMs, 0.05f) * 0.001f * sr));
         compRel = std::exp(-1.0f / (std::max(s.compReleaseMs, 1.0f) * 0.001f * sr));
         compMk = std::pow(10.0f, s.compMakeupDb / 20.0f);
+        if (s.compVital) {
+            vcSplitA.set(120.0f, sr); vcSplitB[0].set(2500.0f, sr); vcSplitB[1].set(2500.0f, sr);
+            for (int b = 0; b < 3; b++) vcBand[b].setup(s, b, sr);
+        }
         if (s.compMulti) {                                   /* Linkwitz-Riley 4th order crossovers at 120 Hz and 2.4 kHz */
             for (int i = 0; i < 2; i++) {
                 mbLp2[i].set(false, 2400.0f, sr); mbHp2[i].set(true, 2400.0f, sr);
@@ -588,21 +882,42 @@ public:
      * type is the voice filter's list (LP/HP/BP/notch, 12 and 24 dB). */
     bool filterOn() const { return xfOn; }
 
+    /* Routes from an LFO or envelope to the Vital distortion's Drive (a fraction of its 60 dB), and its filter's Cutoff (a fraction of the 128 notes), Res (of 0..1) and Blend (of 0..2).
+     * m holds the four offsets the newest voice's routes sum to; the gain and the filter's coefficients are redone only when one moved. */
+    void setVitalDistMod(const float *m)
+    {
+        if (!st.distVital) return;
+        bool moved = false;
+        for (int i = 0; i < 4; i++) if (m[i] != distVModSeen[i]) { distVModSeen[i] = m[i]; moved = true; }
+        if (!moved) return;
+        applyVitalDist(m);
+    }
+    /* The audio-rate LFO's frequency: the newest note's, set once per block. */
+    void setVitalAudioNote(float note) { distAudioHz = 440.0f * std::pow(2.0f, (note + st.distAudioTrans - 69.0f) / 12.0f); }
+    void applyVitalDist(const float *m, bool gain = true, bool filter = true)
+    {
+        if (gain) distGainNow = std::pow(10.0f, std::min(std::max(st.distDriveDb + m[0] * 60.0f, -30.0f), 30.0f) / 20.0f);
+        if (filter && st.distFlt)
+            distVf.set(std::min(std::max(st.distFltNote + m[1] * 128.0f, 8.0f), 136.0f), std::min(std::max(st.distFltRes + m[2], 0.0f), 1.0f), std::min(std::max(st.distFltBlend + m[3] * 2.0f, 0.0f), 2.0f), sr);
+    }
+
     /* A route from an envelope or an LFO to the Distortion's Wet (Serum: the Wet knob, in its percent domain, moves by the route's amount x the source): the calibrated law's smoothstep
      * s is taken back to the Wet knob it came from, the offset added, and the smoothstep applied again. Called every block by the engine; 0 leaves the pot's mix as it is. */
     void setDistWetMod(float m)
     {
-        if (!st.distCal) return;
+        if (!st.distCal && !st.distVital) return;
         if (m == distWetModSeen) return;
         distWetModSeen = m;
         float s = distMixBase;
-        if (m != 0.0f) {
+        if (m != 0.0f && st.distVital) {
+            s = std::min(std::max(distMixBase + m, 0.0f), 1.0f);        /* Vital's mix is a linear crossfade and a route adds to its stored value */
+        } else if (m != 0.0f) {
             const float w0 = 0.5f - std::sin(std::asin(std::min(std::max(1.0f - 2.0f * std::min(std::max(distMixBase, 0.0f), 1.0f), -1.0f), 1.0f)) / 3.0f);
             const float w = std::min(std::max(w0 + m, 0.0f), 1.0f);
             s = w * w * (3.0f - 2.0f * w);
         }
         st.distMix = s;
-        distTarget = (s > 0.0f || std::fabs(st.distLevel - 1.0f) > 1e-3f) ? 1.0f : 0.0f;
+        distTarget = st.distVital ? (s > 0.0f ? 1.0f : 0.0f) : (s > 0.0f || std::fabs(st.distLevel - 1.0f) > 1e-3f) ? 1.0f : 0.0f;
         baseActive = baseActive || distTarget > 0.0f;
         anyActive = baseActive || xfOn;
     }
@@ -665,33 +980,54 @@ public:
         const bool convNow = (st.convMix > 0.0f && convP) || convWetCur > 0.0f, revNow = st.revMix > 0.0f || revWetCur > 0.0f;
         if (inBand && (((inBand & 64) && convNow) || ((inBand & 128) && revNow) || ((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq) || ((inBand & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)))) processBand(L, R, n, inBand);
         if (!(inBand & 1) && hyper.active()) hyper.process(L, R, n);
-        if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
-        if (xfOn) processFilterFx(L, R, n);
-        if (compTarget > 0.0f || compCur > 0.0f) {
-            if (st.compMulti) processCompMulti(L, R, n); else processComp(L, R, n);
-        } else { compGrDb = 0.0f; compMs = 0.0f; for (int b = 0; b < 3; b++) { mbMs[b] = 0.0f; mbGain[b] = 0.0f; } }
+        /* The main chain's stages in the order fxSeq gives (FX Order; 0 is distortion, Filter FX, comp, chorus / flanger / phaser (and the width), delay, conv and reverb, EQ). */
+        for (int k = 0; k < 7; k++) {
+            switch (fxSeq[k]) {
+            case 0:
+                if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
+                break;
+            case 1:
+                if (xfOn) processFilterFx(L, R, n);
+                break;
+            case 2:
+                if (compTarget > 0.0f || compCur > 0.0f) {
+                    if (st.compVital) processCompVital(L, R, n); else if (st.compMulti) processCompMulti(L, R, n); else processComp(L, R, n);
+                } else { compGrDb = 0.0f; compMs = 0.0f; for (int b = 0; b < 3; b++) { mbMs[b] = 0.0f; mbGain[b] = 0.0f; vcBand[b].hi[0] = vcBand[b].hi[1] = vcBand[b].lo[0] = vcBand[b].lo[1] = 0.0f; vcBand[b].mult = 0.0f; } vcSplitA.reset(); vcSplitB[0].reset(); vcSplitB[1].reset(); }
+                break;
+            case 3: {
+                if (!(inBand & 4) && mod.active()) mod.process(L, R, n);
 
-        if (!(inBand & 4) && mod.active()) mod.process(L, R, n);
+                const bool wideNow = st.wideMix > 0.0f || wideCur > 0.0f;
+                if (wideNow && !(inBand & 32)) { processWide(L, R, n); wideRan = true; }               /* (with bit 32 the width works on the Split band, in processBandChunk) */
+                else if (!wideNow && wideRan) { clearWide(); wideRan = false; }
+                break;
+            }
+            case 4: {
+                const DelayPrm q[2] = { { st.delayMix, st.delayMs, st.delayRMs, st.delayFb, st.delayLoHz, st.delayHiHz, st.delayPing },
+                                        { st.delay2Mix, st.delay2Ms, st.delay2RMs, st.delay2Fb, st.delay2LoHz, st.delay2HiHz, st.delay2Ping } };
+                for (int j = 0; j < 2; j++) {
+                    if (q[j].mix > 0.0f || dly[j].wetCur > 0.0f) { processDelay(dly[j], q[j], L, R, n); dly[j].ran = true; }
+                    else if (dly[j].ran) { clearDelay(dly[j]); dly[j].ran = false; }
+                }
+                break;
+            }
+            case 5:
+                if (!(inBand & 64) && convNow) { processConv(L, R, n); convRan = true; }                /* (with bit 64 the convolver works on the Split band, in processBandChunk) */
+                else if (!convNow && convRan) { if (convP) convP->reset(); convRan = false; }
 
-        const bool wideNow = st.wideMix > 0.0f || wideCur > 0.0f;
-        if (wideNow && !(inBand & 32)) { processWide(L, R, n); wideRan = true; }               /* (with bit 32 the width works on the Split band, in processBandChunk) */
-        else if (!wideNow && wideRan) { clearWide(); wideRan = false; }
-
-        {
-            const DelayPrm q[2] = { { st.delayMix, st.delayMs, st.delayRMs, st.delayFb, st.delayLoHz, st.delayHiHz, st.delayPing },
-                                    { st.delay2Mix, st.delay2Ms, st.delay2RMs, st.delay2Fb, st.delay2LoHz, st.delay2HiHz, st.delay2Ping } };
-            for (int k = 0; k < 2; k++) {
-                if (q[k].mix > 0.0f || dly[k].wetCur > 0.0f) { processDelay(dly[k], q[k], L, R, n); dly[k].ran = true; }
-                else if (dly[k].ran) { clearDelay(dly[k]); dly[k].ran = false; }
+                if (!(inBand & 128) && revNow) { processReverb(L, R, n); revRan = true; }              /* (likewise bit 128: the reverb) */
+                else if (!revNow && revRan) { clearReverb(); revRan = false; }
+                break;
+            default:
+                processEq(L, R, n);
+                break;
             }
         }
+    }
 
-        if (!(inBand & 64) && convNow) { processConv(L, R, n); convRan = true; }                /* (with bit 64 the convolver works on the Split band, in processBandChunk) */
-        else if (!convNow && convRan) { if (convP) convP->reset(); convRan = false; }
-
-        if (!(inBand & 128) && revNow) { processReverb(L, R, n); revRan = true; }              /* (likewise bit 128: the reverb) */
-        else if (!revNow && revRan) { clearReverb(); revRan = false; }
-
+    /* The EQ stage (the last of the main chain unless FX Order moves it). */
+    void processEq(float *L, float *R, int n)
+    {
         /* The bands run whether or not the EQ is switched on, so the filters hold the signal's state and
          * switching never starts one from silence; only their output is crossfaded (about 10 ms). With
          * the EQ on, a sample goes through the bands in the same order as before, bit for bit. */
@@ -745,8 +1081,6 @@ private:
         }
     };
 
-    static constexpr float kMaxBoostDb = 12.0f;
-
     static float kneeCurve(float over, float slope, float knee)
     {
         if (over <= -0.5f * knee) return 0.0f;
@@ -775,7 +1109,7 @@ private:
                 const float xdb = 3.0102999566f * fxdetail::fastLog2(mbMs[b] + 1e-18f), T = st.compThreshBandDb[b];
                 /* The upward part has no end in a silent tail: a band at -180 dB asked for +135 dB, and the next note arrived into that gain
                  * (Serum's own stays level across repeated notes). It is capped, so the boost a quiet tail earns stays one a note can recover from. */
-                const float up = std::min(sb * kneeCurve((T - 11.0f) - xdb, 1.0f, knee), kMaxBoostDb);
+                const float up = std::min(sb * kneeCurve((T - 11.0f) - xdb, 1.0f, knee), st.compBoostDb);
                 const float target = up - kneeCurve(xdb - T, slope, knee);   /* dB: + boosts, - reduces */
                 mbGain[b] = target + (target < mbGain[b] ? compAtt : compRel) * (mbGain[b] - target);
                 const float g = fxdetail::fastExp2((mbGain[b] + st.compBandGainDb[b]) * 0.16609640474f);          /* 10^(dB / 20) */
@@ -786,6 +1120,90 @@ private:
             L[i] += w * (out[0] * compMk - L[i]);
             R[i] += w * (out[1] * compMk - R[i]);
         }
+        compCur = compTarget;
+    }
+
+    /* Vital's compressor (effects/compressor.cpp, MultibandCompressor): Linkwitz-Riley splits at 120 Hz and 2.5 kHz, each band's own pair of envelope followers on the squared signal (attack and
+     * release, a per-band base time), a downward gain over the upper threshold and an upward (or expanding) one under the lower, a band gain, and the bands summed. Left and right run apart. */
+    struct VcBand {
+        float upThr2 = 1, loThr2 = 1, upR = 0, loR = 0, attN = 1, relN = 1, attScale = 0.5f, relScale = 0.5f, mult = 0, multTarget = 1;
+        float hi[2] = { 0, 0 }, lo[2] = { 0, 0 };
+        void setup(const FxSettings &s, int b, float sr)
+        {
+            static const float kAtt[3] = { 2.8f, 1.4f, 0.7f }, kRel[3] = { 40.0f, 28.0f, 15.0f };
+            const float spm = sr * 0.001f;
+            attN = std::max(std::exp(std::min(std::max(s.vcAttack, 0.0f), 1.0f) * 8.0f - 4.0f) * kAtt[b] * spm, 5.0f);
+            relN = std::max(std::exp(std::min(std::max(s.vcRelease, 0.0f), 1.0f) * 8.0f - 4.0f) * kRel[b] * spm, 5.0f);
+            attScale = 1.0f / (attN + 1.0f); relScale = 1.0f / (relN + 1.0f);
+            upThr2 = std::pow(10.0f, std::min(std::max(s.vcUpThrDb[b], -100.0f), 12.0f) * 0.1f);
+            loThr2 = std::pow(10.0f, std::min(std::max(s.vcLoThrDb[b], -100.0f), 12.0f) * 0.1f);
+            upR = std::min(std::max(s.vcUpRatio[b], 0.0f), 1.0f) * 0.5f;
+            loR = std::min(std::max(s.vcLoRatio[b], -1.0f), 1.0f) * 0.5f;
+            multTarget = std::pow(10.0f, std::min(std::max(s.vcGainDb[b], -30.0f), 30.0f) * 0.05f);
+        }
+        float tick(int c, float x)
+        {
+            const float sq = x * x;
+            const bool hiAtt = sq > hi[c];
+            hi[c] = (sq + hi[c] * (hiAtt ? attN : relN)) * (hiAtt ? attScale : relScale);
+            hi[c] = std::max(hi[c], upThr2);
+            const bool loAtt = sq > lo[c];
+            lo[c] = (sq + lo[c] * (loAtt ? attN : relN)) * (loAtt ? attScale : relScale);
+            lo[c] = std::min(lo[c], loThr2);
+            float g = 1.0f;
+            if (upR > 0.0f) g *= fxdetail::fastExp2(std::min(upR * fxdetail::fastLog2(upThr2 / hi[c]), 20.0f));
+            if (loR != 0.0f) g *= fxdetail::fastExp2(std::min(std::max(loR * fxdetail::fastLog2(loThr2 / (lo[c] + 1e-30f)), -60.0f), 20.0f));
+            return std::min(std::max(g, 0.0f), 32.0f) * x;
+        }
+    };
+    struct VcSplit {                                         /* one Linkwitz-Riley split: low and high, each two Butterworth biquads */
+        MbBq lp[2], hp[2];
+        void set(float fc, float sr) { for (int i = 0; i < 2; i++) { lp[i].set(false, fc, sr); hp[i].set(true, fc, sr); } }
+        void reset() { for (int i = 0; i < 2; i++) { lp[i] = MbBq(); hp[i] = MbBq(); } }
+        void tick(int c, float x, float &lo, float &hi) { lo = lp[1].tick(c, lp[0].tick(c, x)); hi = hp[1].tick(c, hp[0].tick(c, x)); }
+    };
+
+    void processCompVital(float *L, float *R, int n)
+    {
+        const float dw = (compTarget - compCur) / (float) n;
+        VcBand *bd = vcBand;
+        float startMult[3] = { bd[0].mult, bd[1].mult, bd[2].mult };
+        for (int i = 0; i < n; i++) {
+            compCur += dw;
+            const float u = (float) (i + 1) / (float) n;
+            float m[3];
+            for (int b = 0; b < 3; b++) m[b] = startMult[b] + (bd[b].multTarget - startMult[b]) * u;
+            float out[2];
+            for (int c = 0; c < 2; c++) {
+                const float x = c ? R[i] : L[i];
+                float lo1, hi1, y;
+                switch (st.vcBands) {
+                case 0: {
+                    float lo1L, lo1H, hi1L, hi1H;
+                    vcSplitA.tick(c, x, lo1, hi1);
+                    vcSplitB[0].tick(c, lo1, lo1L, lo1H);
+                    vcSplitB[1].tick(c, hi1, hi1L, hi1H);
+                    y = bd[0].tick(c, lo1L + lo1H) * m[0] + bd[1].tick(c, hi1L) * m[1] + bd[2].tick(c, hi1H) * m[2];
+                    break; }
+                case 1:
+                    vcSplitA.tick(c, x, lo1, hi1);
+                    y = bd[0].tick(c, lo1) * m[0] + bd[1].tick(c, hi1) * m[1];
+                    break;
+                case 2:
+                    vcSplitB[0].tick(c, x, lo1, hi1);
+                    y = bd[1].tick(c, lo1) * m[1] + bd[2].tick(c, hi1) * m[2];
+                    break;
+                default:
+                    y = bd[1].tick(c, x) * m[1];
+                    break;
+                }
+                out[c] = y;
+            }
+            const float w = compCur;
+            L[i] += w * (out[0] * compMk - L[i]);
+            R[i] += w * (out[1] * compMk - R[i]);
+        }
+        for (int b = 0; b < 3; b++) bd[b].mult = bd[b].multTarget;
         compCur = compTarget;
     }
 
@@ -867,6 +1285,7 @@ private:
      * without a DC offset. */
     void processDist(float *L, float *R, int n)
     {
+        if (st.distVital) { processDistVital(L, R, n); return; }
         if (st.distCal) { processDistCal(L, R, n); return; }
         const float a = std::min(std::max(st.distDrive, 0.0f), 1.0f);
         const float g = 1.0f + 14.0f * a * a, k = 1.0f / std::sqrt(g);
@@ -883,6 +1302,58 @@ private:
                 case 2:  y[c] = std::min(std::max(g * v, -1.0f), 1.0f) * k; break;
                 default: y[c] = std::tanh(g * v) * k; break;
                 }
+            }
+            L[i] = x[0] + w * (y[0] - x[0]);
+            R[i] = x[1] + w * (y[1] - x[1]);
+        }
+        distCur = distTarget;
+    }
+
+    /* Vital's law (calibration/vital_dist_probe.py, vital_distfilt_probe.py): the wet part is the curve of gain x signal, in units of Vital's own full scale (the engine's pre-master level is 6.7 dB
+     * under it, so the signal is divided by kVitalFull going in and multiplied coming out), through the filter before or after it; the dry part is not filtered, and the mix is a plain crossfade. */
+    void processDistVital(float *L, float *R, int n)
+    {
+        constexpr float kVitalFull = 0.46345f;                     /* 10^(-6.7 / 20) */
+        constexpr int kAudioStep = 1;                              /* the audio-rate LFO is applied every this many samples (a power of 2) */
+        /* Down Sample (a high sine through the plugin, calibration/vital_dist_probe.py): Vital holds each sample for a length that grows with Drive, 2 samples at the bottom of the knob, 4 at 0 dB, doubling every ~9 dB; the plugin's own
+         * output past that is a ping-pong of two held values that this plain hold does not reproduce, so the length is capped at 12 */
+        const float vdsLen = std::min(std::max(4.0f * std::pow(2.0f, st.distDriveDb / 8.9f), 2.0f), 12.0f);
+        float g = distGainNow / kVitalFull;
+        const float m = std::min(std::max(st.distMix, 0.0f), 1.0f);
+        const float dw = (distTarget - distCur) / (float) n;
+        for (int i = 0; i < n; i++) {
+            if (st.distAudio && (i & (kAudioStep - 1)) == 0) {
+                /* the audio-rate LFO, stepped every sample (4 left a stepped-coefficient hash that the plugin's per-sample cutoff does not have): its value moves Drive and the filter, on top of the block-rate route offsets */
+                distAudioPhase += (float) kAudioStep * distAudioHz / sr;
+                distAudioPhase -= std::floor(distAudioPhase);
+                const float px = distAudioPhase * 16.0f;
+                const int i0 = std::min((int) px, 15), i1 = (i0 + 1) & 15;
+                const float u = st.distAudioShape[i0] + (st.distAudioShape[i1] - st.distAudioShape[i0]) * (px - (float) i0);
+                float mm[4];
+                for (int k = 0; k < 4; k++) mm[k] = distVModSeen[k] + st.distAudioAmt[k] * u;
+                applyVitalDist(mm, st.distAudioAmt[0] != 0.0f, st.distAudioAmt[1] != 0.0f || st.distAudioAmt[2] != 0.0f || st.distAudioAmt[3] != 0.0f);      /* only what the LFO moves is redone */
+                g = distGainNow / kVitalFull;
+            }
+            distCur += dw;
+            const float w = distCur;
+            float x[2] = { L[i], R[i] }, y[2];
+            for (int c = 0; c < 2; c++) {
+                const float v = x[c];
+                const float vf = st.distFlt == 1 ? distVf.tick(c, v) : v;
+                const float t = g * vf;
+                float f;
+                switch (st.distMode) {
+                case 2:  f = std::min(std::max(t, -1.0f), 1.0f); break;
+                case 3:  f = std::sin(1.57079633f * t); break;
+                case 4:  if (c == 0) { vdsPhase += 1.0f; vdsNew = vdsPhase >= vdsLen; if (vdsNew) vdsPhase -= vdsLen; }
+                         if (vdsNew) dsHold[c] = vf;
+                         f = dsHold[c] / kVitalFull; break;
+                case 5:  { float p = std::fmod(t + 1.0f, 4.0f); if (p < 0.0f) p += 4.0f; f = p < 2.0f ? p - 1.0f : 3.0f - p; break; }
+                default: f = std::tanh(t); break;
+                }
+                float wet = f * kVitalFull;
+                if (st.distFlt == 2) wet = distVf.tick(c, wet);
+                y[c] = v + m * (wet - v);
             }
             L[i] = x[0] + w * (y[0] - x[0]);
             R[i] = x[1] + w * (y[1] - x[1]);
@@ -1030,6 +1501,7 @@ private:
      * damping filter shortens it further at high frequencies. */
     void processReverb(float *L, float *R, int n)
     {
+        if (st.revVital) { processReverbVital(L, R, n); return; }
         const float tgtWet = fxdetail::kRevOut * revLevel(st.revT60) * wetGain(st.revMix);
         const float tgtDry = dryGain(st.revMix);
         const float dw = (tgtWet - revWetCur) / (float) n, dd = (tgtDry - revDryCur) / (float) n;
@@ -1051,8 +1523,11 @@ private:
         const float wd = std::min(std::max(st.revWidth, 0.0f), 1.0f);
         static const float sl[kLines] = { 1, 1, -1, -1, 1, 1, -1, -1 };
         static const float sr_[kLines] = { 1, -1, 1, -1, 1, -1, 1, -1 };
+        const int preN = std::min((int) (st.revVDelayS * sr), 16000);                       /* the Pre-delay knob (0 = none: the input is used as it is) */
+        if (preN > 0 && rpd.empty()) rpd.assign(16384, 0.0f);
         for (int i = 0; i < n; i++) {
             float x = 0.5f * (L[i] + R[i]);
+            if (preN > 0) { rpd[(size_t) rpdw] = x; x = rpd[(size_t) ((rpdw - preN) & 16383)]; rpdw = (rpdw + 1) & 16383; }
             for (int k = 0; k < kAps; k++) {
                 Allpass &a = aps[k];
                 const int len = (int) a.buf.size();
@@ -1090,6 +1565,110 @@ private:
         revWetCur = tgtWet; revDryCur = tgtDry;
     }
 
+    /* Vital's reverb, ported from vital/src/synthesis/effects/reverb.cpp (GPL-3.0-or-later, Copyright 2013-2019 Matt Tytel; see THIRD-PARTY.md): a 4 x 4 grid of feedback lines
+     * (lengths x 2^(size x 4 - 3), each read through a cubic interpolator with a slow chorus on the read position), every line behind an all-pass (delay about 570..1020 samples, gain 0.6,
+     * each lane reading its neighbour's: the left / right swap), mixed by a Householder-like matrix over rows, columns and the whole grid, then a high shelf and a low shelf (one-poles) and the
+     * decay gain 0.001^(line length / T60). The input is a band-pass (difference of two one-poles) at a quarter level into every line; the output adds the grid again through the same matrix. */
+    struct VRev {
+        std::vector<float> fb[16], ap[4], pd[2];
+        int w = 0, pdw = 0;
+        float pre[2][2] = {}, hiSh[4][4] = {}, loSh[4][4] = {}, phase = 0;
+    };
+    VRev vr;
+    std::vector<float> rpd;                                     /* Serum reverb's pre-delay line */
+    int rpdw = 0;
+    void processReverbVital(float *L, float *R, int n)
+    {
+        static const int kAD[4][4] = { { 1001, 799, 933, 876 }, { 895, 807, 907, 853 }, { 957, 1019, 711, 567 }, { 833, 779, 663, 997 } };
+        static const float kFD[4][4] = { { 6753.2f, 9278.4f, 7704.5f, 11328.5f }, { 9701.12f, 5512.5f, 8480.45f, 5638.65f }, { 3120.73f, 3429.5f, 3626.37f, 7713.52f }, { 4521.54f, 6518.97f, 5265.56f, 5630.25f } };
+        constexpr int FB = 1 << 15, FM = FB - 1, AN = 1024, AM = AN - 1, PN = 1 << 14, PM = PN - 1;
+        if (vr.fb[0].empty()) { for (auto &b : vr.fb) b.assign(FB, 0.0f); for (auto &b : vr.ap) b.assign(AN * 4, 0.0f); for (auto &b : vr.pd) b.assign(PN, 0.0f); }
+        const float w01 = std::min(std::max(st.revMix, 0.0f), 1.0f);
+        const float tgtWet = std::sin(w01 * 1.5707963f), tgtDry = std::cos(w01 * 1.5707963f);
+        const float dw = (tgtWet - revWetCur) / (float) n, dd = (tgtDry - revDryCur) / (float) n;
+        auto coef = [&](float note) { const float f = 440.0f * std::pow(2.0f, (std::min(std::max(note, 0.0f), 130.0f) - 69.0f) / 12.0f); const float x = f * 3.14159265f / sr; return std::tan(x / (x + 1.0f)); };
+        const float cPreLo = coef(st.revVPreLo), cPreHi = coef(st.revVPreHi), cLo = coef(st.revVLoNote), cHi = coef(st.revVHiNote);
+        const float loAmp = 1.0f - std::pow(10.0f, std::min(std::max(st.revVLoDb, -24.0f), 0.0f) / 20.0f), hiAmp = std::pow(10.0f, std::min(std::max(st.revVHiDb, -24.0f), 0.0f) / 20.0f);
+        const float sizeMult = std::pow(2.0f, std::min(std::max(st.revVSize, 0.0f), 1.0f) * 4.0f - 3.0f);
+        const float decaySamples = std::min(std::max(st.revVDecay, 0.1f), 100.0f) * 44100.0f, decayPeriod = sizeMult / decaySamples;
+        const float ratio = sr / 44100.0f;
+        float decay[4][4], delay[4][4];
+        for (int c = 0; c < 4; c++) for (int l = 0; l < 4; l++) { decay[c][l] = std::pow(0.001f, kFD[c][l] * decayPeriod); delay[c][l] = sizeMult * kFD[c][l] * ratio; }
+        const float chHz = std::min(std::max(st.revVChorusHz, 0.0f), 16.0f), phInc = chHz / sr;
+        float amt[4], cr[4], ci[4];
+        for (int l = 0; l < 4; l++) {
+            float a = std::min(std::max(st.revVChorus, 0.0f), 1.0f) * 2500.0f * ratio;
+            for (int c = 0; c < 4; c++) a = std::min(a, delay[c][l] - 32.0f);
+            amt[l] = std::max(a, 0.0f) * sizeMult;
+            const float ph = ((float) l * (1.0f / 16.0f) + vr.phase) * 6.2831853f;
+            cr[l] = std::cos(ph); ci[l] = std::sin(ph);
+        }
+        const float rotR = std::cos(phInc * 6.2831853f), rotI = std::sin(phInc * 6.2831853f);
+        vr.phase += (float) n * phInc; vr.phase -= std::floor(vr.phase);
+        const float pdTarget = std::min(std::max(st.revVDelayS * sr, 3.0f), (float) (PN - 8));
+        for (int i = 0; i < n; i++) {
+            for (int l = 0; l < 4; l++) { const float r = cr[l] * rotR - ci[l] * rotI; ci[l] = ci[l] * rotR + cr[l] * rotI; cr[l] = r; }
+            float fbr[4][4];
+            for (int c = 0; c < 4; c++)
+                for (int l = 0; l < 4; l++) {
+                    const float m = (c < 2 ? cr[l] : ci[l]) * amt[l] * ((c & 1) ? -1.0f : 1.0f);
+                    const float rp = (float) vr.w - (delay[c][l] + m) + (float) FB;
+                    const int i1 = (int) rp; const float f = rp - (float) i1;
+                    const float *b = vr.fb[c * 4 + l].data();
+                    const float y0 = b[(i1 - 1) & FM], y1 = b[i1 & FM], y2 = b[(i1 + 1) & FM], y3 = b[(i1 + 2) & FM];
+                    const float c1 = 0.5f * (y2 - y0), c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3, c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+                    fbr[c][l] = ((c3 * f + c2) * f + c1) * f + y1;
+                }
+            const float in[2] = { L[i], R[i] };
+            float sc[2];
+            for (int ch = 0; ch < 2; ch++) {
+                float d = cPreHi * (in[ch] - vr.pre[1][ch]); vr.pre[1][ch] += d; const float hi = vr.pre[1][ch]; vr.pre[1][ch] += d;
+                d = cPreLo * (in[ch] - vr.pre[0][ch]); vr.pre[0][ch] += d; const float lo = vr.pre[0][ch]; vr.pre[0][ch] += d;
+                sc[ch] = sanitize(lo - hi) * 0.25f;
+            }
+            float ao[4][4], rows[4] = { 0, 0, 0, 0 }, cols[4] = { 0, 0, 0, 0 }, tot = 0.0f;
+            for (int c = 0; c < 4; c++)
+                for (int l = 0; l < 4; l++) {
+                    const int src = l ^ 1;
+                    const float apr = vr.ap[c][(size_t) (4 * ((vr.w - kAD[c][src] - 1) & AM) + src)];
+                    const float adi = fbr[c][l] - apr * 0.6f;
+                    vr.ap[c][(size_t) (4 * (vr.w & AM) + l)] = sanitize(sc[l & 1] + adi);
+                    ao[c][l] = apr + adi * 0.6f;
+                    rows[l] += ao[c][l]; cols[c] += ao[c][l]; tot += ao[c][l];
+                }
+            float wr[4][4], sto[4][4], rows2[4] = { 0, 0, 0, 0 }, cols2[4] = { 0, 0, 0, 0 }, tot2 = 0.0f;
+            for (int c = 0; c < 4; c++)
+                for (int l = 0; l < 4; l++) {
+                    float v = ao[c][l] + 0.25f * tot - 0.5f * rows[l] - 0.5f * cols[c];
+                    float &h = vr.hiSh[c][l]; float d = cHi * (v - h); h += d; const float hl = h; h += d;
+                    v = hl + hiAmp * (v - hl);
+                    float &g = vr.loSh[c][l]; d = cLo * (v - g); g += d; const float ll = g; g += d;
+                    v -= ll * loAmp;
+                    wr[c][l] = sanitize(v);
+                    sto[c][l] = decay[c][l] * wr[c][l];
+                    vr.fb[c * 4 + l][(size_t) vr.w] = sto[c][l];
+                    rows2[l] += sto[c][l]; cols2[c] += sto[c][l]; tot2 += sto[c][l];
+                }
+            float t[4] = { 0, 0, 0, 0 };
+            for (int c = 0; c < 4; c++)
+                for (int l = 0; l < 4; l++) {
+                    const float ff = sto[c][l] + 0.25f * tot2 - 0.5f * rows2[l] - 0.5f * cols2[c];
+                    t[l] += wr[c][l] + 0.125f * ff * decay[c][l];
+                }
+            vr.w = (vr.w + 1) & FM;
+            vr.pd[0][(size_t) vr.pdw] = t[0] + t[2]; vr.pd[1][(size_t) vr.pdw] = t[1] + t[3];
+            const float rp = (float) vr.pdw - (pdTarget - 1.0f) + (float) PN;
+            const int j = (int) rp; const float f = rp - (float) j;
+            vr.pdw = (vr.pdw + 1) & PM;
+            const float wl = vr.pd[0][(size_t) (j & PM)] * (1.0f - f) + vr.pd[0][(size_t) ((j + 1) & PM)] * f;
+            const float wrr = vr.pd[1][(size_t) (j & PM)] * (1.0f - f) + vr.pd[1][(size_t) ((j + 1) & PM)] * f;
+            revWetCur += dw; revDryCur += dd;
+            L[i] = L[i] * revDryCur + wl * revWetCur;
+            R[i] = R[i] * revDryCur + wrr * revWetCur;
+        }
+        revWetCur = tgtWet; revDryCur = tgtDry;
+    }
+
     void clearWide() { std::fill(chorusBuf.begin(), chorusBuf.end(), 0.0f); wideCur = 0; }
     void clearDelay(DelayUnit &u)
     {
@@ -1121,6 +1700,12 @@ private:
         for (auto &l : lines) { std::fill(l.buf.begin(), l.buf.end(), 0.0f); l.lp = 0; }
         for (auto &a : aps) std::fill(a.buf.begin(), a.buf.end(), 0.0f);
         revHp[0] = revHp[1] = 0;
+        std::fill(rpd.begin(), rpd.end(), 0.0f);
+        for (auto &b : vr.fb) std::fill(b.begin(), b.end(), 0.0f);
+        for (auto &b : vr.ap) std::fill(b.begin(), b.end(), 0.0f);
+        for (auto &b : vr.pd) std::fill(b.begin(), b.end(), 0.0f);
+        for (int a = 0; a < 2; a++) vr.pre[0][a] = vr.pre[1][a] = 0.0f;
+        for (int c = 0; c < 4; c++) for (int l = 0; l < 4; l++) vr.hiSh[c][l] = vr.loSh[c][l] = 0.0f;
         revWetCur = 0; revDryCur = 1;
     }
 
@@ -1145,6 +1730,7 @@ private:
     float chorusPhase = 0.0f;
     float wideCur = 0.0f;
     bool wideRan = false;
+    int fxSeq[7] = { 0, 1, 2, 3, 4, 5, 6 };
 
     DelayUnit dly[2];
 
@@ -1165,9 +1751,15 @@ private:
     int   dsCount = 0;
     float dsHold[2] = { 0.0f, 0.0f };
     StereoBiquad distPreBq;
+    VitalDistFilter distVf;
+    float vdsPhase = 0.0f; bool vdsNew = true;                  /* the Vital law's Down Sample: samples since the last hold, and whether this one starts a new hold */
+    float distAudioHz = 261.63f, distAudioPhase = 0.0f;                           /* the audio-rate LFO's frequency (the newest note's) and phase */
+    float distGainNow = 1.0f, distVModSeen[4] = { 0.0f, 0.0f, 0.0f, 0.0f };      /* the Vital law's gain as the routes leave it, and the offsets it was last set for */
     MbBq mbLp2[2], mbHp2[2], mbLp1[2], mbHp1[2], mbApLp[2], mbApHp[2];
     MbBq spLp[2], spHp[2];                  /* the Split crossover */
     float mbMs[3] = { 0, 0, 0 }, mbGain[3] = { 0, 0, 0 };
+    VcBand vcBand[3];
+    VcSplit vcSplitA, vcSplitB[2];            /* Vital's compressor: the 120 Hz split, and the 2.5 kHz split of the low and of the upper branch */
     float compCur = 0.0f, compTarget = 0.0f, compGrDb = 0.0f, compAtt = 0.0f, compRel = 0.0f, compMk = 1.0f, compDet = 0.0f, compMs = 0.0f;
 };
 

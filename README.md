@@ -1,14 +1,14 @@
 # TinyHouse
 
-**A wavetable synth for the Ableton Move, inspired by Serum 2, that plays your own Serum 2 presets.**
+**A wavetable synth for the Ableton Move, inspired by Serum 2, that plays your own Serum 2 and Vital presets.**
 
-TinyHouse is a sound-generator module for [Schwung](https://github.com/charlesvestal/schwung) (the Move's open module host). You bring Serum 2 presets;
+TinyHouse is a sound-generator module for [Schwung](https://github.com/charlesvestal/schwung) (the Move's open module host). You bring Serum 2 presets (or [Vital](https://vital.audio) ones: `.vital` files, loose or in a `.zip`, are imported the same way);
 TinyHouse converts them, and they play on the Move as native patches: polyphonic, with unison, filters, modulation, eight macros, a sample and granular
 oscillator, and a full effects rack.
 
 TinyHouse is its own engine on a small ARM box, not a copy of Serum: **expect an imported preset or pack to sound similar to, and clearly related to, the Serum 2
 original, but not the same.** Some come out very close, some less so, and a bank will always have a few that miss. Some features are not built yet (see
-[What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound; the import report says which.
+[What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound; the import report says which. The same goes for Vital presets: the engine emulates Vital's oscillators, envelopes, filters and effects loosely, not exactly, and a Vital preset is not level-matched, so set its volume by ear.
 
 **This is experimental.** Importing in the browser is the easy route; it sets loudness, reverb and width from general rules. If you have Serum 2 on Windows and
 want presets to land closer to what you hear in the plugin, use the [Python scripts](#more-accurate-conversion-with-the-python-scripts), which can compare
@@ -19,7 +19,7 @@ each preset against your own copy of it.
 ## What you need
 
 - An Ableton Move running [Schwung](https://github.com/charlesvestal/schwung), with the TinyHouse module installed on it (see [Installing](#installing)).
-- Serum 2 presets (`.SerumPreset` files or a `.SerumPack`). Nothing from Xfer is included.
+- Serum 2 presets (`.SerumPreset` files or a `.SerumPack`). Or Vital presets (`.vital` files, loose or zipped, or a `.vitalbank`; they carry their own wavetables and samples, so they need no other install). Nothing from Xfer or Vital Audio is included.
 - Serum 2 installed on your computer, for any preset that uses Serum's own wavetables or samples (most factory presets do). Serum's installer puts those files in your
   `Documents\Xfer\Serum 2 Presets` folder, and TinyHouse reads them from there; the plugin itself does not have to run. Without that folder those oscillators are silent.
   Wavetables and samples stored inside the preset file itself are imported with it and need nothing from Serum 2. Serum 2 on Windows is also needed for the more accurate
@@ -42,7 +42,7 @@ The browser import runs the converter inside the page, so it needs no Python on 
 
 ![The import dialog](docs/img/remote-import.png)
 
-- Choose or drop `.SerumPreset` files (or a `.SerumPack`). If a preset uses a wavetable or sample that is not stored inside it (Serum's own tables, the audio of
+- Choose or drop `.SerumPreset` files (or a `.SerumPack`), or Vital presets (`.vital`, or a `.vitalbank`, which gets a bank of its own named after the file: they carry their own wavetables and samples, so they need no folder; they are not level-matched, so set the volume by ear. The Vital converter is GPL-3.0-or-later, see [THIRD-PARTY.md](THIRD-PARTY.md)). If a preset uses a wavetable or sample that is not stored inside it (Serum's own tables, the audio of
   Sample oscillators, recorded noises), the import asks for your Serum 2 folder: drop `Documents\Xfer` on the dialog, press **Choose folder…**, or press **Import
   without them** to leave those oscillators silent. Only the files the presets use are copied to the Move.
 - **Chrome's "Upload N files to this site?" prompt** appears when you choose a folder. Nothing is uploaded: the page reads the folder in your browser and sends only
@@ -237,7 +237,7 @@ The converter, the importer that matches loudness, reverb and width against Seru
 ## Licences and what is not here
 
 The engine is a fork of [Tablor](https://github.com/athousanddetails/schwung-tablor), itself a port of FigBug's [Wavetable](https://github.com/FigBug/Wavetable),
-under BSD-3-Clause (see `schwung-tablor/LICENSE`). The rest of TinyHouse (the converter, the remote page, the scripts and the docs) is also BSD-3-Clause: see [LICENSE](LICENSE).
+under BSD-3-Clause (see `schwung-tablor/LICENSE`). The rest of TinyHouse (the converter, the remote page, the scripts and the docs) is also BSD-3-Clause: see [LICENSE](LICENSE), **except the Vital import** (`converter/vital_*.py` and `calibration/vital_*`), which is derived from [Vital](https://github.com/mtytel/vital) and is GPL-3.0-or-later: see [THIRD-PARTY.md](THIRD-PARTY.md) and [LICENSE-GPL-3.0](LICENSE-GPL-3.0).
 
 This repository contains **no Serum presets, packs, wavetables, samples or renders**, and no presets converted from them: those belong to Xfer and the preset
 authors. You convert your own. Check a pack's licence before sharing presets you converted from it.

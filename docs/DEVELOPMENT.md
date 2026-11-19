@@ -134,6 +134,8 @@ bash schwung-tablor/scripts/zig-build.sh arm                            # after 
 
 The engine is BSD-3-Clause (Tablor, FigBug's Wavetable and gin, AudioFilter, dr_flac: see `schwung-tablor/LICENSE`).
 
+The Vital import (`converter/vital_*.py`, `calibration/vital_*`) is derived from Vital's source and is GPL-3.0-or-later: see [THIRD-PARTY.md](../THIRD-PARTY.md). Nothing in the BSD parts imports it.
+
 Serum presets, packs, wavetables and samples are Xfer's and the pack authors', and **are not redistributed**. The repo does not contain any `.SerumPack`,
 `.SerumPreset`, Serum wavetable, `.tbs` sample set or Serum render. Bring your own and keep the outputs (`out/`, `out_*/`, `calibration/refs/`) local.
 Check the licence of a pack before sharing the presets you convert from it.

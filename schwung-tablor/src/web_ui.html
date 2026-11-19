@@ -1664,7 +1664,7 @@ function buildFx(page) {
   });
   fxSlot("Reverb", fxSwitch("rev_on"), function (b) {
     graph(b, reverbGraph(), 60);
-    row([["rev_mix", "Mix"], ["rev_decay", "Decay"], ["rev_damp", "Damp"], ["rev_lo", "Lo cut"], ["rev_width", "Width"]], b);
+    row([["rev_mix", "Mix"], ["rev_decay", "Decay"], ["rev_damp", "Damp"], ["rev_lo", "Lo cut"], ["rev_width", "Width"], ["rev_predelay", "Pre-delay"]], b);
   });
   fxSlot("EQ", fxSwitch("eq_on"), function (b) {
     var tabs = el("div", "seg", b), boxes = [], names = ["Main", "Mid", "Side"], sets = ["eq", "eqm", "eqs"];
@@ -1889,7 +1889,7 @@ function buildBrowser() {
   var head = el("div", "bhead", brEl);
   brSearch = el("input", null, head);
   brSearch.placeholder = "Search every bank…";
-  var imp = el("button", "imp", head, "＋ Import"); imp.title = "Import Serum 2 presets"; imp.addEventListener("click", function () { openImport(true); });
+  var imp = el("button", "imp", head, "＋ Import"); imp.title = "Import Serum 2 or Vital presets"; imp.addEventListener("click", function () { openImport(true); });
   var del = delBtn = el("button", "imp", head, "Delete bank"); del.title = "Delete the bank shown on the left, with its wavetables and samples"; del.addEventListener("click", function () { deleteBank(); });
   var x = el("button", "x", head, "✕"); x.title = "Close (Esc)";
   x.addEventListener("click", function () { openBrowser(false); });
@@ -1907,7 +1907,7 @@ function buildBrowser() {
 }
 
 /* ---- import Serum 2 presets ------------------------------------------------
- * The preset browser's Import button. Presets (.SerumPreset), packs (.SerumPack) or a folder of either are converted in the browser by the
+ * The preset browser's Import button. Presets (.SerumPreset, .vital), packs (.SerumPack, .vitalbank) or a folder of either are converted in the browser by the
  * same Python the desktop converter is (Pyodide, in a worker; the bundle of its files is read from the module's folder on the Move), then
  * uploaded through the Move's own file manager into a bank: loose presets go to "Imports", a folder or pack to a bank of its own name.
  * Nothing is measured against Serum here, so reverb, width and loudness are the converter's laws, not fits; whatever the engine cannot
@@ -1962,7 +1962,8 @@ async function readBuf(file) {
 }
 function cleanRel(p) { return String(p).replace(/\\/g, "/").split("/").filter(function (x) { return x && x !== "." && x !== ".."; }).join("/"); }
 function cleanBank(s) {
-  s = String(s || "").replace(/[\/\\:*?"<>|;=\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40).trim();
+  s = String(s || "").replace(/[\/\\:*?"<>|;=\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
+  if (s.length > 40) { var cut = s.slice(0, 41).lastIndexOf(" "); s = s.slice(0, cut >= 20 ? cut : 40).trim(); }          /* too long: cut at a word, not in the middle of one */
   if (!s) s = "Imports";
   if (s.toLowerCase() === "user") s = "User imports";
   return s;
@@ -1978,7 +1979,7 @@ function addPicks(list, asTables) {
     noteOld(low, rel);
     if (asTables === "smp") { if (/\.(flac|wav|aif|aiff|ogg|mp3|sfz)$/.test(low)) IMP.smps.push({ file: it.file, rel: rel }); }
     else if (/\.wav$/.test(low)) (asTables ? IMP.tables : IMP.wavs).push({ file: it.file, rel: rel });
-    else if (!asTables && /\.(serumpreset|serumpack|zip)$/.test(low)) IMP.presets.push({ file: it.file, rel: rel });
+    else if (!asTables && /\.(serumpreset|vital|serumpack|vitalbank|zip)$/.test(low)) IMP.presets.push({ file: it.file, rel: rel });
   });
   impSummary();
 }
@@ -2021,7 +2022,7 @@ function addRoot(list) {
     else if (top === "presets") {
       var s = segs.slice(1);
       if (/\.wav$/.test(low)) { IMP.wavs.push({ file: it.file, rel: s.join("/"), fromRoot: true }); return; }
-      if (!/\.(serumpreset|serumpack|zip)$/.test(low) || !s.length) return;
+      if (!/\.(serumpreset|serumpack|vitalbank|zip)$/.test(low) || !s.length) return;
       var unit, name, strip = 0;
       if (/^packs$/i.test(s[0])) {                            /* Packs / store / pack / ... : a bank per pack */
         if (s.length >= 4) { unit = s.slice(0, 3).join("/"); name = s[2]; strip = 2; }
@@ -2110,7 +2111,7 @@ async function classifyDir(dir, depth) {
 async function walkDir(dir, base, out) {
   for await (var e of dir.values()) {
     if (e.kind === "directory") await walkDir(e, base + e.name + "/", out);
-    else if (/\.(serumpreset|serumpack|zip|wav|flac|aif|aiff|ogg|mp3|sfz)$/i.test(e.name)) out.push({ file: e, rel: base + e.name });
+    else if (/\.(serumpreset|vital|serumpack|vitalbank|zip|wav|flac|aif|aiff|ogg|mp3|sfz)$/i.test(e.name)) out.push({ file: e, rel: base + e.name });
   }
 }
 /* Read a classified folder into the same {file, rel} lists the folder input gives, so the matching below does not care which way they arrived. Only the folders Serum's
@@ -2221,7 +2222,7 @@ function onDrop(e) {
   }
 }
 
-function presetCount() { return IMP.presets.filter(function (p) { return /\.serumpreset$/i.test(p.rel); }).length; }
+function presetCount() { return IMP.presets.filter(function (p) { return /\.(serumpreset|vital)$/i.test(p.rel); }).length; }
 function packCount() { return IMP.presets.length - presetCount(); }
 function impSummary() {
   if (!IMP.sumEl) return;
@@ -2231,7 +2232,7 @@ function impSummary() {
   if (k) parts.push(k + (k === 1 ? " pack" : " packs"));
   IMP.sumEl.textContent = (parts.length ? parts.join(" and ") + " chosen" : "Nothing chosen yet") + (w ? " · " + w + " wavetable files available" : "") + (IMP.smps.length ? " · " + IMP.smps.length + " sample files available" : "");
   var o = oldCount();
-  if (o) IMP.sumEl.textContent += " · " + o + " Serum 1 " + (o === 1 ? "file" : "files") + " (.fxp / .fxb) left out: only Serum 2 presets (.SerumPreset, .SerumPack) can be imported";
+  if (o) IMP.sumEl.textContent += " · " + o + " Serum 1 " + (o === 1 ? "file" : "files") + " (.fxp / .fxb) left out: only Serum 2 presets (.SerumPreset, .SerumPack) and Vital presets (.vital) and banks (.vitalbank) can be imported";
   IMP.goEl.disabled = IMP.busy || !(n || k);
   if (!IMP.bankTouched && IMP.bankEl) {
     var first = IMP.presets[0], nm = "Imports";
@@ -2239,7 +2240,7 @@ function impSummary() {
     else if (first) {
       var segs = first.rel.split("/");
       if (segs.length > 1) nm = segs[0];
-      else if (!/\.serumpreset$/i.test(first.rel) && k === 1 && !n) nm = first.rel.replace(/\.[^.]+$/, "");
+      else if (!/\.(serumpreset|vital)$/i.test(first.rel) && k === 1 && !n) nm = first.rel.replace(/\.[^.]+$/, "");
     }
     IMP.bankEl.value = cleanBank(nm);
   }
@@ -2548,7 +2549,7 @@ async function runImport() {
       impStatus("Reading presets… " + (i + 1) + " of " + queue.length, 2 + 8 * (i + 1) / queue.length);
     }
     var names = await impCall("names", {});
-    if (!names.length) throw new Error(oldCount() ? "No Serum 2 presets were found. The " + oldCount() + " .fxp/.fxb files chosen are Serum 1 presets, which cannot be imported: only Serum 2 presets (.SerumPreset) and packs (.SerumPack) can." : "No presets were found in what was chosen.");
+    if (!names.length) throw new Error(oldCount() ? "No Serum 2 presets were found. The " + oldCount() + " .fxp/.fxb files chosen are Serum 1 presets, which cannot be imported: only Serum 2 presets (.SerumPreset), packs (.SerumPack) and Vital presets (.vital) and banks (.vitalbank) can." : "No presets were found in what was chosen.");
     IMP.smps = IMP.smps.filter(function (x) { return !x.packed; });          /* samples, multisamples and impulses the packs carry are looked for like the picked folders' */
     (await impCall("packaudio", {})).forEach(function (pa) {
       IMP.smps.push({ file: { pack: pa[1] }, rel: pa[0], packed: true, imp: /^impulses\//i.test(pa[0]) });
@@ -2624,7 +2625,7 @@ async function runImport() {
     var smpFiles = await impCall("getsamples", {});
 
     var list = Object.keys(results).map(function (n) { return results[n]; });
-    list.forEach(function (p) { p.skipped = !!(IMP.onlyComplete && p.json && impLines(p).length); });
+    list.forEach(function (p) { p.skipped = !!(IMP.onlyComplete && p.json && (p.tier === "vital" ? impVitalSilent(p) : impLines(p).length)); });
     var sendable = list.filter(function (p) { return p.json && !p.skipped; });
     var wtPaths = Object.keys(files), smPaths = Object.keys(smpFiles);
     var total = sendable.length + wtPaths.length + smPaths.length, done = 0;
@@ -2697,10 +2698,16 @@ function impLines(p) {
     out.push("Sample not found: " + t + (IMP.smps.length ? " (that oscillator stays silent" + (own ? "; it is one of Serum's own sample files and was not found in the folder you chose" : "") + ")"
       : " (" + (own ? "a file of Serum's own library, not in the pack: " : "") + "no Samples folder has been chosen: pick your Serum 2 folder, not only its Presets folder, then import again; that oscillator stays silent)"));
   });
-  return out;
+  return p.tier === "vital" ? out.filter(function (l) { return !impIsMinor(l); }) : out;           /* a Vital preset nearly always has a few small details the engine does not carry: they are not listed as gaps */
+}
+/* Small details of a Vital preset: a modulation route, a modulator's delay or shape, a filter's drive or key tracking, a filter's partial mix, the amp envelope's delay. The sound is close without them. */
+function impIsMinor(l) {
+  return /^not carried: |^LFO \d|key tracking not carried|drive not carried|serial routing not carried|^filter \d mix [\d.]+ not carried|^amp envelope delay|random start phase|transpose quantize|^portamento|slope .* straight glide/.test(l);
 }
 /* A gap in the sound itself (an oscillator that is silent or plays the wrong table) as against an effect left out. */
-function impIsSound(l) { return /^Oscillator|^Sample not found|^Wavetable not found|oscillators are not imported|sample was not carried/.test(l); }
+function impIsSound(l) { return /^SILENT|^Oscillator|^Sample not found|^Wavetable not found|oscillators are not imported|sample was not carried/.test(l); }
+/* A Vital preset almost always has some small detail the engine does not carry (portamento, a modulation route ...), so the "nothing missing" option leaves one out only when it would not sound at all. */
+function impVitalSilent(p) { return impLines(p).some(function (l) { return /^SILENT|^Sample not found|^Wavetable not found/.test(l); }); }
 function impSound(p) { return impLines(p).filter(impIsSound).length; }
 function impReport(bank, list, sent, failed, landed, existed) {
   var body = IMP.bodyEl; body.textContent = "";
@@ -2720,8 +2727,9 @@ function impReport(bank, list, sent, failed, landed, existed) {
   var tk = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; }).slice(0, 6);
   if (tk.length) el("div", "rep-sub", body, "Most common gaps: " + tk.map(function (k) { return k + " ×" + tally[k]; }).join(" · "));
   var nSound = part.filter(function (p) { return impSound(p) > 0; }).length;
-  if (whole.length) el("div", "rep-line", body, whole.length + " imported with nothing left out.");
-  if (part.length) el("div", "rep-line", body, nSound + " will sound different, an oscillator is silent or plays another wavetable (listed first, in amber). " + (part.length - nSound) + " only miss an effect: the sound is the same, with less of that effect.");
+  if (whole.length) el("div", "rep-line", body, whole.length + (ok.length && ok.every(function (p) { return p.tier === "vital"; }) ? " imported with no notable gaps (small details are not listed)." : " imported with nothing left out."));
+  var nVital = ok.filter(function (p) { return p.tier === "vital"; }).length;
+  if (part.length) el("div", "rep-line", body, nSound + " will sound different, an oscillator is silent or plays another wavetable (listed first, in amber). " + (part.length - nSound) + (nVital ? " only miss a detail, an effect or a modulation route: the sound should be close, not identical." : " only miss an effect: the sound is the same, with less of that effect."));
   if (skipped.length) el("div", "rep-line", body, skipped.length + " not imported because “only presets with nothing missing” was chosen. Import again without that choice to get them.");
   if (IMP.same) el("div", "rep-sub", body, IMP.same + " wavetable or sample file" + (IMP.same === 1 ? " was" : "s were") + " already on the Move, the same, and not sent again.");
   function group(title, arr, cls, fn) {
@@ -2739,7 +2747,8 @@ function impReport(bank, list, sent, failed, landed, existed) {
   group("Left out (not complete)", skipped, "bad", lines);
   group("Not imported", bad, "bad", function (p) { return [p.error || "Could not be sent to the Move"]; });
   if (failed.length) group("Upload problems", [{ name: "Files that did not reach the Move", f: failed }], "bad", function (p) { return p.f; });
-  el("div", "rep-note", body, "Loudness, reverb and width are set by general rules, not matched to Serum (that needs Serum to measure): set Volume and the effects to taste. Granular oscillators are left silent, and Sample oscillators too unless you chose the Samples folders.");
+  if (nVital === ok.length && ok.length) el("div", "rep-note", body, "Vital presets are not level-matched (that needs Vital and the native engine): set Volume by ear. Vital's own effects, reverb included, are carried. Small details are not listed (a few modulation routes, a filter's partial mix or drive, the shape of an LFO). The engine is tuned mainly on Serum 2, so a Vital preset is an approximation: it may sound different.");
+  else el("div", "rep-note", body, "Loudness, reverb and width are set by general rules, not matched to Serum (that needs Serum to measure): set Volume and the effects to taste. Granular oscillators are left silent, and Sample oscillators too unless you chose the Samples folders.");
   var again = el("button", "imp-go", body, "Import more");
   again.addEventListener("click", function () { IMP.presets = []; IMP.bankTouched = false; impBuildForm(); impSummary(); });
   impStatus("Done.");
@@ -2758,11 +2767,12 @@ function impBuildForm() {
     b.addEventListener("click", function () { inp.click(); });
     return b;
   }
-  el("div", "imp-intro", body, "Bring Serum 2 presets into TinyHouse. Everything is converted here in the browser and stored on the Move.");
+  el("div", "imp-intro", body, "Bring Serum 2 or Vital presets into TinyHouse. Everything is converted here in the browser and stored on the Move.");
+  el("div", "imp-note", body, "Vital presets (.vital) carry their own wavetables and samples, so they need nothing else. They are not level-matched: adjust the volume by ear. The engine is tuned mainly on Serum 2, so a Vital preset is an approximation and may sound different. The Vital converter is GPL-3.0-or-later code derived from Vital; its source is at github.com/fleshinachair/TinyHouse (converter/vital_import.py).");
   el("div", "imp-h", body, "Import a preset file");
   var prow = el("div", "imp-row", body);
-  prow.appendChild(picker("Choose preset file(s)…", { multiple: "", accept: ".SerumPreset,.SerumPack,.zip" }, function (l) { addPicks(l, false); }));
-  var drop = el("div", "imp-drop", body, "…or drop .SerumPreset files, packs or folders here");
+  prow.appendChild(picker("Choose preset file(s)…", { multiple: "", accept: ".SerumPreset,.vital,.SerumPack,.vitalbank,.zip" }, function (l) { addPicks(l, false); }));
+  var drop = el("div", "imp-drop", body, "…or drop .SerumPreset or .vital files, packs (.SerumPack, .vitalbank) or folders here");
   drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
   drop.addEventListener("drop", function (e) { drop.classList.remove("over"); onDrop(e); });
@@ -2793,7 +2803,7 @@ function impBuildForm() {
   el("div", "imp-note", body, "Loose presets go to “Imports”; a folder or pack gets a bank of its own name. A preset with the same name already in the bank is replaced.");
   var oc = el("label", "imp-opt", body), ocb = el("input", null, oc); ocb.type = "checkbox"; ocb.checked = !!IMP.onlyComplete;
   ocb.addEventListener("change", function () { IMP.onlyComplete = ocb.checked; });
-  oc.appendChild(document.createTextNode("Only import presets with nothing missing (leave out any preset with a silent oscillator, a missing wavetable or sample, or an effect that is not carried)"));
+  oc.appendChild(document.createTextNode("Only import presets with nothing missing (leave out any preset with a silent oscillator, a missing wavetable or sample, or an effect that is not carried; a Vital preset is left out only if nothing in it would sound)"));
   IMP.goEl = el("button", "imp-go", body, "Import");
   IMP.goEl.addEventListener("click", runImport);
   IMP.barWrap = el("div", "imp-bar", body); IMP.barEl = el("i", null, IMP.barWrap); IMP.barWrap.style.display = "none";

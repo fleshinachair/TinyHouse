@@ -956,6 +956,76 @@ static void testModFx()
         CHECK(std::fabs(corr) < 0.3, "and its sides are decorrelated (%.2f)", corr);
         CHECK(fx.active(), "chorus: block runs");
     }
+    {   /* Vital's chorus: one voice pair at wet 100 passes noise at the input's level (each tap's half, two taps), a wet of 50 % is the equal-power crossfade (the voices of one pair add coherently
+         * for a delay that does not move), four voices are about 12 dB up with equal delays, and a feedback of -0.95 stays bounded */
+        FxSettings s;
+        s.chorVital = true; s.chorMix = 1.0f; s.chorDepth = 0.0f; s.chorRate = 0.1f; s.chorD1Ms = 5.0f; s.chorD2Ms = 5.0f; s.chorVoices = 1; s.chorVCutNote = 60.0f; s.chorVSpread = 1.0f;     /* Vital's default: the loop filter passes everything (cutoff 8 would be a low-pass near 3.3 kHz) */
+        Fx fx(SR);
+        fx.set(s);
+        const double db1 = noisePowerDb(fx, L, R);
+        CHECK(std::fabs(db1 + 2.5) < 0.7, "Vital chorus, one pair, wet 100: %.2f dB re the input (white noise; the loop's one-pole near Nyquist takes the 2.5 dB)", db1);
+        s.chorVoices = 4;
+        Fx fx4(SR);
+        fx4.set(s);
+        const double db4 = noisePowerDb(fx4, L, R);
+        CHECK(std::fabs(db4 - db1 - 12.0) < 0.7, "four voices with equal delays add coherently: %.1f dB over one (want 12)", db4 - db1);
+        s.chorVoices = 1; s.chorFb = -0.95f; s.chorD1Ms = 2.0f; s.chorD2Ms = 2.0f;
+        Fx fxf(SR);
+        fxf.set(s);
+        const double dbf = noisePowerDb(fxf, L, R);
+        CHECK(std::isfinite(dbf) && dbf < 30.0, "feedback -0.95 stays bounded (%.1f dB)", dbf);
+    }
+    {   /* Vital's flanger and phaser: bounded output with the strongest feedback, and a sensible level (the flanger's delayed part is 0.618 of the input at Wet 100, the phaser's wet is half the input plus half its all-pass output) */
+        FxSettings s;
+        s.flanVital = true; s.flanMix = 1.0f; s.flanDepth = 0.5f; s.flanRate = 0.5f; s.flanFb = -0.95f; s.flanVCenterNote = 70.0f; s.flanPhase = 0.33f;
+        Fx fx(SR);
+        fx.set(s);
+        const double dbf = noisePowerDb(fx, L, R);
+        CHECK(std::isfinite(dbf) && dbf < 20.0 && dbf > -30.0, "Vital flanger with feedback -0.95 stays bounded (%.1f dB)", dbf);
+        FxSettings q;
+        q.phasVital = true; q.phasMix = 1.0f; q.phasDepth = 0.25f; q.phasRate = 0.5f; q.phasFb = 0.5f; q.phasVCenterNote = 80.0f; q.phasVBlend = 1.0f; q.phasPhase = 0.33f;
+        Fx fp(SR);
+        fp.set(q);
+        const double dbp = noisePowerDb(fp, L, R);
+        CHECK(std::fabs(dbp) < 3.0, "Vital phaser at wet 100: %.1f dB re the input (the wet is (in + all-pass) / 2, an all-pass keeping the level: about 0 dB for noise)", dbp);
+    }
+    {   /* The Pre-delay knob works with Serum's reverb too, and 0 leaves it as it was: the first 80 ms after a click are silent with 100 ms of pre-delay and not without */
+        auto early = [&](float pre) {
+            FxSettings s;
+            s.revMix = 1.0f; s.revT60 = 2.0f; s.revVDelayS = pre;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) (0.5f * SR);
+            std::vector<float> L((size_t) n, 0.0f), R((size_t) n, 0.0f);
+            L[512] = R[512] = 1.0f;
+            run(fx, L, R);
+            double e = 0;
+            for (int i = 600; i < 600 + (int) (0.08f * SR); i++) e += (double) L[(size_t) i] * L[(size_t) i];
+            return e;
+        };
+        const double e0 = early(0.0f), e1 = early(0.1f);
+        CHECK(e0 > 1e-6 && e1 < e0 * 1e-3, "Serum reverb pre-delay: early energy %.3g without, %.3g with 100 ms", e0, e1);
+    }
+    {   /* Vital's reverb: an impulse in, wet 100: the tail is finite, falls about 60 dB over the decay time (the lines' gain is 0.001 ^ (length / T60); the shelves and the in-loop all-passes add a little), and a longer decay keeps more */
+        auto tail = [&](float t60, double *e1, double *e2) {
+            FxSettings s;
+            s.revVital = true; s.revMix = 1.0f; s.revVDecay = t60; s.revVSize = 0.5f; s.revVPreLo = 0; s.revVPreHi = 110; s.revVLoNote = 0; s.revVLoDb = 0; s.revVHiNote = 90; s.revVHiDb = -1;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) (6.0f * SR);
+            std::vector<float> L((size_t) n, 0.0f), R((size_t) n, 0.0f);
+            L[512] = R[512] = 1.0f;
+            run(fx, L, R);
+            auto en = [&](double a, double b) { double e = 0; for (int i = (int) (a * SR); i < (int) (b * SR); i++) e += (double) L[(size_t) i] * L[(size_t) i] + (double) R[(size_t) i] * R[(size_t) i]; return 10.0 * std::log10(e / ((b - a) * SR) + 1e-30); };
+            *e1 = en(0.1, 0.3); *e2 = en(t60 * 0.9, t60 * 0.9 + 0.2);
+            for (int i = 0; i < n; i++) if (!std::isfinite(L[(size_t) i])) { *e1 = *e2 = 1e9; break; }
+        };
+        double a1, a2, b1, b2;
+        tail(1.0f, &a1, &a2); tail(3.0f, &b1, &b2);
+        CHECK(a1 < 1e8 && b1 < 1e8, "Vital reverb output is finite");
+        CHECK(a1 - a2 > 40.0 && a1 - a2 < 85.0, "Vital reverb with T60 1 s: the tail falls %.1f dB between 0.2 s and 0.9 s (about 60 over the decay time)", a1 - a2);
+        CHECK(b1 - b2 > 40.0 && b1 - b2 < 85.0, "Vital reverb with T60 3 s: the tail falls %.1f dB by 2.7 s", b1 - b2);
+    }
     {   /* chorus at wet 50 keeps most of the dry: -2.3 dB in Serum */
         FxSettings s;
         s.chorMix = 0.5f; s.chorDepth = 0.5f; s.chorRate = 1.0f;
@@ -1068,6 +1138,10 @@ static void testComp()
         CHECK(lift > 6.0, "Below pulls a quiet band up toward the floor (%+.1f dB)", lift);
         const double loudDown = tone(1000, u, 0.5f);
         CHECK(loudDown < -3.0, "and the same setting still pulls a loud one down (%+.1f dB)", loudDown);
+        const double capped12 = tone(1000, u, 0.0003f);                         /* about -73 dB rms: the floor is 32 dB away */
+        FxSettings u36 = u; u36.compBoostDb = 36;
+        const double capped36 = tone(1000, u36, 0.0003f);
+        CHECK(capped12 < 13.0 && capped36 > capped12 + 10.0, "the Comp Boost Cap limits the lift (%+.1f dB at 12, %+.1f dB at 36)", capped12, capped36);
     }
     /* switches */
     Engine e1, e2;
@@ -1168,6 +1242,121 @@ static void testLfo()
     CHECK(mb < mu * 0.9, "Bi swings below the base as well, so it is quieter than Uni on average (%.0f against %.0f)", mb / 90, mu / 90);
 }
 
+/* FX Order: the main chain's stages run in the order the rank gives (0 is the default order). A distortion before a low-pass EQ is filtered; after it, its harmonics are not. */
+static void testFxOrder()
+{
+    printf("== FX order =="); printf("\n");
+    auto harmonicDb = [&](int rank) {
+        FxSettings s = band(EQ_LOPASS, 250.0f, 0.0f, 0.71f);
+        s.distCal = true; s.distGain = 30.0f; s.distOut = 0.3f; s.distLevel = 1.0f; s.distMix = 1.0f; s.distMode = 0;
+        s.fxOrder = rank;
+        Fx fx(SR);
+        fx.set(s);
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.3 * std::sin(6.283185307 * 200.0 * i / SR));
+        run(fx, L, R);
+        double re = 0, im = 0;
+        for (int i = n / 2; i < n; i++) { const double w = 6.283185307 * 600.0 * i / SR; re += L[(size_t) i] * std::cos(w); im += L[(size_t) i] * std::sin(w); }
+        return 20.0 * std::log10(std::sqrt(re * re + im * im) / (n / 2) + 1e-12);
+    };
+    const double eqLast = harmonicDb(0), eqFirst = harmonicDb(6 * 720);
+    CHECK(eqFirst > eqLast + 8.0, "the EQ before the distortion leaves its 3rd harmonic (%.1f dB) where the default order filters it (%.1f dB)", eqFirst, eqLast);
+    CHECK(std::fabs(harmonicDb(5040) - harmonicDb(5039)) < 1e-9 && std::fabs(harmonicDb(-3) - eqLast) < 1e-9, "a rank out of range is clamped to the nearest order");
+}
+
+static void testVitalDist()
+{
+    printf("== Vital distortion ==\n");
+    auto peakOf = [&](const FxSettings &s, double amp) {
+        Fx fx(SR);
+        fx.set(s);
+        const int n = (int) SR / 2;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (amp * std::sin(6.283185307 * 220.0 * i / SR));
+        run(fx, L, R);
+        double pk = 0;
+        for (int i = n / 2; i < n; i++) pk = std::max(pk, (double) std::fabs(L[(size_t) i]));
+        return pk;
+    };
+    const double full = 0.46345;
+    FxSettings s;
+    s.distVital = true; s.distMix = 1.0f; s.distMode = 0; s.distGain = 4.0f;
+    const double soft = peakOf(s, 0.07);
+    CHECK(std::fabs(soft - full * std::tanh(4.0 * 0.07 / full)) < 0.004, "the soft clip is tanh of the gain times the signal in Vital's full scale (%.4f)", soft);
+    s.distMode = 2; s.distGain = 8.0f;
+    CHECK(std::fabs(peakOf(s, 0.1) - full) < 0.003, "the hard clip stops at Vital's full scale (%.4f)", peakOf(s, 0.1));
+    {
+        s.distMode = 5; s.distGain = 1.5f * (float) full / 0.1f;                       /* the input's peak is 1.5 of full scale: the fold has turned back to 0.5 there */
+        Fx fx(SR);
+        fx.set(s);
+        const int n = (int) SR / 2;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin(6.283185307 * 220.0 * i / SR));
+        std::vector<float> in = L;
+        run(fx, L, R);
+        int at = n / 2;
+        for (int i = n / 2; i < n; i++) if (in[(size_t) i] > in[(size_t) at]) at = i;
+        CHECK(std::fabs(L[(size_t) at] - 0.5 * full) < 0.01, "the linear fold turns back at full scale (%.4f at the input's peak, wanted %.4f)", L[(size_t) at], 0.5 * full);
+    }
+    s.distMode = 3; s.distGain = (float) full / 0.1f;
+    CHECK(std::fabs(peakOf(s, 0.1) - full) < 0.004, "the sine fold peaks at a quarter turn (%.4f)", peakOf(s, 0.1));
+    s.distMode = 2; s.distGain = 8.0f; s.distMix = 0.5f;
+    CHECK(std::fabs(peakOf(s, 0.1) - (0.5 * 0.1 + 0.5 * full)) < 0.004, "the mix is a linear crossfade of the dry and the wet (%.4f)", peakOf(s, 0.1));
+    /* the filter: response against the unfiltered path, in the linear range */
+    auto filt = [&](int where, float note, float res, float blend, double hz) {
+        FxSettings f;
+        f.distVital = true; f.distMix = 1.0f; f.distMode = 0; f.distGain = 0.05f;
+        const double ref = sineGainDb(f, hz);
+        f.distFlt = where; f.distFltNote = note; f.distFltRes = res; f.distFltBlend = blend;
+        return sineGainDb(f, hz) - ref;
+    };
+    const double fc = 440.0;
+    const double lpFc = filt(1, 69, 0.0f, 0.0f, fc), lp2 = filt(1, 69, 0.0f, 0.0f, 2 * fc), res = filt(1, 69, 0.5f, 0.0f, fc), bp = filt(1, 69, 0.0f, 1.0f, fc), hp = filt(1, 69, 0.0f, 2.0f, 4 * fc);
+    CHECK(std::fabs(lpFc + 6.0) < 0.5 && std::fabs(lp2 + 14.0) < 1.0, "the low-pass is -6 dB at the corner and -14 dB an octave up (%+.1f, %+.1f dB)", lpFc, lp2);
+    CHECK(std::fabs(res - 7.7) < 0.7, "resonance 0.5 peaks +7.7 dB at the corner (%+.1f dB)", res);
+    CHECK(std::fabs(bp + 6.0) < 0.5 && std::fabs(hp) < 1.0, "the band-pass is -6 dB at the corner and the high-pass is open far above it (%+.1f, %+.1f dB)", bp, hp);
+    const double mid = filt(1, 69, 0.5f, 0.5f, fc);
+    CHECK(std::fabs(mid - 7.7) < 0.7, "the corner's peak stays at Q across the blend (%+.1f dB at blend 0.5)", mid);
+    /* before or after the curve: a low-pass after a hard clip leaves much less of its harmonics */
+    auto h3 = [&](int where) {
+        FxSettings f;
+        f.distVital = true; f.distMix = 1.0f; f.distMode = 2; f.distGain = 30.0f;
+        f.distFlt = where; f.distFltNote = 57; f.distFltRes = 0.0f; f.distFltBlend = 0.0f;
+        Fx fx(SR);
+        fx.set(f);
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.2 * std::sin(6.283185307 * 220.0 * i / SR));
+        run(fx, L, R);
+        return goertzelDb(std::vector<float>(L.begin() + n / 2, L.end()), 660.0);
+    };
+    const double pre = h3(1), post = h3(2);
+    CHECK(post < pre - 6.0, "a filter after the curve takes the made harmonics out (3rd: %.1f dB after, %.1f dB before)", post, pre);
+    /* the audio-rate LFO: a sine whose drive is swung at the note's pitch grows sidebands at the sine's frequency +- the LFO's; a zero amount leaves a clean tone, and the cutoff route stays stable */
+    auto side = [&](float driveAmt, float cutAmt) {
+        FxSettings f;
+        f.distVital = true; f.distMix = 1.0f; f.distMode = 0; f.distGain = 1.0f; f.distDriveDb = 0.0f;
+        f.distFlt = 1; f.distFltNote = 100.0f; f.distFltRes = 0.3f; f.distFltBlend = 0.0f;
+        f.distAudio = true; f.distAudioAmt[0] = driveAmt; f.distAudioAmt[1] = cutAmt;
+        for (int k = 0; k < 16; k++) f.distAudioShape[k] = k < 8 ? (float) k / 8.0f : (float) (16 - k) / 8.0f;      /* a triangle */
+        Fx fx(SR);
+        fx.set(f);
+        fx.setVitalAudioNote(60.0f);                                                                              /* 261.6 Hz */
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin(6.283185307 * 1000.0 * i / SR));
+        run(fx, L, R);
+        bool fin = true;
+        for (float v : L) fin = fin && std::isfinite(v);
+        CHECK(fin, "the audio-rate LFO leaves the output finite");
+        return goertzelDb(std::vector<float>(L.begin() + n / 2, L.end()), 1000.0 + 261.63) - goertzelDb(std::vector<float>(L.begin() + n / 2, L.end()), 1000.0);
+    };
+    const double clean = side(0.0f, 0.0f), driven = side(0.15f, 0.0f), swept = side(0.0f, 0.3f);
+    CHECK(driven > clean + 20.0, "an audio-rate drive LFO puts sidebands round the tone (%.1f dB against %.1f dB without)", driven, clean);
+    CHECK(swept > clean + 10.0, "an audio-rate cutoff LFO does too (%.1f dB against %.1f dB without)", swept, clean);
+}
+
 int main()
 {
     testBypass();
@@ -1187,6 +1376,8 @@ int main()
     testFxFilter();
     testModFx();
     testLfo();
+    testFxOrder();
+    testVitalDist();
     printf("== distortion Wet route ==\n");
     {
         auto wetRun = [&](float mod) {

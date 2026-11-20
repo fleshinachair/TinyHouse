@@ -107,6 +107,8 @@ struct WtBuildStats {
  * playbackRate the engine's (44100 on Move). notesPerTable=6 matches gin. */
 bool wtBuild(Wavetable &out, const float *samples, int nFrames, int frameSize,
              float playbackRate, float fileRate, int notesPerTable = 6,
-             WtBuildStats *stats = nullptr);
+             WtBuildStats *stats = nullptr, bool compensate = false);
+/* compensate: every harmonic k of a level of S samples is raised by 1 / sinc^2(k / S), the loss of the oscillator's linear interpolation (a saw's 21 kHz harmonic was 8 dB down on a 512-sample level),
+ * which Vital's tables, read at twice the rate with finer steps, do not have. Only for the tables the Vital importer writes (vital_*.wav). */
 
 } // namespace tb

@@ -40,7 +40,9 @@ static std::shared_ptr<Wavetable> loadTable(const std::string &path)
     if (w.normPeak > 0.0f) peak = w.normPeak;                   /* a "tbpk" chunk: the importer rewrote the table (Even/Odd) and says which peak to normalise by */
     if (peak > 0.0f) { const float g = 0.9f / peak; for (float &v : w.samples) v *= g; }
     auto table = std::make_shared<Wavetable>();
-    if (nf <= 0 || !wtBuild(*table, w.samples.data(), nf, frame, 44100.0f, 44100.0f)) return nullptr;
+    const size_t slash = path.find_last_of("/\\");
+    const bool vitalTable = path.compare(slash == std::string::npos ? 0 : slash + 1, 6, "vital_") == 0;      /* as the module's loader: a table the Vital importer wrote is pre-emphasised for the linear read */
+    if (nf <= 0 || !wtBuild(*table, w.samples.data(), nf, frame, 44100.0f, 44100.0f, 6, nullptr, vitalTable)) return nullptr;
     table->stepped = w.clmStepped;
     return table;
 }

@@ -23,7 +23,7 @@ static bool isPow2(int v) { return v > 0 && (v & (v - 1)) == 0; }
 
 bool wtBuild(Wavetable &out, const float *samples, int nFrames, int frameSize,
              float playbackRate, float fileRate, int notesPerTable,
-             WtBuildStats *stats)
+             WtBuildStats *stats, bool compensate)
 {
     if (!samples || nFrames <= 0 || !isPow2(frameSize) || frameSize < 32)
         return false;
@@ -70,7 +70,7 @@ bool wtBuild(Wavetable &out, const float *samples, int nFrames, int frameSize,
                 if (kmax < 1) kmax = 1;          /* always keep the fundamental */
             }
 
-            if (kmax >= frameSize / 2 - 1) {
+            if (kmax >= frameSize / 2 - 1 && !compensate) {
                 /* Full-bandwidth level: copy the raw frame. */
                 lvl.size = frameSize;
                 lvl.data.assign(frame, frame + frameSize);
@@ -87,11 +87,17 @@ bool wtBuild(Wavetable &out, const float *samples, int nFrames, int frameSize,
                 for (int i = 0; i < S; i++) small[(size_t) i] = { 0.0f, 0.0f };
                 small[0] = { spec[0].re * scale, spec[0].im * scale };
                 for (int k = 1; k <= kmax; k++) {
-                    small[(size_t) k] = { spec[(size_t) k].re * scale,
-                                          spec[(size_t) k].im * scale };
+                    float g = scale;
+                    if (compensate) {
+                        const float x = 3.14159265f * (float) k / (float) S;
+                        const float sc = std::sin(x) / x;
+                        g = scale * std::pow(sc, -4.6f);              /* fitted: sinc^2 would be 2.3 x short: the table also loses on the way out of the voice, fitted on a saw */
+                    }
+                    small[(size_t) k] = { spec[(size_t) k].re * g,
+                                          spec[(size_t) k].im * g };
                     /* conjugate partner, keeps the IFFT exactly real */
-                    small[(size_t) (S - k)] = { spec[(size_t) (frameSize - k)].re * scale,
-                                                spec[(size_t) (frameSize - k)].im * scale };
+                    small[(size_t) (S - k)] = { spec[(size_t) (frameSize - k)].re * g,
+                                                spec[(size_t) (frameSize - k)].im * g };
                 }
                 fftRadix2(small.data(), S, true);
 

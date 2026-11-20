@@ -312,7 +312,9 @@ private:
         }
 
         auto wt = std::make_shared<Wavetable>();
-        if (!wtBuild(*wt, samples.data(), nFrames, frameSize, 44100.0f, rate))
+        const size_t slash = entry.path.find_last_of("/\\");
+        const bool vitalTable = entry.path.compare(slash == std::string::npos ? 0 : slash + 1, 6, "vital_") == 0;      /* a table the Vital importer wrote */
+        if (!wtBuild(*wt, samples.data(), nFrames, frameSize, 44100.0f, rate, 6, nullptr, vitalTable))
             return nullptr;
         wt->stepped = steppedFlag && nFrames == origFrames;       /* a table thinned to fit memory is not the table Serum steps through */
 

@@ -260,6 +260,8 @@ def render_table(wt: dict, notes: list[str]) -> np.ndarray | None:
 
 
 _PD_TABLE = None
+PD_SINC_READ = False
+PD_UNWRAP_MAP = True
 
 
 def bake_phase_distortion(table: np.ndarray, typ: int, amount: float) -> np.ndarray | None:
@@ -277,17 +279,35 @@ def bake_phase_distortion(table: np.ndarray, typ: int, amount: float) -> np.ndar
     m, g = maps[typ - 1, ai], gains[typ - 1, ai]
     nb = len(m)
     x = (np.arange(FRAME) + 0.5) * nb / FRAME - 0.5                         # the table's bin centres
-    mm = np.interp(x, np.arange(nb), m, period=nb)
+    if PD_UNWRAP_MAP:
+        # the map is a phase (0..1, circular): between two samples that straddle a wrap (formant, sync) it continues through the wrap instead of sliding across the whole range, which is what the
+        # linear interpolation did and which played a burst of the wrong part of the frame at every wrap
+        dm = np.diff(np.concatenate([m, [m[0]]]))
+        dm -= np.round(dm)
+        mu = np.concatenate([[m[0]], m[0] + np.cumsum(dm)])               # nb + 1 points, the last one the first plus the cycle's net winding
+        xx = np.mod(x, nb)
+        mm = np.interp(xx, np.arange(nb + 1), mu) % 1.0
+    else:
+        mm = np.interp(x, np.arange(nb), m, period=nb)
     if m.max() - m.min() < 0.05:                                            # a pulse width at its limit: the whole cycle reads one point of the frame, a constant, which Vital's output stage removes (silent, measured)
         mm = np.full(FRAME, float(m.mean()))
     gg = np.interp(x, np.arange(nb), g, period=nb)
     if np.abs(mm - (np.arange(FRAME) + 0.5) / FRAME).max() < 0.01 and np.abs(gg - 1.0).max() < 0.02:
         return None
     pos = (mm % 1.0) * FRAME
-    i0 = np.floor(pos).astype(int) % FRAME
-    f = pos - np.floor(pos)
-    i1 = (i0 + 1) % FRAME
-    out = (table[:, i0] * (1.0 - f) + table[:, i1] * f) * gg
+    if PD_SINC_READ:
+        # the frame is a trigonometric polynomial (its harmonics are all there is), so read it at the warped phases exactly instead of by linear interpolation, which rounds every bend of the map into
+        # high harmonics Vital's smooth read does not have (the plugin's formant at amount 0.3 is 20 to 30 dB duller from the 3rd harmonic up)
+        k = np.arange(FRAME // 2 + 1)
+        F = np.fft.rfft(table, axis=1)
+        w = np.full(len(k), 2.0); w[0] = 1.0; w[-1] = 1.0
+        E = np.exp(2j * np.pi * np.outer(k, pos / FRAME))
+        out = ((F * w[None, :]) @ E).real / FRAME * gg
+    else:
+        i0 = np.floor(pos).astype(int) % FRAME
+        f = pos - np.floor(pos)
+        i1 = (i0 + 1) % FRAME
+        out = (table[:, i0] * (1.0 - f) + table[:, i1] * f) * gg
     out -= out.mean(axis=1, keepdims=True)
     return out.astype(np.float32)
 

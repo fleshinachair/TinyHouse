@@ -874,7 +874,7 @@ BANKS = [
     # Last, so the earlier indices stay. The EQ's frequency knob steps by about a semitone; a Vital EQ band is tuned finer than that (a notch is only deep on its exact frequency): this is the remainder, +-0.5 semitone, 64 centred.
     ("Vital EQ Fine", False, [row(*[num(f"eq{n}_ffine", f"E{n}FF", f"EQ{n} Fine Freq", 0, 127, 64) for n in (1, 2, 3, 4)])]),
     # Vital's own filter models (Analog: Sallen-Key; Ladder), 12 or 24 dB, Blend between low / band / high, in place of the biquad. Set by the Vital converter for a filter of that model in a plain style.
-    ("Vital Filter SK", False, [row(enum("flt_vsk", "FSK", "Vital Model Filter 1", ["Off", "Analog", "Ladder", "Dirty", "Digital"], 0), enum("flt2_vsk", "F2SK", "Vital Model Filter 2", ["Off", "Analog", "Ladder", "Dirty", "Digital"], 0))]),
+    ("Vital Filter SK", False, [row(enum("flt_vsk", "FSK", "Vital Model Filter 1", ["Off", "Analog", "Ladder", "Dirty", "Digital", "Diode"], 0), enum("flt2_vsk", "F2SK", "Vital Model Filter 2", ["Off", "Analog", "Ladder", "Dirty", "Digital", "Diode"], 0))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

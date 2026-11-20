@@ -1378,6 +1378,14 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             P[f"{pre}_ftr"] = pot(64.0 + CLAMP(s.get(f"filter_{fi}_formant_transpose", 0.0), -12.0, 12.0) * 64.0 / 12.0)
             P[f"{pre}_fres"] = pot(127.0 * CLAMP(s.get(f"filter_{fi}_formant_resonance", 0.85), 0.0, 1.0))
             notes.pop() if why and notes and notes[-1].endswith(why) else None
+        elif VITAL_SK and mdl == 4 and sty in (0, 1):
+            # Vital's Diode model itself (vital_sk.h): its Blend knob is a high-pass amount, not low / band / high
+            P[f"{pre}_type"] = 1 if sty == 1 else 0
+            P[f"{pre}_vb"] = 1
+            P[f"{pre}_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
+            P[f"{pre}_vbg"] = 0
+            P[f"{pre}_vsk"] = 5
+            notes.pop() if why and notes and notes[-1].endswith(why) else None
         elif FILTER_BLEND and mdl in FILTER_BLEND_MODELS:
             if LFO_BLEND_MEAN and not VITAL_BLEND_LIVE:
                 bl = CLAMP(bl + 2.0 * lfo_route_mean(s, routes, f"filter_{fi}_blend"), 0.0, 2.0)               # an LFO moving the Blend knob, at the mean of its shape

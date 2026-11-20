@@ -342,4 +342,97 @@ struct VitalDigital {
     }
 };
 
+/* Vital's Diode model (filters/diode_filter.cpp): a four-stage diode-ladder-like low-pass with the feedback taken through a 20 Hz high-pass, and in front of it a two-pole high-pass whose corner follows
+ * the Blend knob (the 12 dB style only mixes it in, the other style sweeps it from 2^-9 to 2^-1 of the cutoff). Same wiring and level convention as VitalSK. */
+struct VitalDiode {
+    static constexpr float kVitalFull = 0.33650f;
+    bool on = false;
+    bool steep = false;
+    double sr = 44100.0;
+    struct Coefs { float coef = 0, fbCoef = 0, reso = 1, drive = 1, post = 1, hpRatio = 0.5f, hpAmt = 0; };
+    Coefs cur, tgt;
+    bool fresh = true;
+    struct Pole { float fs = 0, sat = 0, cur = 0; };
+    struct St { Pole hp1, hp2, hpf, s1, s2, s3, s4; } st[2];
+
+    void setSampleRate(double v) { sr = v; }
+    void reset() { fresh = true; st[0] = St(); st[1] = St(); }
+    static float clipSat(float v) { return std::min(std::max(v, -1.0f), 1.0f); }
+    static float coefOf(float hz, double sr)
+    {
+        const float f = std::min(std::max(hz, 1.0f), (float) sr * 0.49f), sc = f / (float) sr * 3.14159265f;
+        return std::tan(std::min(0.499f * 3.14159265f, sc / (sc + 1.0f)));
+    }
+    template <class F> static void tick(Pole &p, float in, float k, F sat)
+    {
+        const float d = k * (in - p.sat);
+        p.fs += d; p.cur = sat(p.fs); p.fs += d; p.sat = sat(p.fs);
+    }
+    static float tickBasic(Pole &p, float in, float k)
+    {
+        const float d = k * (in - p.fs);
+        p.fs += d; p.cur = p.fs; p.fs += d;
+        return p.cur;
+    }
+
+    void set(float hz, float res, float driveGain, float blend, bool steep24)
+    {
+        steep = steep24;
+        tgt.coef = coefOf(hz, sr);
+        tgt.fbCoef = coefOf(20.0f, sr);
+        const float rp = std::min(std::max(res, 0.0f), 1.0f);
+        tgt.reso = 0.7f + (17.0f - 0.7f) * rp * rp * rp;
+        tgt.drive = (tgt.reso * 0.5f + 1.0f) * driveGain;
+        tgt.post = 1.0f / std::sqrt(driveGain);
+        const float ba = std::min(std::max(blend, 0.0f), 2.0f) * 0.5f;
+        if (!steep24) { tgt.hpRatio = std::exp2(-1.0f); tgt.hpAmt = ba * ba; }
+        else { tgt.hpRatio = std::exp2(ba * 8.0f - 9.0f); tgt.hpAmt = 1.0f; }
+        if (fresh) cur = tgt;
+    }
+
+    void process(float *l, float *r, int n)
+    {
+        const float inv = 1.0f / (float) std::max(n, 1);
+        Coefs d;
+        d.coef = (tgt.coef - cur.coef) * inv; d.reso = (tgt.reso - cur.reso) * inv; d.drive = (tgt.drive - cur.drive) * inv; d.post = (tgt.post - cur.post) * inv;
+        d.hpRatio = (tgt.hpRatio - cur.hpRatio) * inv; d.hpAmt = (tgt.hpAmt - cur.hpAmt) * inv;
+        Coefs c = cur;
+        c.fbCoef = tgt.fbCoef;
+        float *io[2] = { l, r };
+        auto tnh = [](float v) { return vitalTanh(v); };
+        auto pass = [](float v) { return v; };
+        for (int i = 0; i < n; i++) {
+            c.coef += d.coef; c.reso += d.reso; c.drive += d.drive; c.post += d.post; c.hpRatio += d.hpRatio; c.hpAmt += d.hpAmt;
+            const float k = c.coef;
+            const float hk = k * c.hpRatio, hk2 = hk * 2.0f, hsq = hk * hk;
+            const float hfm = hk2 - hsq - 1.0f, hnorm = 1.0f / ((hsq - hk) + 1.0f), hm2 = 1.0f - hk;
+            for (int ch = 0; ch < 2; ch++) {
+                St &s = st[ch];
+                const float x = io[ch][i] * (1.0f / kVitalFull);
+                const float hpfb = hfm * s.hp1.fs + hm2 * s.hp2.fs;
+                const float hin = (x - hpfb) * hnorm;
+                const float h1 = tickBasic(s.hp1, hin, hk);
+                const float h2 = tickBasic(s.hp2, h1, hk);
+                float hout = hin - h1 * 2.0f + h2;
+                hout = x + (hout - x) * c.hpAmt;
+                const float finput = (c.drive * hout - c.reso * s.s4.sat) * 0.5f;
+                const float satIn = vitalTanh(finput);
+                const float fbIn = satIn + s.s2.sat;
+                const float fb = tickBasic(s.hpf, fbIn, c.fbCoef);
+                tick(s.s1, fbIn - fb, k, tnh);
+                tick(s.s2, (s.s1.cur + s.s3.sat) * 0.5f, k, pass);
+                tick(s.s3, (s.s2.cur + s.s4.sat) * 0.5f, k, pass);
+                tick(s.s4, s.s3.cur, k, clipSat);
+                io[ch][i] = s.s4.cur * c.post * kVitalFull;
+            }
+        }
+        cur = tgt;
+        fresh = false;
+        for (int ch = 0; ch < 2; ch++) {
+            Pole *ps[] = { &st[ch].hp1, &st[ch].hp2, &st[ch].hpf, &st[ch].s1, &st[ch].s2, &st[ch].s3, &st[ch].s4 };
+            for (Pole *p : ps) { if (std::fabs(p->fs) < 1e-15f) p->fs = 0.0f; if (std::fabs(p->sat) < 1e-15f) p->sat = 0.0f; if (std::fabs(p->cur) < 1e-15f) p->cur = 0.0f; }
+        }
+    }
+};
+
 } // namespace tb

@@ -18,6 +18,8 @@ Not released. Everything here comes from comparing the engine with the Vital plu
 
 **Distortion runs at 2x like Vital's.** Vital runs its whole effect chain at twice the sample rate (its Oversampling setting, 2x unless a preset says otherwise), so a clip at high drive, a fold or a bit crush makes much less aliasing there. A Vital preset's distortion now does the same (a new "Vital 2x" value on Distortion Calibrated: a 47-tap half-band up and down around the curve), and Down Sample is a port of Vital's own (the hold length follows its drive law and works on pairs of samples). A soft clip of a note an octave and a half up at 25 dB drive went from 3.4 to 0.1 dB of error, Float Chords from 12.7 to 6.9, Snowcrash 13.0 to 11.9; Fun Pulse (8.0 to 9.2) and FM Drum Circle (7.4 to 9.3, a chaotic preset) are a little worse. Over the 32 local presets with a hard distortion the mean went from 6.83 to 6.65 dB.
 
+**One LFO moves another.** A route from an LFO or an envelope to another LFO's Tempo, Phase (or, while it stays below audio rate, Frequency) was dropped (Staggered Phrases, Thumpus, LORN Style Lead, Strings Section, Abbysun, 6 of the 100 local presets). The engine has sixteen more route destinations, LFO 1..8 Rate and Phase (the Tempo knob steps by octaves as Vital's does); isolated, a phase route follows the plugin (Thumpus 3.2 to 2.5 dB), inside a full preset the results are mixed within the scan noise.
+
 **Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
 
 

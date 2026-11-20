@@ -400,7 +400,9 @@ MOD_DST = ["None",
            # The voice filters' Blend knob (a fraction of its 0..2 range) of the Blend, Phaser and Comb filters, moved by an LFO / envelope route.
            "Filter Blend", "Filter 2 Blend",
            # The whole voice's pitch (Vital voice_transpose, 48 semitones per unit of the route) and fine tune (voice_tune, 2 per unit).
-           "Voice Pitch", "Voice Fine", "Filter Comb Trans", "Filter 2 Comb Trans"]
+           "Voice Pitch", "Voice Fine", "Filter Comb Trans", "Filter 2 Comb Trans",
+           # One LFO moving another's rate (16 octaves for a free LFO, 12 tempo steps for a synced one) and phase (cycles): the engine's LFO 1..8.
+           *[f"LFO{n} Rate" for n in range(1, 9)], *[f"LFO{n} Phase" for n in range(1, 9)]]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,

@@ -683,6 +683,12 @@ def dest_spec(name: str, s: dict, P: dict, main_filter: int) -> dict | None:
         return {"lr": 26, "x": 1.0, "key": "comp_mix", "pot": 127.0, "lo": 0, "hi": 127}       # "Comp Wet"
     if name in FX_MIX_KEYS and s.get(FX_MIX_KEYS[name][0]):
         return {"lr": None, "x": 0.0, "key": FX_MIX_KEYS[name][1], "pot": 127.0, "lo": 0, "hi": 127}
+    ml = re.fullmatch(r"lfo_([1-8])_(frequency|tempo|phase)", name)
+    if ml and LFO_META:
+        k, what, sync = int(ml.group(1)), ml.group(2), int(s.get(f"lfo_{int(ml.group(1))}_sync", 0))
+        if (what == "frequency" and sync == 0) or (what == "tempo" and sync in (1, 2, 3)) or what == "phase":
+            # another LFO or an envelope moving this LFO's rate or phase: the engine's LFO Rate / Phase destinations, whose index depends on the LFO's engine slot (resolved when the slots are chosen: 1000 + 10 k + kind)
+            return {"lr": 1000 + 10 * k + {"tempo": 0, "phase": 1, "frequency": 2}[what], "x": 1.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}
     return None
 
 
@@ -779,6 +785,14 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         if spec is None:
             drop(f"{src.split(':')[1] if src.startswith('key:') else src.rstrip('0123456789_')}->{dest}")
             continue
+        if spec["lr"] is not None and spec["lr"] >= 1000 and not src.startswith(("lfo_", "env_")):
+            drop(f"{src.rstrip('0123456789_')}->{dest}")                 # only an LFO or an envelope can move another LFO's rate / phase live
+            continue
+        if spec["lr"] is not None and spec["lr"] >= 1000 and (spec["lr"] - 1000) % 10 == 2:
+            tk = (spec["lr"] - 1000) // 10
+            if 2.0 ** (s.get(f"lfo_{tk}_frequency", 0.0) + abs(a) * 16.0 * (0.5 if bip else 1.0)) > LFO_META_MAX_HZ:
+                drop(f"{src.rstrip('0123456789_')}->{dest} (it would reach audio rate)")      # a free LFO swept to audio rate cannot be followed by the block-rate LFOs (Fleet 6.5 to 8.5 dB with it)
+                continue
         x = a * spec["x"] * (0.5 if bip else 1.0)                        # measured (calibration/vital_route_probe.py): a bipolar route adds amount * (value - 0.5), the engine's bipolar flag gives amount * (2 * value - 1)
         if src.startswith("random_") and RANDOM_LIVE and spec["lr"] is not None and not dest.endswith("_tempo"):
             rn.append((abs(a * spec["x"] * (0.5 if bip else 1.0)), int(src[7:]), spec["lr"], a * spec["x"] * (0.5 if bip else 1.0), bip))        # a live route (a modulation destination the engine has): not folded in at its mean
@@ -863,8 +877,15 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         notes.append(f"LFO {k} follows the keyboard at an audio rate ({keytrack_audio_hz(s, k):.0f} Hz at middle C): its distortion routes run in the distortion stage at the note's pitch")
     # LFOs: up to eight (the engine's first four are on the route sources 1..4, 5..8 on sources 11..14), ranked by the strength of their routes
     strength: dict[int, float] = {}
-    for w, k, *_ in lr:
+    for w, k, dst, *_ in lr:
         strength[k] = strength.get(k, 0.0) + w
+        if dst >= 1000 and k < 100:
+            tk = (dst - 1000) // 10
+            strength[tk] = strength.get(tk, 0.0) + w * 0.5                                  # the LFO being moved needs an engine slot too
+    for w, k, dst, *_ in me:
+        if dst >= 1000:
+            tk = (dst - 1000) // 10
+            strength[tk] = strength.get(tk, 0.0) + w * 0.5
     chosen = sorted(strength, key=lambda k: -strength[k])[:LFO_SLOTS]
     for slot, k in enumerate(chosen, 1):
         if k >= 100:                                                                         # a Key / Key Oct lookup: the engine LFO's mode, and the route's curve as its Hi-Res table
@@ -939,7 +960,13 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"rn{k}_rate"] = pot(127.0 * math.log(CLAMP(hz, 0.05, 120.0) / 0.05) / math.log(2400.0))
         if int(s.get(f"random_{k}_sync_type", 0)):
             notes.append(f"random {k} is synced to the song position: it draws a new value per note instead")
-    combined = [(w, lfo_source(slot_of[k]), dst, x, bip) for w, k, dst, x, bip in lr if k in slot_of] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
+    def resolve_dst(dst: int):
+        """A placeholder destination (1000 + 10 k + kind: LFO k's rate or phase) as the engine's index for the slot LFO k took; None when it has none."""
+        if dst < 1000:
+            return dst
+        tk = (dst - 1000) // 10
+        return None if tk not in slot_of else 70 + (slot_of[tk] - 1) + (8 if (dst - 1000) % 10 == 1 else 0)
+    combined = [(w, lfo_source(slot_of[k]), rd, x, bip) for w, k, dst, x, bip in lr if k in slot_of and (rd := resolve_dst(dst)) is not None] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
     combined += ex
     # velocity routes go live while the eight route slots last (the rest, and any with a control to fold into, are added at velocity 100 as before)
     vel_live.sort(key=lambda r: -r[0])
@@ -962,6 +989,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     for w, src_slot, dst, x, bip in combined[ROUTE_SLOTS:]:
         drop(f"lfo routes past the engine's {ROUTE_SLOTS}")
     # envelope routes: the four strongest onto the engine's spare envelopes (1 and 2 are on its pages, 3 and 4 hidden)
+    me = [(w, k, rd, x, dn) for w, k, dst, x, dn in me if (rd := resolve_dst(dst)) is not None]
     me.sort(key=lambda r: -r[0])
     for n, (w, k, dst, x, _dn) in enumerate(me[:MOD_ENVS], 1):
         P[f"me{n}_dst"] = dst
@@ -1138,6 +1166,8 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
     return sec
 
 
+LFO_META_MAX_HZ = 40.0                                                    # a free LFO's frequency route is carried only while its top rate stays below this (audio rate cannot be followed)
+LFO_META = True                                                          # an LFO / envelope route to another LFO's rate, tempo or phase is live (engine MD_LFOn_RATE / PHASE)
 VITAL_DIST_OS = True                                                    # Vital's distortion at 2x (dist_cal 3)
 VITAL_DELAY = True                                                      # Vital's delay as the engine's own port of it (dly_vital)
 VITAL_SK = True                                                         # Vital's Analog filter (Sallen-Key) as the engine's flt_vsk

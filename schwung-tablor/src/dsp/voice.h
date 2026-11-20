@@ -96,6 +96,9 @@ enum ModDst {
     MD_FLT_BLEND, MD_FLT2_BLEND,     /* Vital's voice filter Blend knob (a fraction of its 0..2 range): added to the stored blend of the Blend, Phaser and Comb filters before the block is run */
     MD_VOICE_PITCH, MD_VOICE_FINE,     /* Vital's voice_transpose (48 semitones per unit of the route) and voice_tune (2 per unit): the whole voice, every oscillator, the sub, the samples and the filters' key tracking */
     MD_FLT_CTRANS, MD_FLT2_CTRANS,     /* Vital's comb filter Blend Transpose (a fraction of its 0..84 semitone range), added to the stored transpose of the Vital comb law */
+    /* One LFO moving another's rate (a fraction of Vital's control range: 16 octaves of Hz for a free LFO, 12 tempo steps for a synced one) and phase (cycles), the engine's LFO 1..8 (the value the routes leave is read one block later) */
+    MD_LFO1_RATE, MD_LFO2_RATE, MD_LFO3_RATE, MD_LFO4_RATE, MD_LFO5_RATE, MD_LFO6_RATE, MD_LFO7_RATE, MD_LFO8_RATE,
+    MD_LFO1_PHASE, MD_LFO2_PHASE, MD_LFO3_PHASE, MD_LFO4_PHASE, MD_LFO5_PHASE, MD_LFO6_PHASE, MD_LFO7_PHASE, MD_LFO8_PHASE,
     MD_COUNT
 };
 /* Saved presets store the destination INDEX: a new destination goes at the end, never in front of one that has shipped (0.9.8 shipped MD_FLT_BLEND = 64). */
@@ -166,9 +169,11 @@ inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
 
 /* LFO l's rate in Hz as it plays: with its Tempo switch on (a synced LFO of the source preset) the pot is the rate at 120 BPM and the host tempo scales it; off, the pot's Hz as it always was.
  * No host tempo (0) counts as 120, the same clamp the delay and the granular oscillator use. */
-inline float lfoHz(const float *P, int l, float bpm)
+inline float lfoHz(const float *P, int l, float bpm, float rateMod = 0.0f)
 {
-    const float hz = potLfoHz(P[lfoKeys(l).rate]);
+    float hz = potLfoHz(P[lfoKeys(l).rate]);
+    if (rateMod != 0.0f) { const float hz0 = hz; hz *= std::pow(2.0f, P[lfoKeys(l).tempo] < 0.5f ? std::clamp(rateMod * 16.0f, -16.0f, 16.0f) : std::floor(std::clamp(rateMod * 12.0f + 0.3f, -12.0f, 12.0f)));
+        hz = std::min(hz, std::max(hz0, 40.0f)); }   /* Vital's frequency knob is 16 octaves of Hz; its tempo knob steps by octaves too, floor(index + 0.3) */
     if (P[lfoKeys(l).tempo] < 0.5f) return hz;
     return hz * (bpm >= 20.0f ? std::clamp(bpm, 40.0f, 300.0f) : 120.0f) / 120.0f;
 }
@@ -342,7 +347,7 @@ public:
         /* Serum's noise is mono with a random left/right level imbalance per note (2.3 dB on average, calibration/noise_stereo: correlation 1.000, side/mid -13..-29 dB) */
         noisePan = ((float) rand() / (float) RAND_MAX * 2.0f - 1.0f) * 0.27f;
         for (int l = 0; l < kLfos; l++)             /* Trig restarts at the top of the cycle, Free joins the running one */
-            { lfoPhase[l] = lfoIsFree(P, l) ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
+            { lfoRM[l] = lfoPM[l] = 0.0f; lfoPhase[l] = lfoIsFree(P, l) ? c.lfoFree[l] : 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
         resetRandoms(P);
 
         filterADSR.noteOn();
@@ -368,7 +373,7 @@ public:
         bool legato = P[TB_P_LEGATO] > 0.5f && !isReleasing();       /* a releasing voice has to be brought back in whatever the legato switch says */
         if (!legato) {              /* env retrig switches cut: always retrig */
             for (int l = 0; l < kLfos; l++)
-                if (!lfoIsFree(P, l)) { lfoPhase[l] = 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
+                if (!lfoIsFree(P, l)) { lfoRM[l] = lfoPM[l] = 0.0f; lfoPhase[l] = 0.0f; lfoSmInit[l] = false; lfoDelayLeft[l] = lfoDelaySec(P, l); lfoFadeAmp[l] = 0.0f; }
             resetRandoms(P);
             levelAge = 0.0f;
             filterADSR.noteOn();
@@ -871,13 +876,13 @@ private:
                 if (lfoDelayLeft[l] > 0.0f) { const float used = std::min(adv, lfoDelayLeft[l]); lfoDelayLeft[l] -= used; adv -= used; }
                 if (blockSize > 0) {
                     /* with no Delay running the step is written the way it always was, so Serum presets stay bit-identical */
-                    lfoPhase[l] += adv == full ? lfoHz(P, l, c.bpm) * (float) blockSize / (float) sampleRate : lfoHz(P, l, c.bpm) * adv;
+                    lfoPhase[l] += adv == full ? lfoHz(P, l, c.bpm, lfoRM[l]) * (float) blockSize / (float) sampleRate : lfoHz(P, l, c.bpm, lfoRM[l]) * adv;
                     if (lfoIsOneShot(P, l)) lfoPhase[l] = std::min(lfoPhase[l], 1.0f);        /* Env: plays once, then holds its end */
                     else lfoPhase[l] -= std::floor(lfoPhase[l]);
                 }
-                const float phOff = lfoPhaseOff(P, l);
+                const float phOff = lfoPhaseOff(P, l) + lfoPM[l];
                 float ph = lfoPhase[l] + phOff;
-                if (phOff > 0.0f) ph = lfoIsOneShot(P, l) ? std::min(ph, 1.0f) : ph - std::floor(ph);
+                if (phOff != 0.0f) ph = lfoIsOneShot(P, l) ? std::clamp(ph, 0.0f, 1.0f) : ph - std::floor(ph);
                 lfoOut[ol] = lfoShapeAt(P, l, ph, lfoIsOneShot(P, l));                             // 0..1
                 const float tau = potLfoSmoothTau(P[lfoKeys(l).smooth]);
                 const float fadeSec = lfoFadeSec(P, l);
@@ -920,6 +925,7 @@ private:
                         modOff[dst] += amt;
                 }
             }
+            for (int l = 0; l < kLfos; l++) { lfoRM[l] = modOff[MD_LFO1_RATE + l]; lfoPM[l] = modOff[MD_LFO1_PHASE + l]; }       /* read by the LFOs above on the next block */
         }
 
         /* ---- oscillators ---- */
@@ -1360,6 +1366,7 @@ private:
         }
     }
     float lfoPhase[kLfos] = {};
+    float lfoRM[kLfos] = {}, lfoPM[kLfos] = {};      /* the rate and phase offsets other LFOs and envelopes put on each LFO (last block's routes) */
     float lfoDelayLeft[kLfos] = {};      /* seconds of Vital LFO Delay still to wait, and how far the Fade In has got (0..1) */
     float lfoFadeAmp[kLfos] = {};
     float lfoSm[kLfos] = {};             /* each LFO's smoothed output, and whether it has started since the note began */

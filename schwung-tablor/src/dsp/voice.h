@@ -1104,7 +1104,7 @@ private:
             vb1.on = P[TB_P_FLT_VB] >= 0.5f && P[TB_P_FLT_VB] < 1.5f && !combType && ft < 8;             /* Vital's Blend knob: a crossfade of the low / band / high outputs (see VBlend) */
             if (vb1.on) vb1.set(blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0, q, P[TB_P_FLT_VBG] * (20.0f / 127.0f));
             sk1.on = P[TB_P_FLT_VSK] >= 0.5f && P[TB_P_FLT_VSK] < 1.5f && !combType && ft < 8;
-            if (sk1.on) sk1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
+            if (sk1.on) sk1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), P[TB_P_FLT_VSTY] >= 2.0f ? (int) P[TB_P_FLT_VSTY] : (t & 1));
             ld1.on = P[TB_P_FLT_VSK] >= 1.5f && P[TB_P_FLT_VSK] < 2.5f && !combType && ft < 8;
             if (ld1.on) ld1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
             dt1.on = P[TB_P_FLT_VSK] >= 2.5f && P[TB_P_FLT_VSK] < 3.5f && !combType && ft < 8;
@@ -1140,7 +1140,7 @@ private:
             vb2.on = P[TB_P_FLT2_VB] >= 0.5f && P[TB_P_FLT2_VB] < 1.5f && !combType2 && ft2 < 8;
             if (vb2.on) vb2.set(blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0, fltQ2, P[TB_P_FLT2_VBG] * (20.0f / 127.0f));
             sk2.on = P[TB_P_FLT2_VSK] >= 0.5f && P[TB_P_FLT2_VSK] < 1.5f && !combType2 && ft2 < 8;
-            if (sk2.on) sk2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
+            if (sk2.on) sk2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), P[TB_P_FLT2_VSTY] >= 2.0f ? (int) P[TB_P_FLT2_VSTY] : (t2 & 1));
             ld2.on = P[TB_P_FLT2_VSK] >= 1.5f && P[TB_P_FLT2_VSK] < 2.5f && !combType2 && ft2 < 8;
             if (ld2.on) ld2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
             dt2.on = P[TB_P_FLT2_VSK] >= 2.5f && P[TB_P_FLT2_VSK] < 3.5f && !combType2 && ft2 < 8;

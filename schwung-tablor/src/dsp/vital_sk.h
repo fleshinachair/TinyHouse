@@ -30,7 +30,8 @@ inline float vitalTanh(float v)
 struct VitalSK {
     static constexpr float kVitalFull = 0.33650f;                    /* the engine's level against Vital's (10^(-9.45 / 20)), as in vitalFilterDriveIn */
     bool on = false;
-    bool steep = false;                                               /* 24 dB */
+    bool steep = false;                                               /* 24 dB (the 24 dB pipeline, which styles 2, 3 and 4 also use) */
+    bool dual = false;                                                /* style 3: the low and high weights swap at the output */
     double sr = 44100.0;
 
     /* what the block aims at (set()) and where the previous one ended */
@@ -43,9 +44,11 @@ struct VitalSK {
     void reset() { fresh = true; for (int c = 0; c < 2; c++) p1[c] = p2[c] = q1[c] = q2[c] = 0.0f; }
 
     /* cutoff in Hz, res the Resonance knob 0..1, driveGain the Drive as a linear gain (1 = 0 dB, up to 31.6 = 30 dB), blend the Blend knob 0..2 (0 low-pass, 1 band-pass, 2 high-pass) */
-    void set(float hz, float res, float driveGain, float blend, bool steep24)
+    /* style: 0 12 dB, 1 24 dB, 2 notch / pass swap, 3 dual notch / band, 4 band / peak / notch (Vital's filter styles) */
+    void set(float hz, float res, float driveGain, float blend, int style)
     {
-        steep = steep24;
+        steep = style >= 1;
+        dual = style == 3;
         const float f = std::min(std::max(hz, 1.0f), (float) sr * 0.49f);
         const float sc = f / (float) sr * 3.14159265f;
         tgt.coef = std::tan(std::min(0.499f * 3.14159265f, sc / (sc + 1.0f)));
@@ -54,11 +57,26 @@ struct VitalSK {
         tgt.reso = 2.15f * rs + (driveDb / 36.0f) * rp * 1.1f;
         const float scale = rs * rs * 2.0f + 1.0f;
         tgt.drive = driveGain / scale;
-        tgt.post = 1.0f / std::sqrt(scale * tgt.drive);
         const float b = std::min(std::max(blend - 1.0f, -1.0f), 1.0f);
-        tgt.bd = std::sqrt(1.0f - b * b);
-        tgt.lo = b < 0.0f ? -b : 0.0f;
-        tgt.hi = b >= 0.0f ? b : 0.0f;
+        if (style == 3) {
+            const float t = b * 0.5f + 0.5f, dt = std::min(1.0f - b, 1.0f), dm = 2.0f - t;
+            tgt.drive = driveGain + (tgt.drive * dm - driveGain) * dt;
+            tgt.lo = t; tgt.bd = 0.0f; tgt.hi = 1.0f;
+        } else if (style == 2) {
+            const float dt = std::fabs(b);
+            tgt.drive = driveGain + (tgt.drive - driveGain) * dt;
+            tgt.lo = std::min(1.0f - b, 1.0f); tgt.bd = 0.0f; tgt.hi = std::min(b + 1.0f, 1.0f);
+        } else if (style == 4) {
+            const float dt = std::min(1.0f - b, 1.0f);
+            tgt.drive = driveGain + (tgt.drive - driveGain) * dt;
+            const float inv = 1.0f - dt, mult = std::sqrt(inv * inv * 0.5f + 0.5f), peak = -std::max(-b, 0.0f);
+            tgt.lo = mult * (peak + 1.0f); tgt.bd = mult * (peak - b + 1.0f) * 2.0f; tgt.hi = tgt.lo;
+        } else {
+            tgt.bd = std::sqrt(1.0f - b * b);
+            tgt.lo = b < 0.0f ? -b : 0.0f;
+            tgt.hi = b >= 0.0f ? b : 0.0f;
+        }
+        tgt.post = 1.0f / std::sqrt(scale * tgt.drive);
         if (fresh) cur = tgt;
     }
 
@@ -93,7 +111,7 @@ struct VitalSK {
                 float dd = k * (in1 - q1[ch]); q1[ch] += dd; const float s1 = q1[ch]; q1[ch] += dd;
                 dd = k * (s1 - q2[ch]); q2[ch] += dd; const float s2 = q2[ch]; q2[ch] += dd;
                 const float bp = s1 - s2, hp = in1 - s1 - bp;
-                io[ch][i] = (c.lo * s2 + c.bd * bp + c.hi * hp) * c.post * kVitalFull;
+                io[ch][i] = (dual ? (c.hi * s2 + c.lo * hp) : (c.lo * s2 + c.bd * bp + c.hi * hp)) * c.post * kVitalFull;
             }
         }
         cur = tgt;

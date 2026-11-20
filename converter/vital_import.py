@@ -1394,6 +1394,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             P[f"{pre}_vb"] = 1
             P[f"{pre}_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
             P[f"{pre}_vbg"] = int(round(127.0 * FILTER_BLEND_DROP_DB[mdl] / 20.0))
+            if VITAL_SK and mdl == 0 and 2 <= sty <= 4:
+                P[f"{pre}_vsk"] = 1                                                           # the Analog model's other styles (notch / pass swap, dual notch / band, band / peak / notch)
+                P[f"{pre}_vsty"] = sty
             if VITAL_SK and mdl in (0, 1, 2, 3) and sty in (0, 1):
                 P[f"{pre}_vsk"] = (1, 3, 2, 4)[mdl]                                        # Vital's Analog (Sallen-Key) or Ladder model itself (vital_sk.h), 12 or 24 dB
         cut = filter_cutoff_note(s, fi, voice_shift)
@@ -1437,7 +1440,11 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["fxf_on"] = 1
         P["flt_vdl"] = 1                                                                        # the same saturating stage as the voice filters, at every drive
         P["fxf_type"], why = filter_type(mdl, sty, bl)
-        if VITAL_SK and mdl in (0, 1, 2, 3, 4) and sty in (0, 1):
+        if VITAL_SK and mdl == 0 and 2 <= sty <= 4:
+            P["fxf_type"], why = 0, None
+            P["fxf_vsk"], P["fxf_vsty"] = 1, sty
+            P["fxf_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
+        elif VITAL_SK and mdl in (0, 1, 2, 3, 4) and sty in (0, 1):
             P["fxf_type"], why = (1 if sty == 1 else 0), None                                 # Vital's own model (vital_sk.h), as the voice filters have it
             P["fxf_vsk"] = (1, 3, 2, 4, 5)[mdl]
             P["fxf_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))

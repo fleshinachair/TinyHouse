@@ -919,7 +919,7 @@ public:
     bool filterOn() const { return xfOn; }
 
     /* The Filter FX in one of Vital's own models (1 Analog, 2 Ladder, 3 Dirty, 4 Digital, 5 Diode; 0 keeps the biquad): called after setFilter each block. */
-    void setFilterModel(int model, float blend, bool steep, int cstyle = 0, float ctrans = 0.0f)
+    void setFilterModel(int model, float blend, bool steep, int cstyle = 0, float ctrans = 0.0f, int skStyle = 0)
     {
         xfVm = (xfOn && model >= 1 && model <= 6) ? model : 0;
         xfCstyle = cstyle; xfCtrans = ctrans; xfBlend = blend;
@@ -927,7 +927,7 @@ public:
         const float g = xfDriveT;
         xfSk.on = xfLd.on = xfDt.on = xfDg.on = xfDo.on = false;
         switch (xfVm) {
-        case 1: xfSk.setSampleRate(sr); xfSk.set(xfHz, xfRes, g, blend, steep); break;
+        case 1: xfSk.setSampleRate(sr); xfSk.set(xfHz, xfRes, g, blend, skStyle >= 2 ? skStyle : (steep ? 1 : 0)); break;
         case 2: xfLd.setSampleRate(sr); xfLd.set(xfHz, xfRes, g, blend, steep); break;
         case 3: xfDt.setSampleRate(sr); xfDt.set(xfHz, xfRes, g, blend, steep); break;
         case 4: xfDg.setSampleRate(sr); xfDg.set(xfHz, xfRes, g, blend, steep); break;

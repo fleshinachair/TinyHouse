@@ -180,6 +180,18 @@ def _audio_wave(comp: dict, kf: dict, audio: np.ndarray) -> np.ndarray:
     if len(seg) < size:
         seg = np.concatenate([seg, np.zeros(size - len(seg))])
     w = _resample(seg, FRAME)
+    ps = int(comp.get("phase_style", 0))
+    if ps in (1, 2):
+        # FileSourceKeyframe::render: the frame keeps its amplitudes and takes the component's own phases (Clear: -pi/2, +pi/2 on alternate bins; Vocode: one random set, seeded by random_seed, the same for every
+        # frame). The waveform changes, the spectrum does not, and its crest factor does, which is what sets the level once the table is normalised by its widest span
+        F = np.fft.rfft(w)
+        if ps == 2:
+            ph = np.random.default_rng(abs(int(comp.get("random_seed", 0)))).uniform(-math.pi, math.pi, len(F))
+        else:
+            ph = np.where(np.arange(len(F)) % 2 == 0, -0.5 * math.pi, 0.5 * math.pi)
+        F = np.abs(F) * np.exp(1j * ph)
+        F[0] = 0.0
+        w = np.fft.irfft(F, FRAME)
     if comp.get("normalize_mult", True):                                  # FileSource::render: WaveFrame::normalize, each frame by its own peak (a gain above 1 only when normalize_gain is set)
         peak = float(np.abs(w).max())
         w = w / max(1e-7 if comp.get("normalize_gain", False) else 1.0, peak)

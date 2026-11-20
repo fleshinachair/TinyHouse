@@ -34,6 +34,13 @@ inline float potEnvTime(float v)
  * half the knob). Serum's own note start is never instant: with a stored attack of 0 it still takes 1.5 to 3 ms to reach full level
  * (measured on the Loopsy deep house pack played through Serum and through this engine: the engine's 0.5 ms floor started a note at
  * full level, a hard edge that clicks when notes repeat quickly). So the floor is 3 ms, and longer attacks are untouched. */
+/* A Vital preset's attack has no 3 ms floor (its envelope can be instant: pot 0 is 0 s, the rest 0.5 ms + 10 s x^5). */
+inline float potAttackTimeVital(float v)
+{
+    const float x = pot01(v);
+    return v < 0.5f ? 0.0f : 0.0005f + 10.0f * x * x * x * x * x;
+}
+
 inline float potAttackTime(float v)
 {
     const float x = pot01(v);

@@ -218,13 +218,13 @@ inline float lfoShapeAt(const float *P, int lfo, float phase, bool oneShot = fal
 }
 
 /* Vital's level law, for a Vital preset (the Vital Unison switch marks one). Measured through the plugin with a sine on an oscillator or a sample slot: the level knob a route adds to is not capped at 1 (a knob of 1 and
- * a route of 1 plays 12 dB up, 2 squared), and the knob's own part does not start where it will sit: a note begins with it at about 0.78 and it glides to its value in some 100 ms (a static level of 0.5 starts
- * 8 dB up, a level of 1 starts 4 dB down, and an envelope route on a level of 0 adds to that 0.78 at the note's start). The glide is two exponentials, 4 ms and 32 ms. */
+ * a route of 1 plays 12 dB up, 2 squared), and the knob's own part does not start where it will sit: a note begins with it at 0.7071 (Vital's smoothed value starts at the knob's default) and it glides to its value
+ * with a time constant of 32 ms (re-measured with 1 ms windows on a high note: a level of 0.2 starts 11 times up, 0.5 about 2, 1 about half). */
 inline float vitalLevelBase(float base, float age)
 {
-    if (age > 0.3f) return base;
-    const float g = 0.35f * std::exp(-age * 250.0f) + 0.65f * std::exp(-age * (1.0f / 0.032f));
-    return base + (0.78f - base) * g;
+    (void) age;                 /* no glide: a note's level is where the knob is. (The glide this once modelled was the plugin's own start-up smoothing, seen when a note starts within 0.1 s of a preset loading; with the
+                                 * note a second after the load the plugin's level is flat from the first sample.) */
+    return base;
 }
 
 class Voice {
@@ -797,7 +797,7 @@ private:
         auto decayPot = [dOff](float v) { return std::min(std::max(v + dOff, 0.0f), 127.0f); };
         filterADSR.setDelay(potEnvStage(P[TB_P_FLT_DELAY]));
         filterADSR.setHold(potEnvStage(P[TB_P_FLT_HOLD]));
-        filterADSR.setAttack(potAttackTime(P[TB_P_FLT_A]));
+        filterADSR.setAttack(P[TB_P_UNI_VITAL] >= 0.5f ? potAttackTimeVital(P[TB_P_FLT_A]) : potAttackTime(P[TB_P_FLT_A]));
         filterADSR.setAttackPower(attackPower(P[TB_P_FLT_APOW]), P[TB_P_FLT_APOW] >= 0.5f, false);
         filterADSR.setDecay(potEnvTime(decayPot(P[TB_P_FLT_D])));
         filterADSR.setDecayPower(P[TB_P_FLT_DPOW] >= 0.5f ? (P[TB_P_FLT_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);      /* Vital's decay curve on the filter envelope (0 keeps the analog fall) */
@@ -809,7 +809,7 @@ private:
 
         adsr.setDelay(potEnvStage(P[TB_P_VCA_DELAY]));
         adsr.setHold(potEnvStage(P[TB_P_VCA_HOLD]));
-        adsr.setAttack(potAttackTime(P[TB_P_VCA_A]));
+        adsr.setAttack(P[TB_P_UNI_VITAL] >= 0.5f ? potAttackTimeVital(P[TB_P_VCA_A]) : potAttackTime(P[TB_P_VCA_A]));
         adsr.setAttackPower(attackPower(P[TB_P_VCA_APOW]), P[TB_P_VCA_APOW] >= 0.5f, true);
         adsr.setDecay(potEnvTime(decayPot(P[TB_P_VCA_D])));
         adsr.setReleasePower(P[TB_P_VCA_RPOW] >= 0.5f ? (P[TB_P_VCA_RPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, true);
@@ -833,7 +833,7 @@ private:
                 if (i >= 2 && (int) P[k[i].dst] == MD_NONE) continue;           /* the hidden envelopes cost nothing unless a preset points them somewhere */
                 modEnv[i].setDelay(potEnvStage(P[k[i].delay]));
                 modEnv[i].setHold(potEnvStage(P[k[i].hold]));
-                modEnv[i].setAttack(potAttackTime(P[k[i].a]));
+                modEnv[i].setAttack(P[TB_P_UNI_VITAL] >= 0.5f ? potAttackTimeVital(P[k[i].a]) : potAttackTime(P[k[i].a]));
                 modEnv[i].setAttackPower(attackPower(P[k[i].apow]), P[k[i].apow] >= 0.5f, false);
                 modEnv[i].setDecay(potEnvTime(P[k[i].d]));
                 modEnv[i].setDecayPower(P[k[i].dpow] >= 0.5f ? (P[k[i].dpow] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);

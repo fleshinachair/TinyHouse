@@ -861,6 +861,9 @@ BANKS = [
     # After Vital Formant, for the same reason. Serum's Formant filter models (Filter Type = Formant ONE / TWO / TWB) take the Freq knob and this Var knob (0..127 over Serum's 0..100 %): the resonators sit where the measured
     # tables put them for that Freq and Var (a Freq / Key Track / envelope move slides them along the same axis). Set by the Serum converter.
     ("Serum Formant", False, [row(num("flt_var", "FV1", "Filter Var", 0, 127, 0), num("flt2_var", "FV2", "Filter 2 Var", 0, 127, 0))]),
+    # After Serum Formant, for the same reason. Serum's L6 / H6 / HL6 comb and flanger models (CombL6P ... FlangeHL6N) are the comb with a one-pole low-pass (L6) or high-pass (H6) in its loop; the pole follows Var (the pot above, 0..127 over
+    # 0..100 %) and the Freq knob (comb.h). Set by the Serum converter.
+    ("Serum Comb Loop", False, [row(enum("flt_loop", "FLP1", "Filter Comb Loop", ["Off", "L6", "H6", "HL6"], 0), enum("flt2_loop", "FLP2", "Filter 2 Comb Loop", ["Off", "L6", "H6", "HL6"], 0))]),
     # After Serum Formant, for the same reason. Vital has eight LFOs (Serum four): LFO 5 to 8 carry all the parameters of LFO 1 to 4 (rate, mode, 16 shape points, smooth, Hi-Res switch and 64 points, Delay, Fade In, Phase, Tempo),
     # CONSECUTIVE per LFO in this order (voice.h reads them through a table, with static_asserts), and are route sources 11 to 14. Routes 9 to 16 are routes 1 to 8 again (source, destination, amount, polarity). Set by the Vital converter.
     ("Vital LFO 5-8", False, [row(*c) for n in (5, 6, 7, 8) for c in (lambda L: [L[i:i + 8] for i in range(0, len(L), 8)])(

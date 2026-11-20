@@ -1425,6 +1425,32 @@ static void testFxFilterSerumComb()
 }
 
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
+/* Serum's L6 / H6 / HL6 comb loop filters (comb.h): the pole follows x = Var % + 50 x Freq (HL6: corners at the comb frequency x 2^(Var / 10)). Closed (low x) an L6 loop passes nothing, so the comb is
+ * its flat Reso-0-like gain; opened (high x) it is the plain comb; every mode stays finite, and the pole table falls as Var rises */
+static void testCombLoopFilters()
+{
+    using tb::CombFilter;
+    const int n = 44100;
+    std::vector<float> in(n);
+    for (int i = 0; i < n; i++) { double v = 0.0; for (int k = 1; k < 40; k++) v += std::sin(6.2831853 * 130.81 * k * i / 44100.0) / k; in[i] = (float) v; }
+    auto run = [&](int kind, int sign, int loop, float lx, float reso) {
+        CombFilter c; c.setSampleRate(44100.0);
+        std::vector<float> l = in, r = in;
+        for (int off = 0; off < n; off += 128) c.process(l.data() + off, r.data() + off, std::min(128, n - off), kind, sign, reso, 193.0f, loop, lx);
+        return l;
+    };
+    auto power = [&](const std::vector<float> &x) { double a = 0.0; for (int i = n / 2; i < n; i++) { CHECK(std::isfinite(x[i]), "L6 / H6 comb output is finite"); a += (double) x[i] * x[i]; } return 10.0 * std::log10(a / (n / 2) + 1e-20); };
+    const double base = power(in);
+    const double closed = power(run(0, 1, 1, 40.0f, 0.5f)), open = power(run(0, 1, 1, 130.0f, 0.5f)), plain = power(run(0, 1, 0, 0.0f, 0.5f));
+    CHECK(std::fabs((closed - base) - 20.0 * std::log10(0.4965 / 1.5)) < 0.4, "a closed L6 loop is a flat gain of %.2f dB (%.2f)", 20.0 * std::log10(0.4965 / 1.5), closed - base);
+    CHECK(std::fabs(open - plain) < 1.0, "an open L6 loop is the plain comb (%.2f vs %.2f dB)", open, plain);
+    { const auto o = run(0, 1, 1, 130.0f, 0.5f), cl = run(0, 1, 1, 40.0f, 0.5f); double d = 0.0, e = 0.0; for (int i = n / 2; i < n; i++) { d += (double) (o[i] - cl[i]) * (o[i] - cl[i]); e += (double) o[i] * o[i]; }
+      CHECK(d > 0.05 * e, "an open L6 loop sounds different from a closed one (difference %.2f of the signal power)", d / e); }
+    CHECK(CombFilter::loopPole(1, 60.0f) > CombFilter::loopPole(1, 80.0f) && CombFilter::loopPole(1, 80.0f) > CombFilter::loopPole(1, 100.0f), "the L6 pole falls as x rises");
+    for (int loop = 1; loop <= 3; loop++)
+        for (float lx : { 0.0f, 55.0f, 85.0f, 140.0f }) { power(run(1, -1, loop, lx, 0.9f)); power(run(0, -1, loop, lx, 0.9f)); }
+}
+
 static void testFxFilterLfo()
 {
     auto level = [](bool route) {
@@ -1720,6 +1746,7 @@ int main()
     testFxBuses();
     testFxFilterLfo();
     testFxFilterSerumComb();
+    testCombLoopFilters();
     testVitalEnvelopeAndLfoDelay();
     testVoicePitchRoute();
     testKeyLfo();

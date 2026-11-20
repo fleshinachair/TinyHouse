@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import struct
@@ -623,8 +624,11 @@ SUB_WAVE = {"kSine": 0, "kTriangle": 1, "kSaw": 2, "kSquare": 3, "kRoundRect": 0
 # Serum filter model -> (Tablor flt_type index, exact?)
 # Serum's comb and flanger models are the engine's own filter types 8..11 (comb.h; laws measured on noise in calibration/dev/probe_comb.py, the Comb2 / Combs / L6 / H6 / Dist / Phase variants are not carried)
 COMB_MODELS = {"CombP": 8, "CombN": 9, "FlangeP": 10, "FlangeN": 11, "Phase12P": 12, "Phase24P": 13, "Phase36P": 14, "Phase48P": 15}
+# the L6 / H6 / HL6 variants (a one-pole low-pass / high-pass / band-pass in the comb's loop, comb.h): the same engine type as the plain model, with the engine's loop mode and Var set
+COMB_LOOP_MODELS = {f"{fam}{lp}{sg}": (base + off, {"L6": 1, "H6": 2, "HL6": 3}[lp]) for fam, base in (("Comb", 8), ("Flange", 10)) for lp in ("L6", "H6", "HL6") for sg, off in (("P", 0), ("N", 1))}
 FILTER_MAP = {
     **{m: (i, True) for m, i in COMB_MODELS.items()},
+    **{m: (i, True) for m, (i, _) in COMB_LOOP_MODELS.items()},
     "MgL24": (1, True), "L24": (1, True),
     "MgL18": (1, False), "L18": (1, False), "DirtyMg": (1, False), "LadderAcid": (1, False), "ZDF_A": (1, False),
     "MgL12": (0, False), "L12": (0, True), "MgL6": (0, False), "L6": (0, False),
@@ -1972,8 +1976,9 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         slevel = level_of(3, so["level"]) if so.get("noise") else eff_level(so)
         P[f"{sk}_level"] = round(_clamp(pot_level(slevel) * CAL["smp_scale"], 0, 127))
         P[f"{sk}_fixed"] = int(bool(so.get("noise")))
-        P[f"{sk}_tune"] = round(_clamp(sinfo["octave"] * 12 + sinfo["pitch"], -48, 48))
-        P[f"{sk}_fine"] = round(_clamp(sinfo["fine"], -100, 100))
+        # the oscillator's Octave / Pitch / Fine with the macro, velocity and wheel routes into them folded in (the same fold as a wavetable oscillator's tune; a noise stand-in has none)
+        P[f"{sk}_tune"] = round(_clamp(so.get("octave", sinfo["octave"]) * 12 + so.get("semitone", sinfo["pitch"]), -48, 48))
+        P[f"{sk}_fine"] = round(_clamp(so.get("fine_cents", sinfo["fine"]), -100, 100))
         P[f"{sk}_post"] = post_of(so["id"])
         if not so.get("noise"):
             P[f"{sk}_pan"] = int(round(_clamp(so["pan"], -50, 50)))          # the slot's own Pan, applied by the engine with Serum's law
@@ -2003,7 +2008,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P[f"{sk}_spread"] = round(_clamp(sst / 100 * CAL["width_scale"], 0, 1) * 127)
             if so["unison"] > 8:
                 appr.append(f"sample unison {so['unison']} fits as 8")
-        note.append(f"{'granular' if so.get('gran') else 'sample'} oscillator carried: {sinfo['file']} ({'granular, the file read by grains' if so.get('gran') else 'multisample' if sinfo['multi'] else 'spectral oscillator played as a sample: scan and spectral filter not carried' if sinfo.get('spectral') else 'sample'})")
+        note.append(f"{'granular' if so.get('gran') else 'sample'} oscillator carried: {sinfo['file']} ({'granular, the file read by grains' if so.get('gran') else 'multisample' if sinfo['multi'] else ('spectral oscillator played as a sample: scan and spectral filter left out' if os.environ.get('TH_SPECTRAL_OK') else 'spectral oscillator played as a sample: scan and spectral filter not carried') if sinfo.get('spectral') else 'sample'})")
     # ---- FX buses: each source's send to Bus 1 / Bus 2 (Serum's level cubed is the gain, probe_bus.py) ----
     send_keys = {**{oid: f"wt{slot}" for oid, slot in slot_of.items()}, 4: "sub", 3: "noise"}
     for sk, s_ in zip(("smp", "smp2", "smp3"), smps):
@@ -2039,7 +2044,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     def voice_filter_pots(fl, key_id, prefix, label):
         """The engine pots for one Serum voice filter (cutoff law, model, resonance, drive, key tracking)."""
         idx, exact = FILTER_MAP.get(fl["model"], (None, False))
-        fkey = filter_model_key(fl["model"], fl.get("var"))
+        fkey = None if fl["model"] in COMB_LOOP_MODELS else filter_model_key(fl["model"], fl.get("var"))          # the engine's own L6 / H6 comb replaces the older nearest-filter entries
         if fkey in FILTER_MODELS and FILTER_MODELS[fkey].get("bypass_rms_db", 99.0) <= FLAT_FILTER_DB:
             # Diffuser, PZ_SVF and the like: a held saw through the model comes out at the same harmonic levels as with no filter (the fit
             # script's "filter open" distance is within Serum's own noise), so no engine filter is closer than none; the model's phase / time
@@ -2074,16 +2079,19 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             # Serum's Formant models (engine types 16..18, formant.h): the resonators sit where the measured Freq x Var tables put them and Reso narrows them (bandwidth / (1 + 2 Reso)); the knob's note exactly,
             # like a comb (no calibration offset; the pot is whole semitones, so the rest goes to the cents pot)
             note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
-            P[f"{prefix}_freq"] = int(math.floor(note_pot))
-            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
+            P[f"{prefix}_freq"] = int(round(note_pot))          # to the nearest semitone: the cents pot spans -64..+63 only (the remainder was up to 99 cents and clamped, a comb up to 36 cents out of tune)
+            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - round(note_pot)) * 100), 0, 127))
             P[f"{prefix}_var"] = round(_clamp(float(fl.get("var") or 0.0) / 100.0 * 127.0, 0, 127))
             P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
         elif idx >= 8:
             # a comb is tuned to the cutoff itself: the knob's note, no calibration offset; the pot is whole semitones, so the rest goes to the cents pot (64 = 0)
             note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
-            P[f"{prefix}_freq"] = int(math.floor(note_pot))
-            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
+            P[f"{prefix}_freq"] = int(round(note_pot))          # to the nearest semitone: the cents pot spans -64..+63 only (the remainder was up to 99 cents and clamped, a comb up to 36 cents out of tune)
+            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - round(note_pot)) * 100), 0, 127))
             P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
+            if fl["model"] in COMB_LOOP_MODELS:
+                P[f"{prefix}_loop"] = COMB_LOOP_MODELS[fl["model"]][1]
+                P[f"{prefix}_var"] = round(_clamp(float(fl.get("var") or 0.0) / 100.0 * 127.0, 0, 127))          # Serum's default Var is 0 (measured)
         else:
             P[f"{prefix}_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] + pivot - 8 + filter_cutoff_delta(fkey, cut, reso_pct), 0, 127))
             P[f"{prefix}_res"] = filter_res_pot(fl["model"], reso_pct)
@@ -2418,8 +2426,8 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
         note_pot = _clamp(cut * CUTOFF_NOTES - 8, 0, 127)
         P["fxf_type"] = 0
         P["fxf_vsk"] = 7 + fxmap.FX_COMB_MODELS.index(dyn["model"])
-        P["fxf_freq"] = int(math.floor(note_pot))
-        P["fxf_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
+        P["fxf_freq"] = int(round(note_pot))
+        P["fxf_cfine"] = int(_clamp(64 + round((note_pot - round(note_pot)) * 100), 0, 127))
         P["fxf_res"] = round(_clamp(dyn["reso"], 0.0, 100.0) / 100.0 * 127)
         P["fxf_drive"] = round(_clamp(dyn.get("drive", 0.0), 0.0, 100.0) / 100.0 * 127)       # a plain gain on these models (fx.h serumModelGain)
     else:

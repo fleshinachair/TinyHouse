@@ -8,7 +8,11 @@
  *
  * Comb +/-: g > 0 / g < 0 and c = sign g^2. Flange +/-: c = sign (so the valleys between the teeth are as deep as 35 dB). The cutoff is Serum's knob on the law
  * midiNoteToHz(12 log2(2697) x Freq) exactly (425.0 Hz at Freq 0.5), with no filter calibration offset.
- * Cubic (4-point Lagrange) interpolation reads the fractional delay; D is ramped across a block so a moving cutoff does not click. */
+ * Cubic (4-point Lagrange) interpolation reads the fractional delay; D is ramped across a block so a moving cutoff does not click.
+ *
+ * The L6 / H6 variants put a one-pole filter in the loop, on the delayed signal: L6 a low-pass (1 - p) / (1 - p z^-1) with the loop 0.5 sample longer (see loopDelay), H6 a high-pass (1 + p) / 2 (1 - z^-1) / (1 - p z^-1).
+ * Its coefficient p is a function of x = Var (%) + 50 x the Freq knob (0..1) alone (measured on a held saw at Freq 0.3 / 0.5 / 0.7 x Var 0..100, calibration/dev/probe_comb_loop_saw.json: the
+ * same p at the same x whatever the split, rms 0.05-0.2 dB for x up to 95 on L6): closed (p 0.99+, the loop passes nothing but the very lowest) up to x 65, opening to p 0.3 at x 95. */
 #include <algorithm>
 #include <cmath>
 
@@ -18,13 +22,44 @@ class CombFilter {
 public:
     static constexpr int kLen = 16384;                       /* 2.7 Hz at 44.1 kHz */
     void setSampleRate(double sr) { sampleRate = (float) sr; reset(); }
-    void reset() { for (auto &a : vs) a[0] = a[1] = 0.0f; vPrev[0] = -1.0f; if (used) { std::fill(bufL, bufL + kLen, 0.0f); std::fill(bufR, bufR + kLen, 0.0f); used = false; } pos = 0; prevD = -1.0f; }   /* (the 128 KB are cleared only if the filter ran) */
+    void reset() { for (auto &a : vs) a[0] = a[1] = 0.0f; vPrev[0] = -1.0f; lpS[0] = lpS[1] = hpX[0] = hpX[1] = hpY[0] = hpY[1] = 0.0f; prevP = prevQ = -1.0f; if (used) { std::fill(bufL, bufL + kLen, 0.0f); std::fill(bufR, bufR + kLen, 0.0f); used = false; } pos = 0; prevD = -1.0f; }   /* (the 128 KB are cleared only if the filter ran) */
 
-    /* kind 0 Comb, 1 Flange; sign +1 / -1; reso 0..1; hz the comb's frequency */
-    void process(float *l, float *r, int n, int kind, int sign, float reso, float hz)
+    /* the loop filter's pole at x = Var % + 50 Freq, L6 (loop 1) and H6 (loop 2): one curve for both (fitted at Freq 0.3 / 0.4 / 0.5 / 0.7: p .998 at x 50, .94 at 75, .78 at 85, .29 at 95), linear between the measured points;
+     * past x 100 the low-pass settles near .15 and the high-pass opens fully */
+    static float loopPole(int loop, float x)
+    {
+        static const float xs[9] = { 45.0f, 50.0f, 60.0f, 65.0f, 75.0f, 85.0f, 95.0f, 105.0f, 115.0f };
+        static const float lp[9] = { 0.999f, 0.998f, 0.995f, 0.99f, 0.94f, 0.775f, 0.295f, 0.17f, 0.11f };
+        static const float hp[9] = { 0.999f, 0.998f, 0.995f, 0.99f, 0.94f, 0.775f, 0.295f, 0.0f, 0.0f };
+        const float *t = loop == 1 ? lp : hp;
+        if (x <= xs[0]) return t[0];
+        for (int i = 1; i < 9; i++)
+            if (x <= xs[i]) return t[i - 1] + (t[i] - t[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+        return t[8];
+    }
+
+    /* the loop's extra length in samples, fitted with the pole: L6 0.5 (0 once the filter has opened, x > 100), H6 0 (-0.5 past x 100) */
+    static float loopDelay(int loop, float x) { return loop == 3 ? 0.5f : loop == 1 ? (x < 100.0f ? 0.5f : 0.0f) : (x < 100.0f ? 0.0f : -0.5f); }
+
+    /* HL6 (loop 3): a band-pass in the loop, a one-pole low-pass at the comb's frequency x 2^(Var / 10) and a one-pole high-pass at the frequency / 2^(Var / 10) (Var in %, so 0 is a 6 dB band-pass
+     * at the comb's own frequency and 100 opens ten octaves each way; fitted at Freq 0.3 / 0.5 / 0.7 x Var 0..100: p = exp(-2 pi f / sr) of those corners, the low-pass capped at 14 kHz) */
+    void hlPoles(float hz, float var, float &pl, float &ph) const
+    {
+        const float k = std::exp2(var * 0.1f);
+        pl = std::exp(-6.2831853f * std::min(hz * k, 14000.0f) / sampleRate);
+        ph = std::exp(-6.2831853f * std::max(hz / k, 5.0f) / sampleRate);
+    }
+
+    /* kind 0 Comb, 1 Flange; sign +1 / -1; reso 0..1; hz the comb's frequency; loop 0 none, 1 L6, 2 H6 with lx = Var % + 50 x the Freq knob, 3 HL6 with lx = Var % */
+    void process(float *l, float *r, int n, int kind, int sign, float reso, float hz, int loop = 0, float lx = 0.0f)
     {
         used = true;
-        const float targetD = std::clamp(sampleRate / std::max(hz, 3.0f), 4.0f, (float) (kLen - 8));
+        float loopP1 = 0.0f, loopQ1 = 0.0f;
+        if (loop == 3) hlPoles(hz, lx, loopP1, loopQ1);
+        else if (loop) loopP1 = loopPole(loop, lx);
+        if (prevP < 0.0f) { prevP = loopP1; prevQ = loopQ1; }
+        const float p0 = prevP, q0 = prevQ;
+        const float targetD = std::clamp(sampleRate / std::max(hz, 3.0f) + loopDelay(loop, lx), 4.0f, (float) (kLen - 8));
         if (prevD < 0.0f) prevD = targetD;
         const float g = (float) sign * std::min(reso, 0.99f);
         const float c = kind ? (float) sign : (float) sign * g * g;
@@ -44,14 +79,28 @@ public:
             auto tap = [&](const float *buf) {
                 return c0 * buf[(b + 1) & m] + c1 * buf[b & m] + c2 * buf[(b - 1) & m] + c3 * buf[(b - 2) & m];
             };
-            const float dl = tap(bufL), dr = tap(bufR);
+            float dl = tap(bufL), dr = tap(bufR);
+            if (loop) {
+                const float p = p0 + (loopP1 - p0) * (float) (i + 1) / (float) n;
+                if (loop == 1 || loop == 3) {                             /* L6: y += (1 - p) (x - y) */
+                    lpS[0] += (1.0f - p) * (dl - lpS[0]); lpS[1] += (1.0f - p) * (dr - lpS[1]);
+                    dl = lpS[0]; dr = lpS[1];
+                }
+                if (loop >= 2) {                                          /* H6 (HL6: after the low-pass, pole q): y = (1 + q) / 2 (x - x1) + q y1 */
+                    const float q = loop == 3 ? q0 + (loopQ1 - q0) * (float) (i + 1) / (float) n : p;
+                    const float k = 0.5f * (1.0f + q);
+                    const float yl = k * (dl - hpX[0]) + q * hpY[0], yr = k * (dr - hpX[1]) + q * hpY[1];
+                    hpX[0] = dl; hpX[1] = dr; hpY[0] = yl; hpY[1] = yr;
+                    dl = yl; dr = yr;
+                }
+            }
             const float wl = l[i] + g * dl, wr = r[i] + g * dr;
             bufL[pos] = wl; bufR[pos] = wr;
             l[i] = a * (wl + c * dl);
             r[i] = a * (wr + c * dr);
             pos = (pos + 1) & m;
         }
-        prevD = targetD;
+        prevD = targetD; prevP = loopP1; prevQ = loopQ1;
         /* keep denormals out of a ringing tail */
         if (std::fabs(bufL[(pos - 1) & (kLen - 1)]) < 1e-20f) bufL[(pos - 1) & (kLen - 1)] = 0.0f;
         if (std::fabs(bufR[(pos - 1) & (kLen - 1)]) < 1e-20f) bufR[(pos - 1) & (kLen - 1)] = 0.0f;
@@ -139,7 +188,8 @@ private:
     float bufL[kLen] = {}, bufR[kLen] = {};
     int pos = 0;
     bool used = false;
-    float prevD = -1.0f;
+    float prevD = -1.0f, prevP = -1.0f, prevQ = -1.0f;
+    float lpS[2] = {}, hpX[2] = {}, hpY[2] = {};                 /* the L6 / H6 loop filter's state per channel */
     float vs[2][2] = {}, vPrev[7] = { -1.0f, 0, 0, 0, 0, 0, 0 };            /* Vital comb: the two one-pole states per channel, the previous block's coefficients */
 };
 

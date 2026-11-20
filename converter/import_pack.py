@@ -149,7 +149,7 @@ def floored_band_error(eb, sb, floor=BAND_FLOOR_DB):
 
 INAUDIBLE_KINDS = ("Filter", "Bode", "Split", "Split3", "SplitMS", "Comp", "Distortion", "Utils")
 AB_SLACK_BANDS = 1.5          # dB above Serum's own render-to-render noise (same band metric) that the effect-off render may differ by and still count as inaudible
-AB_MAX_LEVEL = 1.0            # dB: the effect-off render's level against the full one (a bigger gap is an effect that matters, whatever the bands say)
+AB_MAX_LEVEL = 4.0            # dB: the effect-off render's level against the full one (a bigger gap is an effect that matters, whatever the bands say). Up to this the loudness fit takes up the difference (the volume is set to Serum's full render and the gate then checks the level); at 1 dB it kept out 11 presets whose octave bands were within Serum's own noise
 
 
 BODE_COMPANIONS = {"Bode", "Split", "Split3", "SplitMS"}
@@ -172,17 +172,19 @@ def bode_only(why):
 def ignored_effects_off(tree, header, name, why):
     """When the only thing besides a missing fingerprint that stops a preset is effects the converter leaves out (a Filter FX with a model or a modulator, a Bode, a Split with
     its branch modules, a Comp / Distortion / Utils it has no stage for): the tree with exactly those nodes switched off (a Split takes its branch modules with it), else None.
-    The same in an FX bus rack when the reason is its plain "not carried: <kinds>". A Distortion's own filter, a bus rack's Filter FX with a modulator and every other reason are not this case."""
+    The same in an FX bus rack (its plain "not carried: <kinds>", a Filter FX with a modulator, a Utils the engine cannot carry). A Distortion's own filter and every other reason are not this case."""
     kinds = {}                                           # rack (0 = main, 1 / 2 = bus) -> the kinds left out there
     for w in why:
         if "no Serum fingerprint" in w or "in a Split branch" in w:
             continue
-        mb = re.match(r"FX bus (\d): (not carried: .*)$", w)
+        mb = re.match(r"FX bus (\d): (.*)$", w)
         rack, w = (int(mb.group(1)), mb.group(2)) if mb else (0, w)
         if w.startswith("not carried: "):
             kinds.setdefault(rack, set()).update(w[len("not carried: "):].split(", "))
-        elif rack == 0 and w.startswith("Filter FX not carried: ") and "Distortion filter" not in w:
-            kinds.setdefault(0, set()).add("Filter")
+        elif w.startswith("Filter FX not carried: ") and "Distortion filter" not in w:
+            kinds.setdefault(rack, set()).add("Filter")        # a Filter FX with a modulator (or a model) the engine has no stage for, in the main rack or a bus rack
+        elif w.startswith("Utils "):
+            kinds.setdefault(rack, set()).add("Utils")         # a Utils the engine cannot carry (mono-below in a bus rack, a Level Out moved by a modulator): switched off in Serum too, the A/B test says if it is audible
         else:
             return None
     if not kinds or not set().union(*kinds.values()) <= set(INAUDIBLE_KINDS):
@@ -290,9 +292,12 @@ def main():
     ap.add_argument("--no-bode-out", action="store_true", help="skip a preset whose Bode is audible in Serum (the default imports it without the Bode and lists it in the report)")
     ap.add_argument("--no-ab-ignore", action="store_true", help="do not test whether the effects the converter leaves out are inaudible in Serum itself; skip those presets")
     ap.add_argument("--compare", type=Path, default=None, help="a folder of installed preset .json files: each one is also scored against Serum's render with the same metric, and the line says which is closer (nothing is written for it)")
+    ap.add_argument("--spectral-as-sample", action="store_true", help="let a Spectral oscillator through as the sample it plays (its Scan and spectral filter are left out): the gate then judges the result against Serum's own render, like a left-out Bode. Without this the 33 factory presets with one are skipped")
     ap.add_argument("--no-play-level", action="store_true", help="keep each preset at Serum's own loudness. By default the volume is set last so every preset plays a chord at the same loudness (play_level.py): Serum's presets differ by tens of dB")
     ap.add_argument("--no-level", action="store_true", help="skip the Serum render and the loudness fit (the converter's own volume)")
     a = ap.parse_args()
+    if a.spectral_as_sample:
+        os.environ["TH_SPECTRAL_OK"] = "1"          # read by deephouse2move where the oscillator is carried
 
     bank_dir = a.out / a.bank
     wt_out = H.WT_OUT          # tablor_cli reads its wavetables from here (out/move/...); copy the bank's folder to the Move with the presets

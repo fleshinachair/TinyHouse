@@ -698,7 +698,7 @@ public:
             else if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
             else if (combType2 && vcMode2) comb2.processVital(pre2L, pre2R, n, combType2 <= 2 ? 0 : combType2 - 2, combRes2, fltTarget2, vcBlend2, vcTrans2, vcMode2 == 2);
-            else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2);
+            else if (combType2) comb2.process(pre2L, pre2R, n, combType2 >= 3, (combType2 & 1) ? 1 : -1, combRes2, fltTarget2, combLoop2, combLx2);
             else if (vb2.on) runBlend(vb2, fltTarget2, fltQ2, pre2L, pre2R, n);
             else runFilter(filter2, fltPrev2, fltTarget2, fltQ2, pre2L, pre2R, n);
             if (driving2 && !vDriveLaw) driveOut(pre2L, pre2R, n, drive2Mix, drive2MixTarget);
@@ -727,7 +727,7 @@ public:
         else if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
         else if (combType && vcMode) comb.processVital(preL, preR, n, combType <= 2 ? 0 : combType - 2, combRes, fltTarget, vcBlend, vcTrans, vcMode == 2);
-        else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget);
+        else if (combType) comb.process(preL, preR, n, combType >= 3, (combType & 1) ? 1 : -1, combRes, fltTarget, combLoop, combLx);
         else if (vb1.on) runBlend(vb1, fltTarget, fltQ, preL, preR, n);
         else runFilter(filter, fltPrev, fltTarget, fltQ, preL, preR, n);
         if (driving && !vDriveLaw) driveOut(preL, preR, n, driveMix, driveMixTarget);
@@ -1092,6 +1092,8 @@ private:
 
             const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 18);
             combType = ft >= 8 && ft < 16 ? ft - 7 : 0;                                  /* 1 Comb +, 2 Comb -, 3 Flange +, 4 Flange - */
+            combLoop = combType && combType <= 4 ? std::clamp((int) P[TB_P_FLT_LOOP], 0, 3) : 0;                     /* the L6 / H6 / HL6 loop filter of Serum's comb and flange models, its pole set by x = Var % + 50 x the Freq knob (HL6: by Var % alone, comb.h) */
+            combLx = P[TB_P_FLT_VAR] * (100.0f / 127.0f) + (combLoop == 3 ? 0.0f : 50.0f * n / 136.766f);
             if (combType || ft >= 16) n += (P[TB_P_FLT_CFINE] - 64.0f) * 0.01f;              /* a comb is tuned in cents */
             float f = midiNoteToHz(n);
             float maxFreq = std::min(20000.0f, (float) (sampleRate / 2.0));
@@ -1137,6 +1139,8 @@ private:
             n2 += modOff[MD_FLT2_FREQ] * filterWidth;
             const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 18);
             combType2 = ft2 >= 8 && ft2 < 16 ? ft2 - 7 : 0;
+            combLoop2 = combType2 && combType2 <= 4 ? std::clamp((int) P[TB_P_FLT2_LOOP], 0, 3) : 0;
+            combLx2 = P[TB_P_FLT2_VAR] * (100.0f / 127.0f) + (combLoop2 == 3 ? 0.0f : 50.0f * n2 / 136.766f);
             if (combType2 || ft2 >= 16) n2 += (P[TB_P_FLT2_CFINE] - 64.0f) * 0.01f;
             fltTarget2 = std::clamp(midiNoteToHz(n2), combType2 ? 3.0f : 4.0f, maxFreq);
             combRes2 = std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f);
@@ -1304,7 +1308,8 @@ private:
     FormantSet fmSet1, fmSet2;
     bool fmOn1 = false, fmOn2 = false;
     float vph1Blend = 1.0f, vph2Blend = 1.0f; bool vph1Inv = false, vph2Inv = false, vphClean = false;
-    int combType = 0, combType2 = 0;
+    int combType = 0, combType2 = 0, combLoop = 0, combLoop2 = 0;
+    float combLx = 0.0f, combLx2 = 0.0f;                    /* x = Var % + 50 x the Freq knob: the L6 / H6 loop filter's coordinate (comb.h) */
     float combRes = 0.0f, combRes2 = 0.0f;
     int vcMode = 0, vcMode2 = 0;                  /* 0 Serum's comb law, 1 Vital blend, 2 Vital band spread */
     float vcBlend = 0.0f, vcBlend2 = 0.0f, vcTrans = 0.0f, vcTrans2 = 0.0f;

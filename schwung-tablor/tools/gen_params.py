@@ -840,7 +840,7 @@ BANKS = [
                                        num("flt_vbg", "VD1", "Filter Passband Drop", 0, 127, 0), num("flt2_vbg", "VD2", "Filter 2 Passband Drop", 0, 127, 0))]),
     # After Vital Filter Blend, for the same reason. LFO Tempo: a synced LFO of the source preset (Serum's BeatSync, Vital's Tempo / Dotted / Triplets) plays its Rate pot as the rate at 120 BPM and the host
     # tempo scales it (rate x BPM / 120); Free leaves the rate a fixed Hz, as every LFO was before. No host tempo (0) counts as 120.
-    ("LFO Tempo", False, [row(*[enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host"], 0) for n in (1, 2, 3, 4)])]),
+    ("LFO Tempo", False, [row(*[enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host", "Frozen"], 0) for n in (1, 2, 3, 4)])]),
     # After LFO Tempo, for the same reason. Filter Drive Law: Serum saturates before and after the filter (tanh in, tanh out); Vital saturates the filter's input with a gain of drive / (1 + 2 resonance) and takes the output down by
     # 1 / sqrt(drive) (filters/sallen_key_filter.cpp setupFilter, calibration/vital_vfilter_probe.py --drive). Serum (0) leaves every preset as it was.
     ("Filter Drive Law", False, [row(enum("flt_vdl", "VDL", "Filter Drive Law", ["Serum", "Vital"], 0), num("fxf_drive", "VXD", "FX Filter Drive", 0, 127, 0))]),
@@ -868,7 +868,7 @@ BANKS = [
         [pot(f"lfo{n}_s{k}", f"L{n}S{k:X}", f"LFO{n} Shape {k}", LFO_SHAPE_DEFAULT[k]) for k in range(N_SHAPE)] + [pot(f"lfo{n}_smooth", f"L{n}SM", f"LFO{n} Smooth", 0)] +
         [enum(f"lfo{n}_hr", f"H{n}R", f"LFO{n} Hi-Res", ["Off", "On"], 0)] + [num(f"lfo{n}_h{k}", f"H{n}{k:02X}", f"LFO{n} Hi-Res {k}", 0, 127, 64) for k in range(64)] +
         [num(f"lfo{n}_delay", f"VD{n}", f"LFO{n} Delay", 0, 127, 0), num(f"lfo{n}_fade", f"VE{n}", f"LFO{n} Fade In", 0, 127, 0), num(f"lfo{n}_phase", f"VH{n}", f"LFO{n} Phase", 0, 127, 0),
-         enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host"], 0)])]),
+         enum(f"lfo{n}_tempo", f"LT{n}", f"LFO{n} Tempo", ["Free", "Host", "Frozen"], 0)])]),
     # After Vital LFO Routes, for the same reason. Vital's own decay curve on the filter envelope and the four spare envelopes (the amplitude envelope has Vital Amp Decay Curve): 0 keeps the analog fall, 1..127 draws the curve of power (pot - 64) * 20 / 63 over the stage's time, not squared. Set by the Vital converter.
     ("Vital Env Curves", False, [row(num("flt_dpow", "FDP", "Vital Filter Decay Curve", 0, 127, 0), *[num(f"me{n}_dpow", f"M{n}D", f"Vital Mod Env {n} Decay Curve", 0, 127, 0) for n in (1, 2, 3, 4)])]),
     ("Vital LFO Routes 9-16", False, [row(enum(f"lr{r}_src", f"R{r}SR", f"LFO Route {r} Source", LR_SRC, 0), enum(f"lr{r}_dst", f"R{r}DS", f"LFO Route {r} Dest", MOD_DST, 0),

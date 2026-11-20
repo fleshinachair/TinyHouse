@@ -1430,7 +1430,7 @@ static const char *const tb_opts_35[] = { "Serum", "Vital" };
 static const char *const tb_opts_36[] = { "Fixed", "Per octave" };
 static const char *const tb_opts_37[] = { "Held", "Always" };
 static const char *const tb_opts_38[] = { "Off", "On", "Phaser", "Formant" };
-static const char *const tb_opts_39[] = { "Free", "Host" };
+static const char *const tb_opts_39[] = { "Free", "Host", "Frozen" };
 static const char *const tb_opts_40[] = { "A I U O", "A O I E" };
 static const char *const tb_opts_41[] = { "Off", "Analog", "Ladder", "Dirty", "Digital", "Diode" };
 static const char *const tb_opts_42[] = { "Off", "Analog", "Ladder", "Dirty", "Digital", "Diode", "Comb" };
@@ -2106,10 +2106,10 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "flt2_blend", TB_INT, 0, 127, 0, 0, 0 },
     { "flt_vbg", TB_INT, 0, 127, 0, 0, 0 },
     { "flt2_vbg", TB_INT, 0, 127, 0, 0, 0 },
-    { "lfo1_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
-    { "lfo2_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
-    { "lfo3_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
-    { "lfo4_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
+    { "lfo1_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
+    { "lfo2_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
+    { "lfo3_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
+    { "lfo4_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
     { "flt_vdl", TB_ENUM, 0, 1, 0, 2, tb_opts_35 },
     { "fxf_drive", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo1_hr", TB_ENUM, 0, 1, 0, 2, tb_opts_6 },
@@ -2479,7 +2479,7 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "lfo5_delay", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo5_fade", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo5_phase", TB_INT, 0, 127, 0, 0, 0 },
-    { "lfo5_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
+    { "lfo5_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
     { "lfo6_rate", TB_INT, 0, 127, 60, 0, 0 },
     { "lfo6_mode", TB_ENUM, 0, 4, 0, 5, tb_opts_10 },
     { "lfo6_s0", TB_INT, 0, 127, 64, 0, 0 },
@@ -2567,7 +2567,7 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "lfo6_delay", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo6_fade", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo6_phase", TB_INT, 0, 127, 0, 0, 0 },
-    { "lfo6_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
+    { "lfo6_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
     { "lfo7_rate", TB_INT, 0, 127, 60, 0, 0 },
     { "lfo7_mode", TB_ENUM, 0, 4, 0, 5, tb_opts_10 },
     { "lfo7_s0", TB_INT, 0, 127, 64, 0, 0 },
@@ -2655,7 +2655,7 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "lfo7_delay", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo7_fade", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo7_phase", TB_INT, 0, 127, 0, 0, 0 },
-    { "lfo7_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
+    { "lfo7_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
     { "lfo8_rate", TB_INT, 0, 127, 60, 0, 0 },
     { "lfo8_mode", TB_ENUM, 0, 4, 0, 5, tb_opts_10 },
     { "lfo8_s0", TB_INT, 0, 127, 64, 0, 0 },
@@ -2743,7 +2743,7 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "lfo8_delay", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo8_fade", TB_INT, 0, 127, 0, 0, 0 },
     { "lfo8_phase", TB_INT, 0, 127, 0, 0, 0 },
-    { "lfo8_tempo", TB_ENUM, 0, 1, 0, 2, tb_opts_39 },
+    { "lfo8_tempo", TB_ENUM, 0, 2, 0, 3, tb_opts_39 },
     { "flt_dpow", TB_INT, 0, 127, 0, 0, 0 },
     { "me1_dpow", TB_INT, 0, 127, 0, 0, 0 },
     { "me2_dpow", TB_INT, 0, 127, 0, 0, 0 },

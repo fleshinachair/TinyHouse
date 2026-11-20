@@ -918,7 +918,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         keyflat = False
         if sync in (1, 2, 3):
             hz = 1.0 / lfo_period_s(sync, s.get(f"lfo_{k}_tempo", 4.0))
-            P[f"lfo{slot}_tempo"] = 1                  # the rate is the one at 120 BPM; the engine scales it by the host tempo
+            P[f"lfo{slot}_tempo"] = 2 if int(s.get(f"lfo_{k}_tempo", 4.0) + 0.3) == 0 else 1      # the rate is the one at 120 BPM; the engine scales it by the host tempo (tempo index 0 is 0 Hz: Frozen)
             notes.append(f"LFO {k} is tempo-synced: it follows the host tempo")
         else:
             hz = 2.0 ** s.get(f"lfo_{k}_frequency", 0.0)

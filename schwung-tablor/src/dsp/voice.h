@@ -171,6 +171,7 @@ inline float potLfoHz(float v) { return 0.05f * std::pow(2400.0f, pot01(v)); }
  * No host tempo (0) counts as 120, the same clamp the delay and the granular oscillator use. */
 inline float lfoHz(const float *P, int l, float bpm, float rateMod = 0.0f)
 {
+    if (P[lfoKeys(l).tempo] >= 1.5f) return 0.0f;                       /* Frozen: Vital's tempo index 0 is a rate of 0 Hz, the LFO stays where it starts */
     float hz = potLfoHz(P[lfoKeys(l).rate]);
     if (rateMod != 0.0f) { const float hz0 = hz; hz *= std::pow(2.0f, P[lfoKeys(l).tempo] < 0.5f ? std::clamp(rateMod * 16.0f, -16.0f, 16.0f) : std::floor(std::clamp(rateMod * 12.0f + 0.3f, -12.0f, 12.0f)));
         hz = std::min(hz, std::max(hz0, 40.0f)); }   /* Vital's frequency knob is 16 octaves of Hz; its tempo knob steps by octaves too, floor(index + 0.3) */

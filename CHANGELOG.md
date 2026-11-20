@@ -2,7 +2,7 @@
 
 ## 0.9.10 (in progress)
 
-Not released. Everything here comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.7 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
+Not released. Everything here comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.5 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
 
 **Vital's own filter models.** The Analog (Sallen-Key), Ladder, Dirty, Digital and Diode filters are ported from Vital's source for the voice filters and the Filter FX, 12 and 24 dB with the Blend knob, and the Analog model's notch / pass swap, dual notch / band and band / peak / notch styles. Measured against the plugin they agree to about 0.5 dB at any cutoff and resonance (the biquads were 2 to 4 dB off near the cutoff). The Filter FX also runs Vital's comb with its style, Blend and Blend Transpose.
 
@@ -11,6 +11,8 @@ Not released. Everything here comes from comparing the engine with the Vital plu
 **Volume and Velocity Track.** The master Volume knob follows its real square-root scale (86 dB per unit of sqrt(v / 7399): presets at the ends of the knob were 1 to 5 dB off), and Velocity Track is carried (a positive track as the engine's amp velocity sensitivity, a negative one as its gain at velocity 100).
 
 **Delay and EQ routes.** The delay is a port of Vital's own: mono, stereo, ping pong and mid ping pong, a separate Aux time and sync switch, an equal-power dry / wet (the ping-pong styles had the wrong echo times). An LFO or envelope route into an EQ band's cutoff or gain is carried (13 of the 100 local presets used one and lost it). An Audio File Source wavetable takes its Clear / Vocode phase style, which sets its level (Gorgled 12.3 to 8.4 dB of error, Ah Eh Ee Oh 12.8 to 9.8).
+
+**Vocode morph.** Vital's Vocode spectral morph (Formant scale read at the note's absolute frequency) is baked at middle C, exact against the plugin on a wave source (Text To Wavetable Template went from 12.2 to 4.4 dB of error, Ah Eh Ee Oh from 10.2 to 6.4); it does not follow the key, so other notes keep the middle-C envelope.
 
 **Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
 

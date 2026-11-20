@@ -1405,7 +1405,7 @@ private:
      * under it, so the signal is divided by kVitalFull going in and multiplied coming out), through the filter before or after it; the dry part is not filtered, and the mix is a plain crossfade. */
     void processDistVital(float *L, float *R, int n)
     {
-        constexpr float kVitalFull = 0.46345f;                     /* 10^(-6.7 / 20) */
+        constexpr float kVitalFull = 0.33650f;                     /* 10^(-9.45 / 20): the engine level against Vital (re-measured; it was 10^(-6.7 / 20) before the converter's level offset moved) */
         constexpr int kAudioStep = 1;                              /* the audio-rate LFO is applied every this many samples (a power of 2) */
         /* Down Sample (a high sine through the plugin, calibration/vital_dist_probe.py): Vital holds each sample for a length that grows with Drive, 2 samples at the bottom of the knob, 4 at 0 dB, doubling every ~9 dB; the plugin's own
          * output past that is a ping-pong of two held values that this plain hold does not reproduce, so the length is capped at 12 */

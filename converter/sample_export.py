@@ -269,7 +269,7 @@ def sample_osc(tree: dict, i: int) -> dict | None:
         file = embedded
     return {"multi": multi, "spectral": spectral, "file": file, "embedded": bool(embedded), "base_note": int(node.get("baseNote", 60)),
             "loop": loop, "ping_pong": loop is not None and mode == "kPingPong", "xfade": min(max(float(pp.get("kParamLoopCrossfade", 0.0)), 0.0), 100.0) / 100.0 if loop else 0.0, "octave": float(pp.get("kParamOctave", 0.0)), "pitch": float(pp.get("kParamPitch", 0.0)),
-            "fine": float(pp.get("kParamFine", 0.0)), "level": float(pp.get("kParamVolume", 0.75))}
+            "fine": float(pp.get("kParamFine", 0.0)), "level": float(pp.get("kParamVolume", 0.75)), "scan": float(pp.get("kParamScanRate", 0.0)) if spectral else None}
 
 
 def granular_osc(tree: dict, i: int) -> dict | None:

@@ -625,6 +625,7 @@ SUB_WAVE = {"kSine": 0, "kTriangle": 1, "kSaw": 2, "kSquare": 3, "kRoundRect": 0
 # Serum's comb and flanger models are the engine's own filter types 8..11 (comb.h; laws measured on noise in calibration/dev/probe_comb.py, the Comb2 / Combs / L6 / H6 / Dist / Phase variants are not carried)
 COMB_MODELS = {"CombP": 8, "CombN": 9, "FlangeP": 10, "FlangeN": 11, "Phase12P": 12, "Phase24P": 13, "Phase36P": 14, "Phase48P": 15}
 # the L6 / H6 / HL6 variants (a one-pole low-pass / high-pass / band-pass in the comb's loop, comb.h): the same engine type as the plain model, with the engine's loop mode and Var set
+SPECTRAL_SCAN_MAX = 5.0         # % Scan Rate up to which a Spectral oscillator counts as not scanning (default: not stored)
 COMB_LOOP_MODELS = {f"{fam}{lp}{sg}": (base + off, {"L6": 1, "H6": 2, "HL6": 3}[lp]) for fam, base in (("Comb", 8), ("Flange", 10)) for lp in ("L6", "H6", "HL6") for sg, off in (("P", 0), ("N", 1))}
 FILTER_MAP = {
     **{m: (i, True) for m, i in COMB_MODELS.items()},
@@ -2008,7 +2009,11 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P[f"{sk}_spread"] = round(_clamp(sst / 100 * CAL["width_scale"], 0, 1) * 127)
             if so["unison"] > 8:
                 appr.append(f"sample unison {so['unison']} fits as 8")
-        note.append(f"{'granular' if so.get('gran') else 'sample'} oscillator carried: {sinfo['file']} ({'granular, the file read by grains' if so.get('gran') else 'multisample' if sinfo['multi'] else ('spectral oscillator played as a sample: scan and spectral filter left out' if os.environ.get('TH_SPECTRAL_OK') else 'spectral oscillator played as a sample: scan and spectral filter not carried') if sinfo.get('spectral') else 'sample'})")
+        # A Spectral oscillator is played as the sample it holds. That is close only while it hardly scans (the engine has no spectral resynthesis, so a scanning oscillator's movement is
+        # lost, auditioned 2026-11-20): Scan Rate at its default (not stored) or up to SPECTRAL_SCAN_MAX, or an oscillator that is silent, is let through; a scanning one still blocks
+        # (--spectral-as-sample lets every one through, the gate then judges the result).
+        spec_ok = bool(sinfo.get("spectral")) and bool(os.environ.get("TH_SPECTRAL_OK") or abs(sinfo.get("scan") or 0.0) <= SPECTRAL_SCAN_MAX or slevel < 1e-3)
+        note.append(f"{'granular' if so.get('gran') else 'sample'} oscillator carried: {sinfo['file']} ({'granular, the file read by grains' if so.get('gran') else 'multisample' if sinfo['multi'] else ('spectral oscillator played as a sample: scan and spectral filter left out' if spec_ok else 'spectral oscillator played as a sample: scan and spectral filter not carried') if sinfo.get('spectral') else 'sample'})")
     # ---- FX buses: each source's send to Bus 1 / Bus 2 (Serum's level cubed is the gain, probe_bus.py) ----
     send_keys = {**{oid: f"wt{slot}" for oid, slot in slot_of.items()}, 4: "sub", 3: "noise"}
     for sk, s_ in zip(("smp", "smp2", "smp3"), smps):

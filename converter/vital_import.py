@@ -238,10 +238,12 @@ def render_table(wt: dict, notes: list[str]) -> np.ndarray | None:
     if not frames:
         return None
     t = np.sum(frames, axis=0)
+    if len(frames) > 1:
+        t = t / len(frames)                                    # WavetableCreator::render: the groups are averaged
     t -= t.mean(axis=1, keepdims=True)                          # remove DC
-    peak = np.abs(t).max()
-    if wt.get("full_normalize", True) and peak > 1e-9:
-        t = t / peak
+    span = float((t.max(axis=1) - t.min(axis=1)).max())
+    if wt.get("full_normalize", True) and span > 1e-9:
+        t = t * (2.0 / span)                                   # Wavetable::postProcess: 2 / the widest peak-to-peak span of any frame (an asymmetric frame may pass 1)
     return t.astype(np.float32)
 
 
@@ -1604,7 +1606,18 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             P["dist_flt_blend"] = pot(127 * CLAMP(s.get("distortion_filter_blend", 0.0), 0, 2) / 2.0)
         carried.append("distortion")
     # master volume: Vital's volume knob is a cubic gain (calibration/vital_comp_probe.py: -31.1 dB from 4879 to 1500, 60 dB per decade; -9.5 dB at 4879 from the compressor fit)
-    vol_db = VITAL_VOLUME_DB_AT_4879 + 60.0 * math.log10(max(s.get("volume", 4879.26), 1.0) / 4879.26)
+    # the Volume knob is stored as a square-root scale (synth_parameters.cpp: kSquareRoot): measured through the plugin the gain is 86 dB per unit of sqrt(v / 7399.44) (within 0.1 dB from 1000 to 7399)
+    vol_db = VITAL_VOLUME_DB_AT_4879 + 86.0 * (math.sqrt(max(s.get("volume", 4879.26), 0.0) / 7399.44) - math.sqrt(4879.26 / 7399.44))
+    # Velocity Track (voice handler: the amplitude is interpolate(1, velocity, track) = 1 + (v - 1) track): at the engine's reference velocity of 100 that is a fixed gain; for a positive track the engine's own amp
+    # velocity sensitivity (normalised to velocity 100) gives the rest of the curve (s = v100 t / (1 + (v100 - 1) t)); a negative track (louder when soft) can only have the fixed gain
+    vtrack = float(s.get("velocity_track", 0.0))
+    if abs(vtrack) > 1e-3:
+        v100 = 100.0 / 127.0
+        vol_db += 20.0 * math.log10(max(1.0 + (v100 - 1.0) * vtrack, 0.05))
+        if vtrack > 0.0:
+            P["vca_vel"] = pot(127.0 * min(1.0, v100 * vtrack / (1.0 + (v100 - 1.0) * vtrack)))
+        else:
+            notes.append("velocity track is negative (louder when played softly): carried as the gain at velocity 100 only")
     P["volume"] = d2m.pot_volume(vol_db - ENGINE_PRE_MASTER_OFFSET_DB)
     # compressor: Vital's three bands (low, band, high), each with an upward ratio under a lower threshold, a downward ratio over an upper one and a gain; it sits before the master volume
     # (calibration/vital_comp_probe.py measured the static curves and a model of exactly that fits to 2 dB). The engine's multiband compressor is the same design with one shared ratio.

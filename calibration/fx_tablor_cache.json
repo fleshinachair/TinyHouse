@@ -9169,5 +9169,29 @@
     -14.6
    ]
   }
+ },
+ "[2.16, 5517, 0.1, 0.295, -6.0]": {
+  "params": {
+   "rev_mix": 21,
+   "rev_decay": 64,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    2.16,
+    2.16
+   ],
+   "reverb_centroid": [
+    5517,
+    4747
+   ],
+   "reverb_level_db": [
+    -6.0,
+    5.8
+   ],
+   "reverb_wet": 0.169
+  }
  }
 }

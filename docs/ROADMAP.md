@@ -1,6 +1,6 @@
 # Roadmap
 
-State on 2026-11-20 (0.9.9 is the release candidate, 0.9.8 the last release). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
+State on 2026-11-20 (0.9.10 is released, 0.9.9 the one before; 0.9.9 lost saved sounds in Schwung sets, fixed in 0.9.10). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
 put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of
@@ -21,7 +21,7 @@ Serum's 626, merged and gated), SynthHacker (48), OPS Hardstyle (14).
 | 0.9.6 | Done: tempo-following LFOs, Vital fixes (filter drive law, Filter FX drive, Bit Crush, fine-pitch routes, 64-point LFO shapes, oscillator start phase), `tablor_loadtest` dropped from `deploy.sh` |
 | 0.9.7 | Done, shipped inside 0.9.8: formant voice filter, Vital and Serum models (new filter types and params only, so old presets load unchanged) |
 | 0.9.8 | Done: the cheap Vital leads: attack power, live filter Blend routes and random modulators as live sources (it also carries the 0.9.7 formant filters); the Phaser "regression" is not the filter (see below); `lfo_N_stereo` is not cheap (left and right need separate oscillator renders). The importer lists every dropped preset and feature: the browser report now lists Vital's small details too |
-| 0.9.9 | Release candidate. Already in it: Vital voice-pitch routes, Key and Key-in-octave route sources, live comb blend transpose, an oscillator's Key Track switch (moved up from 1.1: they were the largest measured Vital gaps). Also done: Velocity and Aftertouch as live route sources, the CPU note in the README, a plainer Installing section, the import screenshot. 1.0 follows when nothing in the gates above is open |
+| 0.9.9 | Released (it has the saved-state bug, fixed in 0.9.10). In it: Vital voice-pitch routes, Key and Key-in-octave route sources, live comb blend transpose, an oscillator's Key Track switch (moved up from 1.1: they were the largest measured Vital gaps). Also done: Velocity and Aftertouch as live route sources, the CPU note in the README, a plainer Installing section, the import screenshot. 1.0 follows when nothing in the gates above is open |
 | 1.0 | Every gate above holds |
 
 After 1.0: the plan below, until every row of [UNLOCK_TABLES.md](UNLOCK_TABLES.md) is closed or marked not worth it.

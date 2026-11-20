@@ -1,8 +1,10 @@
 # Changelog
 
-## 0.9.10 (in progress)
+## 0.9.10
 
-Not released. Everything here comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.0 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
+**Important: 0.9.9 lost saved sounds. Update if you use Schwung sets.** Schwung drops any saved module state longer than 16,384 bytes, and 0.9.9's state had grown to about 21 KB (it listed every hidden setting). After a reboot or a set switch the slot loaded back as the default sound (the first Deep House preset), and the next save wrote that default over your set. The state now lists only the settings the host shows (about 7 KB for a default sound) and falls back to the compact form if it would ever pass 15.8 KB; the on-device test fails if the state goes over the limit again. Sounds already overwritten cannot be recovered: pick them again and save the set.
+
+Everything below comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.0 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
 
 **Vital's own filter models.** The Analog (Sallen-Key), Ladder, Dirty, Digital and Diode filters are ported from Vital's source for the voice filters and the Filter FX, 12 and 24 dB with the Blend knob, and the Analog model's notch / pass swap, dual notch / band and band / peak / notch styles. Measured against the plugin they agree to about 0.5 dB at any cutoff and resonance (the biquads were 2 to 4 dB off near the cutoff). The Filter FX also runs Vital's comb with its style, Blend and Blend Transpose.
 

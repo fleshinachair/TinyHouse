@@ -1986,6 +1986,7 @@ static std::string build_state_json(tablor_instance *inst, const std::string &bl
     json_str(o, blob);
     char num[48];
     for (int i = 0; i < TB_PARAM_COUNT; i++) {
+        if (!tb_param_visible[i]) continue;               /* the hidden ones are in the blob; listing them made the state 21 KB, past the 16384 bytes Schwung's slot loader accepts (it dropped the state and the slot came back as the default sound) */
         const ParamView t = param_view(inst, i, waiting, num);
         o += ",\"";
         o += tb_params[i].key;
@@ -2024,6 +2025,9 @@ static std::string build_state_json(tablor_instance *inst, const std::string &bl
         put(k, sp ? *sp : std::string());
     }
     o += '}';
+    /* Schwung drops a saved synth state whose compact JSON is longer than MAX_SYNTH_STATE_LEN (16384, silently: the slot loads as the default sound and the next save keeps it that way).
+     * If the full form would not fit, the blob alone restores the same sound. */
+    if (o.size() > 15800) { std::string small = "{\"tblr\":"; json_str(small, blob); small += '}'; return small; }
     return o;
 }
 

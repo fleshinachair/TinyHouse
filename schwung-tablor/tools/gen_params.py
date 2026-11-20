@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.9"
+VERSION = "0.9.10"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being
@@ -1295,6 +1295,10 @@ for p in PARAMS:
     else:
         rows.append(f'    {{ "{p["key"]}", TB_INT, {p["min"]}, {p["max"]}, {p["default"]}, 0, 0 }},')
 lines += ["static const tb_param_t tb_params[TB_PARAM_COUNT] = {"] + rows + ["};", ""]
+# Which parameters the host sees (chain_params). The state's JSON form lists only those: Schwung's slot loader drops a synth state longer than 16384 bytes
+# (MAX_SYNTH_STATE_LEN in chain_internal.h), and the hidden ones (about 900, set only by a preset's blob) made the JSON 21 KB, so a saved slot came back as the default sound.
+_vis = [0 if (q["key"] == "preset" or HIDDEN_FROM_CHAIN.match(q["key"]) or q["key"] in HIDDEN_BANK_KEYS) else 1 for q in PARAMS]
+lines += ["/* 1 for a parameter the host sees in chain_params; the state's JSON form lists only these. */", "static const unsigned char tb_param_visible[TB_PARAM_COUNT] = {" + ",".join(str(v) for v in _vis) + "};", ""]
 
 lines += [
     "/* chain_params: fully static, served verbatim. It MUST stay cheap —",

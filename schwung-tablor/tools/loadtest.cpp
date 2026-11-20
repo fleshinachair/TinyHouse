@@ -471,6 +471,9 @@ int main(int argc, char **argv)
      * (it read 434 keys one at a time on every preset change, which stalled the Move's own screen). A small buffer gets the plain blob. */
     CHECK(big[0] == '{' && big[n - 1] == '}' && strstr(big, ",\"vca_r\":77,") != nullptr && strstr(big, "\"flt_type\":\"") != nullptr && strstr(big, "\"macro_names\":\"") != nullptr && strstr(big, "\"wt1_select\":\"") != nullptr,
           "the state is a JSON object with every value (numbers bare, names quoted)");
+    /* Schwung's slot loader drops a saved synth state whose compact JSON is longer than MAX_SYNTH_STATE_LEN (16384 bytes in chain_internal.h) and the slot loads as the default sound:
+     * 0.9.9's state was 21 KB (every hidden parameter was listed) and lost every set. Leave room for a preset's own blob. */
+    CHECK(n > 0 && n < 12000, "the state fits Schwung's 16384-byte slot-state limit with room for a preset (%d bytes)", n);
     {
         char small[4096] = {};
         const int sn = api->get_param(inst, "state", small, sizeof small);

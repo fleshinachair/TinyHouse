@@ -128,6 +128,10 @@ def quality(state, it, band_floor=None):
     ren = [H.run_cli(state, it["notes"], C.DUR, C.HOLD) for _ in range(2)]
     gap = L.rms_db(ren, it["end"]) - L.rms_db(it["refs"], it["end"])
     eb, sb = np.mean([VS.bands(x) for x in ren], axis=0), np.mean([VS.bands(x) for x in as_played(it["refs"])], axis=0)
+    if os.environ.get("TH_BAND_DEBUG"):                  # per-band engine-minus-Serum error (re each render's loudest band, floored like the gate), to see where a dropped preset differs
+        e_, s_ = eb - eb.max(), sb - sb.max()
+        d_ = np.maximum(e_, -band_floor) - np.maximum(s_, -band_floor) if band_floor else e_ - s_
+        print(f"    BANDS {it['name']}: " + " ".join(f"{v:+.0f}" for v in d_), flush=True)
     return float(gap), floored_band_error(eb, sb, band_floor)
 
 

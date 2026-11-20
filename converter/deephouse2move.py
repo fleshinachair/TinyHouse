@@ -1955,9 +1955,12 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     f = ph["filter"]
     # Each source goes where Serum sends it: through the filter or direct to the amp (the engine's per-source Route).
     bypassed = f["enabled"] and through == 0 and around > 0
-    for fl, label in ((f, "filter"), (ph["filter2"], "filter 2")):
+    for fl, label, mk in ((f, "filter", "flt1_mix"), (ph["filter2"], "filter 2", "flt2_mix")):
         if fl["enabled"] and 1.0 <= fl.get("wet", 100.0) < 99.0:
-            appr.append(f"{label} Wet {fl['wet']:.0f} %: Serum mixes the unfiltered signal back in, the engine's voice filter is fully wet")
+            # Serum's voice filter Wet is a linear crossfade of the unfiltered and the filtered signal, (1 - w) dry + w filtered (calibration/dev/probe_vfilter_wet.py: the stop band
+            # of a low-pass sits at 0.74 / 0.50 / 0.24 of the dry level at Wet 25 / 50 / 75); the engine's hidden filter Mix (Vital's) is that mix.
+            P[mk] = int(round(127.0 * _clamp(fl["wet"], 0.0, 100.0) / 100.0))
+            note.append(f"{label} Wet {fl['wet']:.0f} %: the unfiltered signal mixed back in (the engine's filter Mix)")
     if bypassed:
         appr.append("every source bypasses the filter in Serum, so Tablor's is left open")
     for oid, slot in slot_of.items():

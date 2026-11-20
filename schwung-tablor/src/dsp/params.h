@@ -6,7 +6,7 @@
 
 #define TB_VERSION "0.9.9"
 #define TB_MODULE_ID "tinyhouse"
-#define TB_PARAM_COUNT 1359
+#define TB_PARAM_COUNT 1364
 
 typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;
 
@@ -1381,6 +1381,11 @@ enum {
     TB_P_FLT2_VSTY = 1356,
     TB_P_FXF_VSTY = 1357,
     TB_P_VCA_RPOW = 1358,
+    TB_P_FLT_RPOW = 1359,
+    TB_P_ME1_RPOW = 1360,
+    TB_P_ME2_RPOW = 1361,
+    TB_P_ME3_RPOW = 1362,
+    TB_P_ME4_RPOW = 1363,
 };
 
 static const char *const tb_opts_0[] = { "LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24", "Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB" };
@@ -2787,6 +2792,11 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "flt2_vsty", TB_INT, 0, 4, 0, 0, 0 },
     { "fxf_vsty", TB_INT, 0, 4, 0, 0, 0 },
     { "vca_rpow", TB_INT, 0, 127, 0, 0, 0 },
+    { "flt_rpow", TB_INT, 0, 127, 0, 0, 0 },
+    { "me1_rpow", TB_INT, 0, 127, 0, 0, 0 },
+    { "me2_rpow", TB_INT, 0, 127, 0, 0, 0 },
+    { "me3_rpow", TB_INT, 0, 127, 0, 0, 0 },
+    { "me4_rpow", TB_INT, 0, 127, 0, 0, 0 },
 };
 
 /* chain_params: fully static, served verbatim. It MUST stay cheap —

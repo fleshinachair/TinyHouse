@@ -803,6 +803,7 @@ private:
         filterADSR.setDecayPower(P[TB_P_FLT_DPOW] >= 0.5f ? (P[TB_P_FLT_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);      /* Vital's decay curve on the filter envelope (0 keeps the analog fall) */
         filterADSR.setSustainLevel(pot01(P[TB_P_FLT_S]));
         filterADSR.setRelease(potEnvTime(P[TB_P_FLT_R]));
+        filterADSR.setReleasePower(P[TB_P_FLT_RPOW] >= 0.5f ? (P[TB_P_FLT_RPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);
         filterADSR.setControlRate(P[TB_P_UNI_VITAL] >= 0.5f);
         if (blockSize > 0) { if (P[TB_P_UNI_VITAL] >= 0.5f) filterADSR.processControl(blockSize); else filterADSR.process(blockSize); }
 
@@ -822,11 +823,11 @@ private:
          * wavetable read as a struck instrument. */
         for (int i = 0; i < MD_COUNT; i++) modOff[i] = lfoLvl[i] = 0.0f;
         {
-            static const struct { int a, d, s, r, dst, amt, apow, delay, hold, dpow; } k[kModEnvs] = {
-                { TB_P_ME1_A, TB_P_ME1_D, TB_P_ME1_S, TB_P_ME1_R, TB_P_ME1_DST, TB_P_ME1_AMT, TB_P_ME1_APOW, TB_P_ME1_DELAY, TB_P_ME1_HOLD, TB_P_ME1_DPOW },
-                { TB_P_ME2_A, TB_P_ME2_D, TB_P_ME2_S, TB_P_ME2_R, TB_P_ME2_DST, TB_P_ME2_AMT, TB_P_ME2_APOW, TB_P_ME2_DELAY, TB_P_ME2_HOLD, TB_P_ME2_DPOW },
-                { TB_P_ME3_A, TB_P_ME3_D, TB_P_ME3_S, TB_P_ME3_R, TB_P_ME3_DST, TB_P_ME3_AMT, TB_P_ME3_APOW, TB_P_ME3_DELAY, TB_P_ME3_HOLD, TB_P_ME3_DPOW },
-                { TB_P_ME4_A, TB_P_ME4_D, TB_P_ME4_S, TB_P_ME4_R, TB_P_ME4_DST, TB_P_ME4_AMT, TB_P_ME4_APOW, TB_P_ME4_DELAY, TB_P_ME4_HOLD, TB_P_ME4_DPOW },
+            static const struct { int a, d, s, r, dst, amt, apow, delay, hold, dpow, rpow; } k[kModEnvs] = {
+                { TB_P_ME1_A, TB_P_ME1_D, TB_P_ME1_S, TB_P_ME1_R, TB_P_ME1_DST, TB_P_ME1_AMT, TB_P_ME1_APOW, TB_P_ME1_DELAY, TB_P_ME1_HOLD, TB_P_ME1_DPOW, TB_P_ME1_RPOW },
+                { TB_P_ME2_A, TB_P_ME2_D, TB_P_ME2_S, TB_P_ME2_R, TB_P_ME2_DST, TB_P_ME2_AMT, TB_P_ME2_APOW, TB_P_ME2_DELAY, TB_P_ME2_HOLD, TB_P_ME2_DPOW, TB_P_ME2_RPOW },
+                { TB_P_ME3_A, TB_P_ME3_D, TB_P_ME3_S, TB_P_ME3_R, TB_P_ME3_DST, TB_P_ME3_AMT, TB_P_ME3_APOW, TB_P_ME3_DELAY, TB_P_ME3_HOLD, TB_P_ME3_DPOW, TB_P_ME3_RPOW },
+                { TB_P_ME4_A, TB_P_ME4_D, TB_P_ME4_S, TB_P_ME4_R, TB_P_ME4_DST, TB_P_ME4_AMT, TB_P_ME4_APOW, TB_P_ME4_DELAY, TB_P_ME4_HOLD, TB_P_ME4_DPOW, TB_P_ME4_RPOW },
             };
             for (int i = 0; i < kModEnvs; i++) {
                 if (i >= 2 && (int) P[k[i].dst] == MD_NONE) continue;           /* the hidden envelopes cost nothing unless a preset points them somewhere */
@@ -838,6 +839,7 @@ private:
                 modEnv[i].setDecayPower(P[k[i].dpow] >= 0.5f ? (P[k[i].dpow] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);
                 modEnv[i].setSustainLevel(pot01(P[k[i].s]));
                 modEnv[i].setRelease(potEnvTime(P[k[i].r]));
+                modEnv[i].setReleasePower(P[k[i].rpow] >= 0.5f ? (P[k[i].rpow] - 64.0f) * (20.0f / 63.0f) : 0.0f, false);
                 modEnv[i].setControlRate(P[TB_P_UNI_VITAL] >= 0.5f);
                 if (blockSize > 0) { if (P[TB_P_UNI_VITAL] >= 0.5f) modEnv[i].processControl(blockSize); else modEnv[i].process(blockSize); }
                 const int dst = (int) P[k[i].dst];

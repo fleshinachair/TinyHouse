@@ -934,6 +934,9 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"me{n}_d"] = d2m.pot_time(dsec)
         P[f"me{n}_s"] = pot(127 * CLAMP(s[f"env_{k}_sustain"], 0, 1))
         P[f"me{n}_r"] = d2m.pot_time(t4(f"env_{k}_release"))
+        if ENV_DECAY_CURVE:
+            rq, rt = env_release_curve(s, k)
+            P[f"me{n}_rpow"], P[f"me{n}_r"] = rq, d2m.pot_time(rt)
         P[f"me{n}_delay"], P[f"me{n}_hold"] = env_stage_pot(s, k, "delay"), hp
     for w, k, dst, x, dn in me[MOD_ENVS:]:
         drop(f"envelope routes past the engine's {MOD_ENVS}")
@@ -1100,9 +1103,21 @@ def env_curve(s: dict, k: int) -> tuple[int, float | None]:
     """Vital envelope k's decay as the engine's exact curve: (the dpow pot, the stage's seconds), or (0, None) for a straight / absent power, which keeps the analog fall. Measured through the plugin with an
     envelope on an oscillator's level: the analog fit was 7 to 10 dB under Vital's own curve in the first 50 ms of a short decay."""
     p = float(s.get(f"env_{k}_decay_power", 0.0))
-    if not ENV_DECAY_CURVE or abs(p) < 0.05:
+    if not ENV_DECAY_CURVE:
         return 0, None
-    return max(1, pot(64 + CLAMP(p, -20.0, 20.0) * 63.0 / 20.0)), max(float(s[f"env_{k}_decay"]), 0.0) ** 4
+    q = pot(64 + CLAMP(p, -20.0, 20.0) * 63.0 / 20.0)
+    if q == 64:
+        q = 65 if p >= 0.0 else 63                                          # a straight Vital decay is a power a hair off 0 (the pot's centre is "off": the analog fall, which was 5 dB out)
+    return q, max(float(s[f"env_{k}_decay"]), 0.0) ** 4
+
+
+def env_release_curve(s: dict, k: int) -> tuple[int, float]:
+    """Vital envelope k's release as the engine's exact curve: (the rpow pot, the stage's seconds)."""
+    p = float(s.get(f"env_{k}_release_power", 0.0))
+    q = pot(64 + CLAMP(p, -20.0, 20.0) * 63.0 / 20.0)
+    if q == 64:
+        q = 65 if p >= 0.0 else 63
+    return q, max(float(s[f"env_{k}_release"]), 0.0) ** 4
 
 
 ATTACK_CURVE = True
@@ -1445,6 +1460,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             P["flt_d"] = d2m.pot_time(dsec2)
             P["flt_s"] = pot(127 * CLAMP(s["env_2_sustain"], 0, 1))
             P["flt_r"] = d2m.pot_time(t("env_2_release"))
+            if ENV_DECAY_CURVE:
+                rq, rt = env_release_curve(s, 2)
+                P["flt_rpow"], P["flt_r"] = rq, d2m.pot_time(rt)
             P["flt_delay"], P["flt_hold"] = env_stage_pot(s, 2, "delay"), hp2
     if s.get("filter_2_on") and s.get("filter_2_mix", 1.0) >= 0.02:
         carried.append("filter 2")

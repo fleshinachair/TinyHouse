@@ -2,7 +2,7 @@
 
 ## 0.9.10 (in progress)
 
-Not released. Everything here comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.2 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
+Not released. Everything here comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.0 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
 
 **Vital's own filter models.** The Analog (Sallen-Key), Ladder, Dirty, Digital and Diode filters are ported from Vital's source for the voice filters and the Filter FX, 12 and 24 dB with the Blend knob, and the Analog model's notch / pass swap, dual notch / band and band / peak / notch styles. Measured against the plugin they agree to about 0.5 dB at any cutoff and resonance (the biquads were 2 to 4 dB off near the cutoff). The Filter FX also runs Vital's comb with its style, Blend and Blend Transpose.
 
@@ -23,6 +23,8 @@ Not released. Everything here comes from comparing the engine with the Vital plu
 **A route's own curve on an LFO.** A Vital route can carry a drawn transfer curve (and a power) between its source and its destination. For a macro or velocity that was folded in; for an LFO it was ignored, so the LFO swept the wrong shape (Squish Clicker's filter sweep was a rising ramp in the engine and a hump in the plugin). The LFO now takes an engine slot of its own with its shape put through the route's curve (any LFO moves that way together: rate and phase routes reach all its copies). Squish Clicker 12.1 to 8.3 dB, Thumpus 12.0 to 11.1.
 
 **Vital wavetables are no longer dull at the top.** The engine reads a wavetable with a linear interpolation from mip levels stored at the smallest size that holds their harmonics, which costs the top octave: a plain saw was 1.8 dB down in the 8 to 16 kHz octave and 8 dB down at 21 kHz, and the bias showed on the 100-preset average (8 to 16 kHz -0.9 dB, 2 to 8 kHz -0.5 dB). Tables the Vital importer writes (vital_*.wav, installed ones too, no reimport needed) are now pre-emphasised to cancel it: the saw is within 0.2 dB up to 17 kHz. Serum tables are untouched.
+
+**A live morph or distortion amount.** An LFO or envelope on an oscillator's spectral morph or phase-distortion amount (58 oscillators in 42 of the 100 local presets) ran at its saved amount only. When the oscillator's frame is not moved, the table is now rebuilt with the amount along its frame axis and the route drives the position (A happy ending of the world 12.5 to 8.3 dB, Boot Scre3n -3.5, VLT Future Gun -2.1, Haven_Chords -2.0; Moving Harmonics, Sad_Peaky_House_Synth and Satellites are 2 to 3 dB worse). A macro or velocity route to the master Volume is added to the stored value, and an LFO route to a reverb, chorus, flanger, phaser or delay control sits at the LFO's average instead of being dropped; a tempo index of 0 is a frozen LFO (Thumpus 11.1 to 10.4). Mean error over the 100 presets for the whole release: 7.9 to 6.0 dB.
 
 **Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
 

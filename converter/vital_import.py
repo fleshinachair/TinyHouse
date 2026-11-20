@@ -407,6 +407,7 @@ FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("de
                "delay_feedback": ("delay_on", "dly_fb")}
 # The stored range (min, max) of the effect controls that a macro or velocity route can move (src/common/synth_parameters.cpp). Vital adds a route in the control's own stored units (a fraction of this range), so a macro at its saved value is a fixed offset that can be added to the control before the effect is mapped.
 FX_FOLD_RANGE = {
+    "volume": (0.0, 7399.44),                                       # the master Volume knob: a route adds amount x 7399.44 to the stored value (measured through the plugin: +5.11 dB for 0.1 at 4879, as the value law predicts)
     "filter_1_blend_transpose": (0.0, 84.0), "filter_2_blend_transpose": (0.0, 84.0),                # a comb filter's Blend Transpose: a route adds amount x 84 semitones
     "filter_fx_blend_transpose": (0.0, 84.0), "filter_fx_blend": (0.0, 2.0),                       # the Filter FX's: the same knobs
     "filter_1_blend": (0.0, 2.0), "filter_2_blend": (0.0, 2.0),                                    # the voice filters' Blend knob: a route adds amount x 2 x the source
@@ -481,7 +482,7 @@ def env_stage_pot(s: dict, k: int, stage: str) -> int:
 
 
 RANDOM_AS_MEAN = True
-AMOUNT_SWEEP = False                                                                        # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
+AMOUNT_SWEEP = True                                                                         # carry a live LFO / envelope route to an oscillator's distortion or morph amount by sweeping the amount along the table position (amount_sweep_table)
 FILTER_BLEND = True                                                                         # the voice filters' Blend knob as a continuous crossfade (engine flt_vb / flt_blend) instead of the nearest LP / BP / HP type
 FILTER_BLEND_MODELS = (0, 1, 2, 3)
 VITAL_FORMANT = True                                                                         # Vital's Formant voice filter (model 5, styles 0 and 1) as its own engine filter (formant.h) instead of a low-pass
@@ -1191,6 +1192,7 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
 
 
 LFO_META_MAX_HZ = 40.0                                                    # a free LFO's frequency route is carried only while its top rate stays below this (audio rate cannot be followed)
+LFO_MEAN_FX = True                                                        # an LFO route to an effect control (mix, depth, centre) is folded in at the LFO's mean
 LFO_META = True                                                          # an LFO / envelope route to another LFO's rate, tempo or phase is live (engine MD_LFOn_RATE / PHASE)
 VITAL_DIST_OS = True                                                    # Vital's distortion at 2x (dist_cal 3)
 VITAL_DELAY = True                                                      # Vital's delay as the engine's own port of it (dly_vital)
@@ -1247,6 +1249,12 @@ def fold_fx_routes(s: dict, routes: list) -> int:
                 tempo_shift[r[1]] = tempo_shift.get(r[1], 0.0) + add
             else:
                 s[r[1]] = CLAMP(float(s[r[1]]) + add, lo, hi)
+            routes.remove(r)
+            n += 1
+        elif LFO_MEAN_FX and r[1] in FX_FOLD_RANGE and r[1] in s and not r[1].endswith("_tempo") and r[1].startswith(("reverb_", "chorus_", "flanger_", "phaser_", "delay_", "volume")) and re.fullmatch(r"lfo_[1-8]", r[0]):
+            # an LFO on an effect control the engine does not move live: the control sits where the LFO leaves it on average (the saved value is the LFO at 0)
+            lo, hi = FX_FOLD_RANGE[r[1]]
+            s[r[1]] = CLAMP(float(s[r[1]]) + (hi - lo) * lfo_route_mean(s, [r], r[1]), lo, hi)
             routes.remove(r)
             n += 1
     # a tempo index (an indexed control) moved by routes, measured through the plugin (Space Station, mod wheel 0..1 into lfo_2_tempo): the stored index is taken to the nearest step and the

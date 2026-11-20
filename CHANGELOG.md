@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.10 (in progress)
+
+Not released. Everything here comes from comparing the engine with the Vital plugin preset by preset (100 local presets; the mean band error went from 7.9 to 6.9 dB, the median level error from -1.7 to -0.3 dB). Vital presets need importing again to get it.
+
+**Vital's own filter models.** The Analog (Sallen-Key), Ladder, Dirty, Digital and Diode filters are ported from Vital's source for the voice filters and the Filter FX, 12 and 24 dB with the Blend knob, and the Analog model's notch / pass swap, dual notch / band and band / peak / notch styles. Measured against the plugin they agree to about 0.5 dB at any cutoff and resonance (the biquads were 2 to 4 dB off near the cutoff). The Filter FX also runs Vital's comb with its style, Blend and Blend Transpose.
+
+**Wavetable levels.** A wavetable is normalised as Vital does it (the groups are averaged and the table scaled by its widest peak-to-peak span, so an asymmetric frame can pass 1), and an Audio File Source frame is normalised by its own peak when the component says so (Gorgled was 14 dB low, Feeder's error went from 23 to 17 dB).
+
+**Volume and Velocity Track.** The master Volume knob follows its real square-root scale (86 dB per unit of sqrt(v / 7399): presets at the ends of the knob were 1 to 5 dB off), and Velocity Track is carried (a positive track as the engine's amp velocity sensitivity, a negative one as its gain at velocity 100).
+
+**Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
+
+
 ## 0.9.9
 
 Every new parameter defaults to the old behaviour; saved presets load and sound the same, and a Vital preset gains the new behaviour when it is imported again.

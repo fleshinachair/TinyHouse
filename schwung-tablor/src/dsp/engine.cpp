@@ -1123,6 +1123,7 @@ void Engine::renderBlock(int16_t *out, int frames)
             const float hz = std::clamp(midiNoteToHz(note), 4.0f, 20000.0f);
             const float res = std::clamp(pots[TB_P_FXF_RES] / 127.0f, 0.0f, 1.0f);
             fx.setFilter(on, (int) pots[TB_P_FXF_TYPE], hz, kFilterQ / (1.0f - res * 0.99f), pots[TB_P_FXF_WET] / 127.0f + fxfWet, pots[TB_P_FXF_DRIVE] / 127.0f, res, pots[TB_P_FLT_VDL] >= 0.5f);
+            fx.setFilterModel((int) pots[TB_P_FXF_VSK], pots[TB_P_FXF_BLEND] * (2.0f / 127.0f), ((int) pots[TB_P_FXF_TYPE] & 1) != 0, (int) pots[TB_P_FXF_CSTYLE], pots[TB_P_FXF_CTRANS] * (84.0f / 127.0f));
             {                                           /* an envelope / LFO route to the Distortion's Wet: the newest voice's, like the Filter FX cutoff above */
                 float dm = 0.0f;
                 uint32_t newestD = 0;

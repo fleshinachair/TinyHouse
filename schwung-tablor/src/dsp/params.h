@@ -6,7 +6,7 @@
 
 #define TB_VERSION "0.9.9"
 #define TB_MODULE_ID "tinyhouse"
-#define TB_PARAM_COUNT 1351
+#define TB_PARAM_COUNT 1355
 
 typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;
 
@@ -1373,6 +1373,10 @@ enum {
     TB_P_EQ4_FFINE = 1348,
     TB_P_FLT_VSK = 1349,
     TB_P_FLT2_VSK = 1350,
+    TB_P_FXF_VSK = 1351,
+    TB_P_FXF_BLEND = 1352,
+    TB_P_FXF_CSTYLE = 1353,
+    TB_P_FXF_CTRANS = 1354,
 };
 
 static const char *const tb_opts_0[] = { "LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24", "Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB" };
@@ -1417,6 +1421,7 @@ static const char *const tb_opts_38[] = { "Off", "On", "Phaser", "Formant" };
 static const char *const tb_opts_39[] = { "Free", "Host" };
 static const char *const tb_opts_40[] = { "A I U O", "A O I E" };
 static const char *const tb_opts_41[] = { "Off", "Analog", "Ladder", "Dirty", "Digital", "Diode" };
+static const char *const tb_opts_42[] = { "Off", "Analog", "Ladder", "Dirty", "Digital", "Diode", "Comb" };
 
 static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "wt1_table", TB_PATH, 0, 0, 0, 0, 0 },
@@ -2770,6 +2775,10 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "eq4_ffine", TB_INT, 0, 127, 64, 0, 0 },
     { "flt_vsk", TB_ENUM, 0, 5, 0, 6, tb_opts_41 },
     { "flt2_vsk", TB_ENUM, 0, 5, 0, 6, tb_opts_41 },
+    { "fxf_vsk", TB_ENUM, 0, 6, 0, 7, tb_opts_42 },
+    { "fxf_blend", TB_INT, 0, 127, 0, 0, 0 },
+    { "fxf_cstyle", TB_INT, 0, 5, 0, 0, 0 },
+    { "fxf_ctrans", TB_INT, 0, 127, 0, 0, 0 },
 };
 
 /* chain_params: fully static, served verbatim. It MUST stay cheap —

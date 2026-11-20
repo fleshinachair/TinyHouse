@@ -20,6 +20,8 @@
 
 #include "param_map.h"
 #include "saturate.h"
+#include "vital_sk.h"
+#include "comb.h"
 #include "conv.h"
 #include "../ported/filter.h"
 
@@ -916,6 +918,35 @@ public:
      * type is the voice filter's list (LP/HP/BP/notch, 12 and 24 dB). */
     bool filterOn() const { return xfOn; }
 
+    /* The Filter FX in one of Vital's own models (1 Analog, 2 Ladder, 3 Dirty, 4 Digital, 5 Diode; 0 keeps the biquad): called after setFilter each block. */
+    void setFilterModel(int model, float blend, bool steep, int cstyle = 0, float ctrans = 0.0f)
+    {
+        xfVm = (xfOn && model >= 1 && model <= 6) ? model : 0;
+        xfCstyle = cstyle; xfCtrans = ctrans; xfBlend = blend;
+        if (!xfVm) return;
+        const float g = xfDriveT;
+        xfSk.on = xfLd.on = xfDt.on = xfDg.on = xfDo.on = false;
+        switch (xfVm) {
+        case 1: xfSk.setSampleRate(sr); xfSk.set(xfHz, xfRes, g, blend, steep); break;
+        case 2: xfLd.setSampleRate(sr); xfLd.set(xfHz, xfRes, g, blend, steep); break;
+        case 3: xfDt.setSampleRate(sr); xfDt.set(xfHz, xfRes, g, blend, steep); break;
+        case 4: xfDg.setSampleRate(sr); xfDg.set(xfHz, xfRes, g, blend, steep); break;
+        case 6: if (xfCombSr != sr) { xfComb.setSampleRate(sr); xfCombSr = sr; } break;
+        default: xfDo.setSampleRate(sr); xfDo.set(xfHz, xfRes, g, blend, steep); break;
+        }
+    }
+    void runFilterModel(float *L, float *R, int n)
+    {
+        switch (xfVm) {
+        case 1: xfSk.process(L, R, n); break;
+        case 2: xfLd.process(L, R, n); break;
+        case 3: xfDt.process(L, R, n); break;
+        case 4: xfDg.process(L, R, n); break;
+        case 6: xfComb.processVital(L, R, n, xfCstyle % 3, xfRes, xfHz, xfBlend, xfCtrans, xfCstyle >= 3); break;
+        default: xfDo.process(L, R, n); break;
+        }
+    }
+
     /* Routes from an LFO or envelope to the Vital distortion's Drive (a fraction of its 60 dB), and its filter's Cutoff (a fraction of the 128 notes), Res (of 0..1) and Blend (of 0..2).
      * m holds the four offsets the newest voice's routes sum to; the gain and the filter's coefficients are redone only when one moved. */
     void setVitalDistMod(const float *m)
@@ -972,6 +1003,7 @@ public:
     void setFilter(bool on, int type, float hz, float q, float wet = 1.0f, float drive01 = 0.0f, float res01 = 0.0f, bool vitalLaw = false)
     {
         xfWetKnob = std::min(std::max(wet, 0.0f), 1.0f);
+        xfHz = hz; xfRes = res01;
         xfDriveT = std::pow(10.0f, drive01 * 30.0f / 20.0f);
         /* Vital's filter saturates at every drive, 0 dB included, and its input gain 1 / (1 + 2 res) costs the passband about a ^ 0.8 (calibration probe: -5.2 dB at res 0.54, -2.1 at 0.2, -7.6 at 0.8) */
         xfDriveOn = vitalLaw || drive01 > 0.0f;
@@ -989,6 +1021,7 @@ public:
             xf.setParams(hz, q);
         } else if (xfOn) {
             xf.reset();
+            xfSk.reset(); xfLd.reset(); xfDt.reset(); xfDg.reset(); xfDo.reset(); xfComb.reset();
         }
         xfOn = on;
         anyActive = baseActive || xfOn;
@@ -1000,6 +1033,7 @@ public:
         const float tgt = xfWetKnob * xfWetKnob * (3.0f - 2.0f * xfWetKnob);
         if (tgt >= 0.9999f && xfS >= 0.9999f) {
             xfS = 1.0f;
+            if (xfVm) { runFilterModel(L, R, n); return; }
             if (xfDriveOn) { vitalFilterDriveIn(L, R, n, xfDriveG, xfDriveT, xfDriveA, xfPass); xfDriveG = xfDriveT; }
             xf.process(L, R, n);
             return;
@@ -1009,8 +1043,11 @@ public:
             const int m = std::min(128, n - o);
             std::copy(L + o, L + o + m, dL);
             std::copy(R + o, R + o + m, dR);
-            if (xfDriveOn) { const float g1 = xfDriveG + (xfDriveT - xfDriveG) * (float) m / (float) (n - o); vitalFilterDriveIn(L + o, R + o, m, xfDriveG, g1, xfDriveA, xfPass); xfDriveG = g1; }
-            xf.process(L + o, R + o, m);
+            if (xfVm) runFilterModel(L + o, R + o, m);
+            else {
+                if (xfDriveOn) { const float g1 = xfDriveG + (xfDriveT - xfDriveG) * (float) m / (float) (n - o); vitalFilterDriveIn(L + o, R + o, m, xfDriveG, g1, xfDriveA, xfPass); xfDriveG = g1; }
+                xf.process(L + o, R + o, m);
+            }
             for (int i = 0; i < m; i++) {
                 xfS += (tgt - xfS) * 0.002f;
                 const float d = 1.0f - xfS * xfS;
@@ -1765,6 +1802,11 @@ private:
     FxSettings st;
     bool anyActive = false, baseActive = false, xfOn = false;
     bool xfDriveOn = false;                                   /* the Filter FX's Vital drive */
+    int xfVm = 0;                                             /* the Filter FX in one of Vital's own models (setFilterModel) */
+    float xfHz = 1000.0f, xfRes = 0.0f, xfBlend = 0.0f, xfCtrans = 0.0f;
+    int xfCstyle = 0;
+    CombFilter xfComb; double xfCombSr = 0.0;
+    VitalSK xfSk; VitalLadder xfLd; VitalDirty xfDt; VitalDigital xfDg; VitalDiode xfDo;
     float xfDriveG = 1.0f, xfDriveT = 1.0f, xfDriveA = 1.0f, xfPass = 1.0f;  /* its gain as it was, as it is set to be, and its a = 1 / (1 + 2 resonance) */
     float xfWetKnob = 1.0f, xfS = 1.0f;                       /* the Filter FX Wet knob (0..1) and the smoothstep weight it has reached */
     Filter xf;

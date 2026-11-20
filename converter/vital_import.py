@@ -370,6 +370,7 @@ FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("de
 # The stored range (min, max) of the effect controls that a macro or velocity route can move (src/common/synth_parameters.cpp). Vital adds a route in the control's own stored units (a fraction of this range), so a macro at its saved value is a fixed offset that can be added to the control before the effect is mapped.
 FX_FOLD_RANGE = {
     "filter_1_blend_transpose": (0.0, 84.0), "filter_2_blend_transpose": (0.0, 84.0),                # a comb filter's Blend Transpose: a route adds amount x 84 semitones
+    "filter_fx_blend_transpose": (0.0, 84.0), "filter_fx_blend": (0.0, 2.0),                       # the Filter FX's: the same knobs
     "filter_1_blend": (0.0, 2.0), "filter_2_blend": (0.0, 2.0),                                    # the voice filters' Blend knob: a route adds amount x 2 x the source
     "reverb_pre_low_cutoff": (0.0, 128.0), "reverb_pre_high_cutoff": (0.0, 128.0), "reverb_low_shelf_cutoff": (0.0, 128.0), "reverb_low_shelf_gain": (-6.0, 0.0), "reverb_high_shelf_cutoff": (0.0, 128.0),
     "reverb_high_shelf_gain": (-6.0, 0.0), "reverb_delay": (0.0, 0.3), "reverb_decay_time": (-6.0, 6.0), "reverb_size": (0.0, 1.0), "reverb_chorus_amount": (0.0, 1.0), "reverb_chorus_frequency": (-8.0, 3.0),
@@ -1436,6 +1437,16 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["fxf_on"] = 1
         P["flt_vdl"] = 1                                                                        # the same saturating stage as the voice filters, at every drive
         P["fxf_type"], why = filter_type(mdl, sty, bl)
+        if VITAL_SK and mdl in (0, 1, 2, 3, 4) and sty in (0, 1):
+            P["fxf_type"], why = (1 if sty == 1 else 0), None                                 # Vital's own model (vital_sk.h), as the voice filters have it
+            P["fxf_vsk"] = (1, 3, 2, 4, 5)[mdl]
+            P["fxf_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
+        elif VITAL_SK and mdl == 6 and 0 <= sty <= 5:
+            P["fxf_type"], why = 0, None                                                      # Vital's comb (comb.h processVital), its style, Blend and Blend Transpose
+            P["fxf_vsk"] = 6
+            P["fxf_cstyle"] = sty
+            P["fxf_blend"] = int(round(127.0 * CLAMP(bl, 0.0, 2.0) / 2.0))
+            P["fxf_ctrans"] = int(round(CLAMP(127.0 * s.get("filter_fx_blend_transpose", 0.0) / 84.0, 0, 127)))
         if why:
             notes.append(f"filter FX: {why}")
         P["fxf_freq"] = pot(s["filter_fx_cutoff"] - 8.0)

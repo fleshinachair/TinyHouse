@@ -1114,8 +1114,28 @@ static void testVitalStackStyles()
     CHECK(std::fabs(tb::stackOffset(10, 3) - 33.6883f) < 1e-3f, "Odd harmonics: the 7th harmonic is 33.69 semitones up");
 }
 
+static void testVitalTableCompensation()
+{
+    printf("== Vital table pre-emphasis ==\n");
+    const int N = 2048;
+    std::vector<float> fr((size_t) N);
+    for (int i = 0; i < N; i++) { double v = 0; for (int k = 1; k <= 1023; k++) v += std::sin(2.0 * M_PI * k * i / N) / k; fr[(size_t) i] = (float) (v * 0.5); }
+    auto harm = [&](const tb::MipLevel &L, int k) {
+        double re = 0, im = 0;
+        for (int i = 0; i < L.size; i++) { re += L.data[(size_t) i] * std::cos(2.0 * M_PI * k * i / L.size); im += L.data[(size_t) i] * std::sin(2.0 * M_PI * k * i / L.size); }
+        return 2.0 * std::sqrt(re * re + im * im) / L.size;
+    };
+    tb::Wavetable plain, comp;
+    wtBuild(plain, fr.data(), 1, N, 44100.0f, 44100.0f, 6, nullptr, false);
+    wtBuild(comp, fr.data(), 1, N, 44100.0f, 44100.0f, 6, nullptr, true);
+    const auto &a = plain.frames[0].levels[7], &b = comp.frames[0].levels[7];
+    CHECK(a.size == b.size && harm(b, 160) > harm(a, 160) * 1.3 && std::fabs(harm(b, 5) / harm(a, 5) - 1.0) < 0.01,
+          "the pre-emphasis raises a table's top harmonics (x%.2f at 160) and leaves the low ones (x%.3f at 5)", harm(b, 160) / harm(a, 160), harm(b, 5) / harm(a, 5));
+}
+
 int main()
 {
+    testVitalTableCompensation();
     testFilter();
     testVitalStackStyles();
     testADSR();

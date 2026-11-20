@@ -22,6 +22,8 @@ Not released. Everything here comes from comparing the engine with the Vital plu
 
 **A route's own curve on an LFO.** A Vital route can carry a drawn transfer curve (and a power) between its source and its destination. For a macro or velocity that was folded in; for an LFO it was ignored, so the LFO swept the wrong shape (Squish Clicker's filter sweep was a rising ramp in the engine and a hump in the plugin). The LFO now takes an engine slot of its own with its shape put through the route's curve (any LFO moves that way together: rate and phase routes reach all its copies). Squish Clicker 12.1 to 8.3 dB, Thumpus 12.0 to 11.1.
 
+**Vital wavetables are no longer dull at the top.** The engine reads a wavetable with a linear interpolation from mip levels stored at the smallest size that holds their harmonics, which costs the top octave: a plain saw was 1.8 dB down in the 8 to 16 kHz octave and 8 dB down at 21 kHz, and the bias showed on the 100-preset average (8 to 16 kHz -0.9 dB, 2 to 8 kHz -0.5 dB). Tables the Vital importer writes (vital_*.wav, installed ones too, no reimport needed) are now pre-emphasised to cancel it: the saw is within 0.2 dB up to 17 kHz. Serum tables are untouched.
+
 **Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
 
 

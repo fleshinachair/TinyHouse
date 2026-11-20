@@ -179,7 +179,11 @@ def _audio_wave(comp: dict, kf: dict, audio: np.ndarray) -> np.ndarray:
     seg = audio[start:start + size]
     if len(seg) < size:
         seg = np.concatenate([seg, np.zeros(size - len(seg))])
-    return _resample(seg, FRAME)
+    w = _resample(seg, FRAME)
+    if comp.get("normalize_mult", True):                                  # FileSource::render: WaveFrame::normalize, each frame by its own peak (a gain above 1 only when normalize_gain is set)
+        peak = float(np.abs(w).max())
+        w = w / max(1e-7 if comp.get("normalize_gain", False) else 1.0, peak)
+    return w
 
 
 def render_group(group: dict, notes: list[str]) -> np.ndarray | None:

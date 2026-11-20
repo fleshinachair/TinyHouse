@@ -69,7 +69,7 @@ d = {"osc": {"kParamScanRange": 1.0, "kParamPan": 40.0, "kParamPitchTrack": 0.0,
 p, gaps, _ = D.granular_pots("smp", d, 0, 3, nofold)
 g = " | ".join(gaps)
 check("pitch track off -> fixed pitch", p.get("smp_fixed") == 1)
-check("flags Random Window Skew, warp, pan, gain", all(s in g for s in ("WindowSkew", "warp", "pan", "gain")), g)
+check("flags Random Window Skew, warp, gain (pan is carried)", all(s in g for s in ("WindowSkew", "warp", "gain")) and "pan" not in g, g)
 check("... and no longer scan range, tempo scan, BPM length, unison", not any(s in g for s in ("scan range", "tempo", "grain length", "unison")), g)
 check("ScanRange 1, Divide + BPM rate 2, BPM length carried", p.get("smp_gscx") == 1 and p.get("smp_gscm") == 2 and p.get("smp_gsbr") == 2 and p.get("smp_glenm") == 1 and p.get("smp_gscan") == 100.0, str(p))
 d = {"osc": {"kParamScanTempoLock": 1.0, "kParamBaseTempo": 138.0, "kParamScanRate": -76.9}, "gran": {"kParamDensityMode": "kDensityBPM"}, "node": {}}

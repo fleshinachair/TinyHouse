@@ -1,6 +1,6 @@
 # Roadmap
 
-State on 2026-11-20 (0.9.10 is released, 0.9.9 the one before; 0.9.9 lost saved sounds in Schwung sets, fixed in 0.9.10). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
+State on 2026-11-20 (0.9.11 is released, 0.9.10 the one before; 0.9.9 before that; 0.9.9 lost saved sounds in Schwung sets, fixed in 0.9.10). The measured Serum facts behind each item are in [TRANSLATION_RULES.md](TRANSLATION_RULES.md); how to work on one is in [DEVELOPMENT.md](DEVELOPMENT.md): find the rule with a Serum probe,
 put it in the converter or engine, check with the audits, then judge by many presets, not one.
 
 The project began as "make one third-party pack (Loopsy Deep House) play faithfully" and is now a general Serum 2 importer; most users will not have that pack, so the general test is Serum's own Factory presets. Installed on the development Move: Deep House (70), Factory (363 of

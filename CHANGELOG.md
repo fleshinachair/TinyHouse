@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.11
+
+Serum 2 import: 69 more of Serum's own Factory presets now convert and pass the importer's gate (384 to 453 installed on the development Move, of 626), and 33 already installed ones were redone with the fixes below. Every new parameter defaults to the old behaviour, so saved presets load and sound the same. Serum presets need importing again to get the fixes.
+
+**Comb, flange and phase filters.** Serum's CombP/N, FlangeP/N and Phase12 to 48 P Filter FX models, and the L6 / H6 / HL6 comb and flange voice filters, are in the engine, measured against Serum (0.1 to 0.9 dB per harmonic). A comb's tuning no longer runs off the end of its knob.
+
+**Voice filter Wet is a real dry / wet mix.** Serum's Wet on a voice filter mixes the dry and filtered signal linearly; presets with Wet under 100 % were too dark.
+
+**Sample slots take Octave, Pitch and Fine routes** (BA - Fonk went from 15.1 to 5.9 dB of band error), and a Diffuser Filter FX is skipped (it is flat in level in Serum).
+
+**Spectral oscillators.** A Spectral oscillator imports when it hardly scans (Scan Rate at the default or at most 5 %, or the oscillator is silent): the engine plays the sample it holds, without Serum's scan or spectral filter. The 29 factory presets that scan stay blocked until a spectral resynthesis stage exists.
+
+**A voice filter model the engine does not have** (Reverb1, DistComb, Phase48 and others) can fall back to the nearest filter when the importer is run with `TH_FILTER_FALLBACK=1`; the Serum gate judges the result. 12 factory presets passed (band error 2.3 to 13.6 dB rms). The importer's effects check also accepts a bus Filter FX or Utils that is inaudible in Serum, and a level difference up to 4 dB.
+
+Known gaps: the remote page still imports at the converter's own volume (no common play level), and a few of the new presets approximate their filter or leave the spectral scan out; the roadmap lists what each needs.
+
 ## 0.9.10
 
 **Important: 0.9.9 lost saved sounds. Update if you use Schwung sets.** Schwung drops any saved module state longer than 16,384 bytes, and 0.9.9's state had grown to about 21 KB (it listed every hidden setting). After a reboot or a set switch the slot loaded back as the default sound (the first Deep House preset), and the next save wrote that default over your set. The state now lists only the settings the host shows (about 7 KB for a default sound) and falls back to the compact form if it would ever pass 15.8 KB; the on-device test fails if the state goes over the limit again. Sounds already overwritten cannot be recovered: pick them again and save the set.

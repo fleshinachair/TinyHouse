@@ -579,6 +579,17 @@ def dest_spec(name: str, s: dict, P: dict, main_filter: int) -> dict | None:
     """What a Vital destination is in the engine: `lr` the modulation destination, `x` its route amount per unit of Vital's amount (Vital's amount is a
     fraction of the control's whole range), `key` the pot a macro or a static route moves and `pot` how far per unit of amount, `lo`/`hi` its range."""
     import re
+    me_ = re.fullmatch(r"eq_(low|band|high)_(cutoff|gain)", name)
+    if me_ and s.get("eq_on"):
+        # an LFO / envelope route into an EQ band: the engine's EQ mod destinations (MD_EQn_FREQ / GAIN, the engine's n-th active band). Its Freq route is a fraction of a 928.8:1 log span (ln 928.8 = 6.834) and its Gain
+        # a fraction of 48 dB; Vital's cutoff route is amount x 128 notes (ln 2 / 12 per note) and its gain amount x 30 dB
+        order = [t for t in ("low", "band", "high") if s.get(f"eq_{t}_mode", 0.0) >= 0.5 or abs(s.get(f"eq_{t}_gain", 0.0)) > 0.1]
+        if me_.group(1) in order:
+            n = order.index(me_.group(1)) + 1
+            if me_.group(2) == "cutoff":
+                return {"lr": 49 + 2 * (n - 1), "x": 128.0 * math.log(2.0) / 12.0 / 6.8342, "key": None, "pot": 0.0, "lo": 0, "hi": 0}
+            return {"lr": 50 + 2 * (n - 1), "x": 30.0 / 48.0, "key": None, "pot": 0.0, "lo": 0, "hi": 0}
+        return None
     m = re.fullmatch(r"osc_([123])_distortion_amount", name)
     if m and s.get(f"osc_{m.group(1)}_on") and int(s.get(f"osc_{m.group(1)}_distortion_type", 0)) in (7, 8, 10, 11):
         n = int(m.group(1))                                                       # FM / RM by another oscillator: the amount is the engine's warp amount (0..1 over the xa pot's 0..1000)

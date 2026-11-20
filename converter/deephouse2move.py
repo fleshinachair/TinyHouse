@@ -2062,10 +2062,17 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             idx, exact = int(fm["type"]), False
             if fm.get("poor"):
                 appr.append(f"{label} {fl['model']}: the nearest engine filter is still {fm['rms_db']:.1f} dB off")
+        fallback_ok = bool(os.environ.get("TH_FILTER_FALLBACK"))                    # opt-in: let the importer's Serum gate judge a nearest-filter fallback (a note, not a blocker)
+        if idx is None and prefix == "flt2" and fallback_ok:
+            appr.append(f"{label} model {fl['model']} unsupported; left open (the gate judges it)")
+            return
         if idx is None and prefix == "flt2":
             crit.append(f"{label} model {fl['model']} unsupported; left open")       # half a source through a low-pass that is not that filter is worse than none
             return
-        if idx is None:
+        if idx is None and fallback_ok:
+            appr.append(f"{label} model {fl['model']} unsupported; LP24 used (the gate judges it)")
+            idx = 1
+        elif idx is None:
             crit.append(f"{label} model {fl['model']} unsupported; LP24 used")
             idx = 1
         elif not exact and fkey not in FILTER_MODELS:

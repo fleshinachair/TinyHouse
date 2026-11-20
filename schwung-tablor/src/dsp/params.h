@@ -6,7 +6,7 @@
 
 #define TB_VERSION "0.9.9"
 #define TB_MODULE_ID "tinyhouse"
-#define TB_PARAM_COUNT 1364
+#define TB_PARAM_COUNT 1367
 
 typedef enum { TB_INT = 0, TB_ENUM = 1, TB_PATH = 2 } tb_param_type_t;
 
@@ -1386,6 +1386,9 @@ enum {
     TB_P_ME2_RPOW = 1361,
     TB_P_ME3_RPOW = 1362,
     TB_P_ME4_RPOW = 1363,
+    TB_P_DLY_VITAL = 1364,
+    TB_P_DLY_VSTYLE = 1365,
+    TB_P_DLY_VMIX = 1366,
 };
 
 static const char *const tb_opts_0[] = { "LP 12", "LP 24", "HP 12", "HP 24", "BP 12", "BP 24", "Notch 12", "Notch 24", "Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB" };
@@ -2797,6 +2800,9 @@ static const tb_param_t tb_params[TB_PARAM_COUNT] = {
     { "me2_rpow", TB_INT, 0, 127, 0, 0, 0 },
     { "me3_rpow", TB_INT, 0, 127, 0, 0, 0 },
     { "me4_rpow", TB_INT, 0, 127, 0, 0, 0 },
+    { "dly_vital", TB_ENUM, 0, 1, 0, 2, tb_opts_6 },
+    { "dly_vstyle", TB_INT, 0, 3, 0, 0, 0 },
+    { "dly_vmix", TB_INT, 0, 127, 0, 0, 0 },
 };
 
 /* chain_params: fully static, served verbatim. It MUST stay cheap —

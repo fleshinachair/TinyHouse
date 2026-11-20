@@ -890,6 +890,9 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.delayLoHz = potEqFreq(pots[TB_P_DLY_LO]);
     s.delayHiHz = potEqFreq(pots[TB_P_DLY_HI]);
     s.delayPing = (int) pots[TB_P_DLY_MODE] == 1;
+    s.delayVital = delayOn && pots[TB_P_DLY_VITAL] >= 0.5f;
+    s.delayStyle = (int) pots[TB_P_DLY_VSTYLE];
+    s.delayVMix = s.delayVital ? pot01(pots[TB_P_DLY_VMIX]) : 0.0f;
     s.delay2Mix = delayOn ? std::min(pot01(pots[TB_P_DLY2_MIX]) * space, 1.0f) : 0.0f;
     s.delay2Ms = std::pow(1500.0f, pot01(pots[TB_P_DLY2_TIME])) * tempoScale;
     s.delay2RMs = std::pow(1500.0f, pot01(pots[TB_P_DLY2_TIMER])) * tempoScale;

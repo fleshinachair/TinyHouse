@@ -370,7 +370,7 @@ def filter_type(model: int, style: int, blend: float) -> tuple[int, str | None]:
 # ---------------------------------------------------------------------------
 LR_DST = {"wt1_pos": 1, "wt2_pos": 2, "wt3_pos": 18, "wt1_level": 3, "wt2_level": 4, "wt3_level": 19, "wt1_pan": 11, "wt2_pan": 12,
           "wt1_pitch": 43, "wt2_pitch": 44, "wt3_pitch": 45, "wt1_fine": 61, "wt2_fine": 62, "wt3_fine": 63, "cutoff": 13, "res": 14}          # the engine's lr_dst / me_dst list (tb_opts_3)
-FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("delay_on", "dly_mix"), "chorus_dry_wet": ("chorus_on", "chor_mix"),
+FX_MIX_KEYS = {"reverb_dry_wet": ("reverb_on", "rev_mix"), "delay_dry_wet": ("delay_on", "dly_vmix"), "chorus_dry_wet": ("chorus_on", "chor_mix"),
                "flanger_dry_wet": ("flanger_on", "flan_mix"), "phaser_dry_wet": ("phaser_on", "phas_mix"), "distortion_mix": ("distortion_on", "dist_mix"),
                "delay_feedback": ("delay_on", "dly_fb")}
 # The stored range (min, max) of the effect controls that a macro or velocity route can move (src/common/synth_parameters.cpp). Vital adds a route in the control's own stored units (a fraction of this range), so a macro at its saved value is a fixed offset that can be added to the control before the effect is mapped.
@@ -1095,6 +1095,7 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
     return sec
 
 
+VITAL_DELAY = True                                                      # Vital's delay as the engine's own port of it (dly_vital)
 VITAL_SK = True                                                         # Vital's Analog filter (Sallen-Key) as the engine's flt_vsk
 ENV_DECAY_CURVE = True                                                  # the filter and spare envelopes draw Vital's own decay curve (engine flt_dpow / meN_dpow) instead of fitting the analog fall to it
 
@@ -1546,12 +1547,13 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     P["dly_on"] = 1 if s.get("delay_on") else 0
     if s.get("delay_on"):
         sync = int(s.get("delay_sync", 0))
-        def ms(freq_key, tempo_key):
-            if sync:
-                return 1000.0 * 2.0 ** (7 - round(s[tempo_key])) * {1: 1.0, 2: 1.5, 3: 2.0 / 3.0}.get(sync, 1.0)
+        def ms(freq_key, tempo_key, sync_key="delay_sync"):
+            sy = int(s.get(sync_key, sync)) if sync_key != "delay_sync" else sync              # the aux (right) time has its own sync switch
+            if sy:
+                return 1000.0 * 2.0 ** (7 - round(s[tempo_key])) * {1: 1.0, 2: 1.5, 3: 2.0 / 3.0}.get(sy, 1.0)
             return 1000.0 / (2.0 ** s[freq_key])
         left_ms = ms("delay_frequency", "delay_tempo")
-        right_ms = ms("delay_aux_frequency", "delay_aux_tempo") if s.get("delay_style", 0) > 0 else left_ms
+        right_ms = ms("delay_aux_frequency", "delay_aux_tempo", "delay_aux_sync") if s.get("delay_style", 0) > 0 else left_ms
         if max(left_ms, right_ms) > 1500.0:
             notes.append(f"delay time {max(left_ms, right_ms) / 1000:.1f} s is past the engine's 1.5 s: shortened")
         P["dly_mix"] = wet_pot("delay", s["delay_dry_wet"])
@@ -1560,6 +1562,10 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["dly_timer"] = pot_log(right_ms, 1.0, 1500.0)
         P["dly_fb"] = pot(127 * CLAMP(s["delay_feedback"], 0, 0.97))
         P["dly_mode"] = 1 if s.get("delay_style", 0) >= 2 else 0
+        if VITAL_DELAY:                                                                       # Vital's own delay (fx.h processDelayVital): its styles, periods and equal-power dry / wet exactly
+            P["dly_vital"] = 1
+            P["dly_vstyle"] = int(CLAMP(s.get("delay_style", 0), 0, 3))
+            P["dly_vmix"] = pot(127.0 * CLAMP(s["delay_dry_wet"], 0.0, 1.0))
         # Vital's delay filter (effects/delay.cpp) is a band-pass on everything written into the line: a one-pole low-pass at note (cutoff + 96 spread) and a one-pole high-pass at note (cutoff - 96 spread), with the gain
         # 1 + f_low / f_high that the engine's delay filter has too, so the engine's Lo / Hi corners are those two notes
         rad = 96.0 * CLAMP(float(s.get("delay_filter_spread", 1.0)), 0.0, 1.0)

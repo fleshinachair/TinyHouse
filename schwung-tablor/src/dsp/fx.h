@@ -217,6 +217,9 @@ struct FxSettings {
     float wideMix = 0, wideRate = 0.5f, wideDepth = 0.5f;
     float delayMix = 0, delayMs = 250, delayRMs = 250, delayFb = 0.4f, delayLoHz = 20, delayHiHz = 16000;
     int   delayPing = 0;
+    bool  delayVital = false;                                     /* Vital's own delay (processDelayVital): the style and the equal-power dry / wet knob */
+    int   delayStyle = 0;
+    float delayVMix = 0;
     float delay2Mix = 0, delay2Ms = 250, delay2RMs = 250, delay2Fb = 0.4f, delay2LoHz = 20, delay2HiHz = 16000;   /* a second delay after the first (Serum racks with two) */
     int   delay2Ping = 0;
     float revMix = 0, revT60 = 2.0f, revDampHz = 8000, revLoHz = 20, revWidth = 1.0f;
@@ -1090,6 +1093,11 @@ public:
                 const DelayPrm q[2] = { { st.delayMix, st.delayMs, st.delayRMs, st.delayFb, st.delayLoHz, st.delayHiHz, st.delayPing },
                                         { st.delay2Mix, st.delay2Ms, st.delay2RMs, st.delay2Fb, st.delay2LoHz, st.delay2HiHz, st.delay2Ping } };
                 for (int j = 0; j < 2; j++) {
+                    if (j == 0 && st.delayVital) {
+                        if (st.delayVMix > 0.0f || vdly.wet > 0.0f) { processDelayVital(L, R, n); vdly.ran = true; }
+                        else if (vdly.ran) { vdly.clear(); vdly.ran = false; }
+                        continue;
+                    }
                     if (q[j].mix > 0.0f || dly[j].wetCur > 0.0f) { processDelay(dly[j], q[j], L, R, n); dly[j].ran = true; }
                     else if (dly[j].ran) { clearDelay(dly[j]); dly[j].ran = false; }
                 }
@@ -1583,6 +1591,86 @@ private:
             u.pos = (u.pos + 1) & mask;
         }
         u.wetCur = tgtWet; u.dryCur = tgtDry;
+    }
+
+    /* Vital's delay (effects/delay.cpp), ported: a stereo line with a period for each side (the left and right Frequency knobs, or the Aux one on the right for the stereo and ping-pong styles), the write
+     * saturated and band-passed by a pair of one-poles (gain 1 + high / low corner), an equal-power dry / wet, and the periods and frequency gliding with a 20 ms half-life. Styles: 0 mono, 1 stereo, 2 ping
+     * pong (the mono sum goes into the left line, the sides swap on every write and the right feedback is 1), 3 mid ping pong (the same without the mono sum, the left period the sum of both). */
+    struct VitalDelayState {
+        static constexpr int kMax = 1 << 18;
+        std::vector<float> buf[2];
+        int pos = 0;
+        float freq[2] = { 0, 0 }, period[2] = { 0, 0 }, wet = 0, dry = 1, fb[2] = { 0, 0 }, gain = 1, lc = 0.1f, hc = 0.1f;
+        float lpS[2] = { 0, 0 }, hpS[2] = { 0, 0 };
+        bool ran = false, init = false;
+        void clear() { for (auto &b : buf) std::fill(b.begin(), b.end(), 0.0f); pos = 0; lpS[0] = lpS[1] = hpS[0] = hpS[1] = 0.0f; init = false; wet = 0.0f; }
+    } vdly;
+    static float vdCoef(float hz, float sr) { const float x = std::min(std::max(hz, 1.0f), sr * 0.4535f) * 3.14159265f / sr; return std::tan(x / (x + 1.0f)); }
+    void processDelayVital(float *L, float *R, int n)
+    {
+        auto &u = vdly;
+        if (u.buf[0].empty()) { u.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); u.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }
+        const int style = std::min(std::max(st.delayStyle, 0), 3);
+        float tgtF[2] = { 1000.0f / std::max(st.delayMs, 1.0f), 1000.0f / std::max(st.delayMs, 1.0f) };
+        if (style >= 1) tgtF[1] = 1000.0f / std::max(st.delayRMs, 1.0f);
+        if (!u.init) { for (int c = 0; c < 2; c++) u.freq[c] = tgtF[c]; }
+        const float decay = std::pow(0.5f, (float) n / (0.02f * sr));
+        for (int c = 0; c < 2; c++) u.freq[c] = tgtF[c] + (u.freq[c] - tgtF[c]) * decay;
+        float tgtP[2] = { sr / u.freq[0], sr / u.freq[1] };
+        if (style == 3) tgtP[0] += tgtP[1];
+        const float maxP = (float) (VitalDelayState::kMax - 8);
+        for (int c = 0; c < 2; c++) tgtP[c] = std::min(std::max(tgtP[c], 3.0f), maxP);
+        if (!u.init) { for (int c = 0; c < 2; c++) u.period[c] = tgtP[c]; u.init = true; }
+        const float wetT = std::sin(1.5707963f * st.delayVMix), dryT = std::cos(1.5707963f * st.delayVMix);
+        const float fbT[2] = { std::min(std::max(st.delayFb, -1.0f), 1.0f), style == 2 ? 1.0f : std::min(std::max(st.delayFb, -1.0f), 1.0f) };
+        if (!u.ran) { u.wet = wetT; u.dry = dryT; u.fb[0] = fbT[0]; u.fb[1] = fbT[1]; }
+        const float lowHz = std::max(st.delayHiHz, 1.0f), highHz = std::max(st.delayLoHz, 1.0f);       /* the engine's Hi corner is Vital's low-pass, its Lo the high-pass */
+        const float gainT = highHz / lowHz + 1.0f, lcT = vdCoef(lowHz, sr), hcT = vdCoef(highHz, sr);
+        const float inv = 1.0f / (float) n;
+        float curP[2] = { u.period[0], u.period[1] }, dP[2], wet = u.wet, dry = u.dry, fb[2] = { u.fb[0], u.fb[1] }, gain = u.gain, lc = u.lc, hc = u.hc;
+        for (int c = 0; c < 2; c++) {
+            const float newP = u.period[c] + (tgtP[c] - u.period[c]) * 0.5f;
+            dP[c] = (newP - u.period[c]) * inv;
+            u.period[c] = newP;
+        }
+        const float dW = (wetT - u.wet) * inv, dD = (dryT - u.dry) * inv, dF0 = (fbT[0] - u.fb[0]) * inv, dF1 = (fbT[1] - u.fb[1]) * inv, dG = (gainT - u.gain) * inv, dL = (lcT - u.lc) * inv, dH = (hcT - u.hc) * inv;
+        const int mask = VitalDelayState::kMax - 1;
+        auto sat8 = [](float v) { return std::min(std::max(v * 0.125f, -1.0f), 1.0f) * 8.0f; };
+        for (int i = 0; i < n; i++) {
+            wet += dW; dry += dD; fb[0] += dF0; fb[1] += dF1; gain += dG; lc += dL; hc += dH;
+            const float in[2] = { L[i], R[i] };
+            float rd[2];
+            for (int c = 0; c < 2; c++) {
+                const float rp = (float) u.pos - curP[c] + (float) VitalDelayState::kMax;
+                const int i0 = (int) rp;
+                const float fr = rp - (float) i0;
+                const float a = u.buf[c][(size_t) (i0 & mask)], b = u.buf[c][(size_t) ((i0 + 1) & mask)];
+                rd[c] = a + (b - a) * fr;
+            }
+            float w[2];
+            if (style == 2) {
+                const float mono = (in[0] + in[1]) * 0.70710678f;
+                const float t0 = sat8(mono + rd[0] * fb[0]), t1 = sat8(0.0f + rd[1] * fb[1]);
+                w[0] = t1; w[1] = t0;                                                          /* the sides swap */
+            } else if (style == 3) {
+                const float t0 = sat8(in[0] + rd[0] * fb[0]), t1 = sat8(in[1] + rd[1] * fb[1]);
+                w[0] = t1; w[1] = t0;
+            } else {
+                w[0] = sat8(in[0] + rd[0] * fb[0]); w[1] = sat8(in[1] + rd[1] * fb[1]);
+            }
+            for (int c = 0; c < 2; c++) {
+                const float x = w[c] * gain;
+                float d = lc * (x - u.lpS[c]); u.lpS[c] += d; const float lp = u.lpS[c]; u.lpS[c] += d;
+                d = hc * (lp - u.hpS[c]); u.hpS[c] += d; const float hp = u.hpS[c]; u.hpS[c] += d;
+                u.buf[c][(size_t) u.pos] = sanitize(lp - hp);
+                curP[c] += dP[c];
+            }
+            L[i] = dry * in[0] + wet * rd[0];
+            R[i] = dry * in[1] + wet * rd[1];
+            u.pos = (u.pos + 1) & mask;
+        }
+        u.wet = wetT; u.dry = dryT; u.fb[0] = fbT[0]; u.fb[1] = fbT[1]; u.gain = gainT; u.lc = lcT; u.hc = hcT;
+        for (int c = 0; c < 2; c++) { u.lpS[c] = sanitize(u.lpS[c]); u.hpS[c] = sanitize(u.hpS[c]); }
     }
 
     /* Eight-line feedback delay network behind four series allpass diffusers. Decay time is

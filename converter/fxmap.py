@@ -529,6 +529,9 @@ def node_mods(mods: list[dict], i: int, rack: int = 0) -> list[dict]:
 # for comb / flange at every Freq / Reso probed, phasers the same up to Reso 0 and 3-5 dB at Reso 80). fxf_vsk is 7 + the position in this list.
 FX_COMB_MODELS = ("CombP", "CombN", "FlangeP", "FlangeN", "Phase12P", "Phase24P", "Phase36P", "Phase48P")
 # (Drive on these models is a plain gain: calibration/dev/probe_fxfilter_comb_drive.py)
+# Filter FX models that leave the mid spectrum alone: Diffuser is flat to 0.2 dB (sd 0.5) at every Freq / Reso probed and leaves no tail after the note off (calibration/dev/probe_fxfilter_misc.py,
+# probe_fxfilter_tail.py). It is skipped, as the voice filter's Diffuser is; what it changes is phase and stereo spread, which the importer's gate does not see.
+FX_FLAT_MODELS = ("Diffuser",)
 
 
 def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) -> dict | None:
@@ -541,7 +544,7 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) ->
     if not folded:
         nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), macros)
     inside = branch_nodes(nodes)
-    fx = [i for i, n in enumerate(nodes) if kind_of(n) == "Filter" and enabled(n) and i not in inside]
+    fx = [i for i, n in enumerate(nodes) if kind_of(n) == "Filter" and enabled(n) and i not in inside and str(plain(n).get("kParamType", "default")) not in FX_FLAT_MODELS]
     if not fx or not FILTER_FX_ENABLED:
         return None
     rack = (ctx or {}).get("rack", 0)
@@ -665,6 +668,9 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             continue
         if spec is not None and spec["index"] == i:
             continue                                    # moved by an envelope: the engine's second filter carries it (dynamic_filter)
+        if str(pp.get("kParamType", "default")) in FX_FLAT_MODELS:
+            handled.add(i)
+            continue                                    # flat in level (Diffuser): the signal goes past it
         dynamic = any(not foldable_source(m, macros) for m in node_mods(fmods, i, (ctx or {}).get("rack", 0)))
         # An unwritten type is Serum's default, measured with test patches (calibration/dev/probe_filterfx.py): a 6 dB/octave
         # low-pass with its -3 dB point at the stated cutoff.

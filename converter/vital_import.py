@@ -1301,6 +1301,14 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
             continue
         table = render_table(s["wavetables"][o - 1], notes)
         smt = int(s.get(f"osc_{o}_spectral_morph_type", 0))
+        if smt == 1:                                                                          # Vocode reads the frame at the note's absolute frequency: note over the table's own fundamental, at the note the preset plays at middle C
+            src = next((c for g in s["wavetables"][o - 1].get("groups", []) for c in g.get("components", []) if c.get("type") in ("Wave Source", "Line Source", "Audio File Source")), None)
+            if src is not None and src.get("type") == "Audio File Source":
+                f_frame = float(src.get("audio_sample_rate", 44100)) / max(float(src.get("window_size", 2048.0)), 1.0)
+            else:
+                f_frame = 44100.0 / 2048.0                                                             # a Wave Source table plays as if it were sampled at 44.1 kHz (fitted to the plugin)
+            note0 = (60.0 if s.get(f"osc_{o}_midi_track", 1.0) >= 0.5 else 48.0) + float(s.get(f"osc_{o}_transpose", 0.0)) + float(s.get(f"osc_{o}_tune", 0.0)) + voice_shift
+            VM.VOCODE_RATIO = 440.0 * 2.0 ** ((note0 - 69.0) / 12.0) / f_frame
         sma = float(s.get(f"osc_{o}_spectral_morph_amount", 0.0)) + static_route_offset(s, routes, f"osc_{o}_spectral_morph_amount")
         pdt = int(s.get(f"osc_{o}_distortion_type", 0))
         pda = CLAMP(float(s.get(f"osc_{o}_distortion_amount", 0.5)) + static_route_offset(s, routes, f"osc_{o}_distortion_amount"), 0.0, 1.0)

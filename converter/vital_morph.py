@@ -15,13 +15,15 @@ A frame is a set of harmonics (0 = DC, 1..1024, complex). Each type maps the inp
   9 Phase disperse harmonic h is rotated by p * ((h - 24)^2 - 23^2), p = a * 0.05
  11 Skew           each harmonic reads the wavetable at a position warped by its own log frequency (needs the whole table)
 
-Types 1 (vocode) and 10 (Shepard) depend on the played pitch and are not carried. Each type is checked against the plugin by calibration/vital_morph_check.py.
+Type 1 (vocode) is Formant scale read at the note's absolute frequency (its g is also scaled by note / the table's own fundamental), baked at the note the importer gives it; type 10 (Shepard) depends on the played pitch and is not carried. Each type is checked against the plugin by calibration/vital_morph_check.py.
 """
 from __future__ import annotations
 
 import numpy as np
 
-KNOWN = (2, 3, 4, 5, 6, 7, 8, 9, 11)
+KNOWN = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11)
+VOCODE_EXP = 1.0                   # kMaxFormantShift (Vocode's range, like Formant scale's 2)
+VOCODE_RATIO = None                # the played note's frequency over the wavetable's own (set by the importer for each oscillator): Vocode reads the frame at the note's absolute frequency
 NH = 1024
 PHASE_SIGN = 1.0                   # the sign of the phase-disperse rotation in numpy's rfft convention (calibration/vital_morph_check.py)
 _RAND = None
@@ -77,7 +79,7 @@ def _split(spec: np.ndarray, pos: np.ndarray) -> np.ndarray:
     return out[:n]
 
 
-def morph_spectrum(sp: np.ndarray, typ: int, a: float, unit: np.ndarray | None = None) -> np.ndarray:
+def morph_spectrum(sp: np.ndarray, typ: int, a: float, unit: np.ndarray | None = None, g_over: float | None = None) -> np.ndarray:
     """sp[0..NH] (DC and harmonics 1..NH, complex); returns the morphed spectrum, same shape. Type 11 is handled in morph_table."""
     h = np.arange(1, NH + 1, dtype=np.float64)
     body = sp[1:NH + 1]
@@ -93,8 +95,8 @@ def morph_spectrum(sp: np.ndarray, typ: int, a: float, unit: np.ndarray | None =
         mult = 2.0 ** (24.0 * a - 12.0)
         shift = mult ** (np.log2(h) / 10.0)
         out[1:] = _split(body, np.maximum(1.0, shift * (h - 1.0) + 1.0))
-    elif typ == 2:
-        g = 2.0 ** (2.0 - 4.0 * a)
+    elif typ in (1, 2):
+        g = 2.0 ** (2.0 - 4.0 * a) if g_over is None else g_over
         last = int(min(NH, 1024.0 / g))
         for i in range(1, last + 1):
             sh = max(1.0, i * g)
@@ -171,6 +173,16 @@ def morph_table(table: np.ndarray, typ: int, a: float) -> np.ndarray | None:
     """A (frames, 2048) table through the morph; None when the type is not carried or the morph does nothing."""
     if typ not in KNOWN:
         return None
+    if typ == 1:
+        if VOCODE_RATIO is None:
+            return None
+        g = 2.0 ** ((a - 0.5) * 2.0 * -VOCODE_EXP) * VOCODE_RATIO
+        sp = np.fft.rfft(table, axis=1)[:, :NH + 1]
+        new = np.array([morph_spectrum(f, 1, a, None, g) for f in sp])
+        full = np.zeros((len(table), table.shape[1] // 2 + 1), dtype=np.complex128)
+        full[:, :NH + 1] = new
+        full[:, 0] = 0.0
+        return np.fft.irfft(full, n=table.shape[1], axis=1)
     if (typ in (2, 3, 4) and abs(a - 0.5) < 1e-3) or (typ == 7 and cutoff_harmonic(a) > 1023) or (typ == 8 and cutoff_harmonic(a) <= 1.0):
         return None
     sp = np.fft.rfft(table, axis=1)[:, :NH + 1]

@@ -1380,6 +1380,50 @@ static void testExtraLfosAndRoutes()
         }
 }
 
+/* The Filter FX in Serum's comb / flange / phaser models (fxf_vsk 7..14, the voice filter's laws): at Reso 0 a comb is a plain gain of 0.4965, the Drive knob is a plain gain on it (+9.2 dB at
+ * 30 %, +24.1 at 100), a feedback comb at Reso 90 changes the tone, and the phasers run and stay finite */
+static void testFxFilterSerumComb()
+{
+    auto level = [](int vsk, int res, int drive, int wet) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 40;
+        e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_FX_ON] = 1; e.pots[TB_P_FXF_ON] = vsk >= 0 ? 1 : 0; e.pots[TB_P_FXF_VSK] = (float) std::max(vsk, 0); e.pots[TB_P_FXF_FREQ] = 60; e.pots[TB_P_FXF_CFINE] = 64;
+        e.pots[TB_P_FXF_RES] = (float) res; e.pots[TB_P_FXF_DRIVE] = (float) drive; e.pots[TB_P_FXF_WET] = (float) wet;
+        note(e, 48, 100);
+        auto x = render(e, 300);
+        double a = 0;
+        for (size_t i = x.size() / 2; i < x.size(); i += 2) { CHECK(std::isfinite(x[i]), "Filter FX comb model %d: a finite sample", vsk); a += (double) x[i] * x[i]; }
+        return 10.0 * std::log10(a / (x.size() / 4) + 1e-12);
+    };
+    const double off = level(-1, 0, 0, 127), comb0 = level(7, 0, 0, 127), drive30 = level(7, 0, 38, 127), drive100 = level(7, 0, 127, 127);
+    CHECK(std::fabs((comb0 - off) - 20.0 * std::log10(0.4965)) < 0.3, "a Filter FX comb at Reso 0 is a gain of 0.4965 (%.2f dB, expected %.2f)", comb0 - off, 20.0 * std::log10(0.4965));
+    CHECK(std::fabs((drive30 - comb0) - 9.2) < 0.4, "Drive 30 %% on the Filter FX comb is +9.2 dB (%.2f)", drive30 - comb0);
+    CHECK(std::fabs((drive100 - comb0) - 24.1) < 0.5, "Drive 100 %% on the Filter FX comb is +24.1 dB (%.2f)", drive100 - comb0);
+    auto wave = [](int res) {
+        Engine e;
+        e.pots[TB_P_WT1_LEVEL] = 40;
+        e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;
+        e.pots[TB_P_FX_ON] = 1; e.pots[TB_P_FXF_ON] = 1; e.pots[TB_P_FXF_VSK] = 7; e.pots[TB_P_FXF_FREQ] = 60; e.pots[TB_P_FXF_CFINE] = 64; e.pots[TB_P_FXF_RES] = (float) res;
+        note(e, 48, 100);
+        return render(e, 300);
+    };
+    {   /* the feedback changes the waveform beyond the Reso 0 gain: the difference between the two renders (the second scaled to the first's level) is a good part of the signal */
+        const auto a = wave(0), b = wave(114);
+        double pa = 0, pb = 0, pd = 0;
+        for (size_t i = a.size() / 2; i < std::min(a.size(), b.size()); i += 2) { pa += (double) a[i] * a[i]; pb += (double) b[i] * b[i]; }
+        const double k = std::sqrt(pa / std::max(pb, 1e-12));
+        for (size_t i = a.size() / 2; i < std::min(a.size(), b.size()); i += 2) pd += ((double) a[i] - k * b[i]) * ((double) a[i] - k * b[i]);
+        CHECK(pd > 0.1 * pa, "a feedback comb at Reso 90 changes the waveform (difference %.2f of the signal power)", pd / pa);
+    }
+    for (int m = 8; m <= 14; m++) {
+        const double l = level(m, 40, 0, 127);
+        CHECK(l > off - 40.0, "Filter FX model %d runs (%.1f dB against %.1f dry)", m, l, off);
+    }
+    const double half = level(7, 0, 0, 64);
+    CHECK(half > comb0 - 0.1 && half < off + 0.1, "a half-wet Filter FX comb sits between the filtered and the dry level (%.2f in %.2f .. %.2f)", half, comb0, off);
+}
+
 /* An LFO route to "FX Filter Freq" (MOD_DST 24) moves the effects block's Filter FX cutoff: a closed low-pass with a constant LFO at 1 and a full Uni route is opened by it */
 static void testFxFilterLfo()
 {
@@ -1675,6 +1719,7 @@ int main()
     testVelocityLaw();
     testFxBuses();
     testFxFilterLfo();
+    testFxFilterSerumComb();
     testVitalEnvelopeAndLfoDelay();
     testVoicePitchRoute();
     testKeyLfo();

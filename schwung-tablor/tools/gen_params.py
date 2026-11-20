@@ -878,7 +878,7 @@ BANKS = [
     # Vital's own filter models (Analog: Sallen-Key; Ladder), 12 or 24 dB, Blend between low / band / high, in place of the biquad. Set by the Vital converter for a filter of that model in a plain style.
     ("Vital Filter SK", False, [row(enum("flt_vsk", "FSK", "Vital Model Filter 1", ["Off", "Analog", "Ladder", "Dirty", "Digital", "Diode"], 0), enum("flt2_vsk", "F2SK", "Vital Model Filter 2", ["Off", "Analog", "Ladder", "Dirty", "Digital", "Diode"], 0))]),
     # The Filter FX in one of Vital's own models (the same list as the voice filters' Vital Model) and its Blend knob (0..2 over the pot).
-    ("Vital Filter FX Model", False, [row(enum("fxf_vsk", "XSK", "Vital Model Filter FX", ["Off", "Analog", "Ladder", "Dirty", "Digital", "Diode", "Comb"], 0), pot("fxf_blend", "XBL", "Vital Filter FX Blend", 0),
+    ("Vital Filter FX Model", False, [row(enum("fxf_vsk", "XSK", "Vital Model Filter FX", ["Off", "Analog", "Ladder", "Dirty", "Digital", "Diode", "Comb", "Serum Comb +", "Serum Comb -", "Serum Flange +", "Serum Flange -", "Serum Phase 12", "Serum Phase 24", "Serum Phase 36", "Serum Phase 48"], 0), pot("fxf_blend", "XBL", "Vital Filter FX Blend", 0),
                                               num("fxf_cstyle", "XCS", "Vital Filter FX Comb Style", 0, 5, 0), num("fxf_ctrans", "XCT", "Vital Filter FX Blend Transpose", 0, 127, 0))]),
     # Vital's filter style for the Analog model beyond the 12 / 24 dB pair (2 notch / pass swap, 3 dual notch / band, 4 band / peak / notch); 0 reads the filter type's slope.
     ("Vital Filter Style", False, [row(num("flt_vsty", "FST", "Vital Filter 1 Style", 0, 4, 0), num("flt2_vsty", "F2ST", "Vital Filter 2 Style", 0, 4, 0), num("fxf_vsty", "XST", "Vital Filter FX Style", 0, 4, 0))]),
@@ -887,6 +887,8 @@ BANKS = [
     ("Vital Env Release Curves", False, [row(num("flt_rpow", "FRP", "Vital Filter Release Curve", 0, 127, 0), *[num(f"me{n}_rpow", f"M{n}R", f"Vital Mod Env {n} Release Curve", 0, 127, 0) for n in (1, 2, 3, 4)])]),
     # Vital's own delay (effects/delay.cpp) in place of the Serum-law one: 1 on, the style (0 mono, 1 stereo, 2 ping pong, 3 mid ping pong) and the dry / wet knob (equal power). The times, feedback and filter corners are the ordinary delay knobs.
     ("Vital Delay", False, [row(enum("dly_vital", "DVL", "Vital Delay", ["Off", "On"], 0), num("dly_vstyle", "DVS", "Vital Delay Style", 0, 3, 0), pot("dly_vmix", "DVM", "Vital Delay Mix", 0))]),
+    # Serum's comb / flange / phaser models in the Filter FX (the Filter FX Model list above, 7..14): the voice filter's laws (comb.h). A comb is tuned to its cutoff exactly, so the cutoff pot (whole semitones) gets a cents remainder, 64 = 0.
+    ("Filter FX Comb Tune", False, [row(num("fxf_cfine", "XCF", "Filter FX Comb Tune", 0, 127, 64))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -1020,7 +1022,7 @@ def chain_param(p):
 # The sample slots' Kind and grain keys are NOT hidden: the remote UI draws its Sample tab from chain_params, and a key missing here is a knob that never appears.
 # The 0.9.8 additions that only the Vital converter sets (random modulators, attack curves, the formant filters' own knobs) stay out of it too: the contract was 800 bytes under the host's 64 KB
 # limit (it refuses to load the synth past it) and these put it over (loadtest, 2026-11-20).
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|eq\d_ffine$|flt2?_vsk$|fxf_vsk$|fxf_blend$|fxf_cstyle$|fxf_ctrans$|flt2?_vsty$|fxf_vsty$|vca_rpow$|flt_rpow$|dly_vital$|dly_vstyle$|dly_vmix$|me\d_rpow$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|eq\d_ffine$|flt2?_vsk$|fxf_vsk$|fxf_blend$|fxf_cstyle$|fxf_ctrans$|fxf_cfine$|flt2?_vsty$|fxf_vsty$|vca_rpow$|flt_rpow$|dly_vital$|dly_vstyle$|dly_vmix$|me\d_rpow$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
 # The Vital banks (comp, distortion LFO, unison, envelope, ...) have no control on any page or in the remote UI: only the Vital converter and a preset load set them, as for the LFOs above. The
 # one exception is Vital Reverb, which the remote UI names. Together with the keys above this takes the contract from 64.9 KB to about 55 KB, well inside the host's 64 KB.
 HIDDEN_BANK_KEYS = {s["key"] for name, _, rws in BANKS if name.startswith("Vital ") and name != "Vital Reverb" for r in rws for s in r if s}

@@ -525,6 +525,12 @@ def node_mods(mods: list[dict], i: int, rack: int = 0) -> list[dict]:
     return [m for m in mods if m.get("dest_id") in (None, rack * 100 + i)]
 
 
+# Serum's comb / flange / phaser Filter FX models the engine's Filter FX stage carries with the voice filter's laws (comb.h; calibration/dev/probe_fxfilter_comb.py: 0.7-0.9 dB rms against the law
+# for comb / flange at every Freq / Reso probed, phasers the same up to Reso 0 and 3-5 dB at Reso 80). fxf_vsk is 7 + the position in this list.
+FX_COMB_MODELS = ("CombP", "CombN", "FlangeP", "FlangeN", "Phase12P", "Phase24P", "Phase36P", "Phase48P")
+# (Drive on these models is a plain gain: calibration/dev/probe_fxfilter_comb_drive.py)
+
+
 def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) -> dict | None:
     """A master-rack Filter FX that an envelope or an LFO moves (and nothing else but macros): the engine runs it as its own Filter FX stage (cutoff, resonance, Wet).
     Returns {"index", "model", "norm", "reso", "wet", "envs": {env index: amount}, "lfos", "wet_envs", "wet_lfos", "ignored": [sources]} or None. The cutoff and the Wet are the stored
@@ -540,9 +546,13 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) ->
         return None
     rack = (ctx or {}).get("rack", 0)
     movers = [i for i in fx if any(not foldable_source(m, macros) and m.get("dest_param") in ("kParamFreq", "kParamWet") for m in node_mods(allmods, i, rack))]
-    i = movers[0] if movers else fx[0]
+    combs = [i for i in fx if rack == 0 and str(plain(nodes[i]).get("kParamType", "default")) in FX_COMB_MODELS]
+    i = movers[0] if movers else combs[0] if combs else fx[0]
     mods = node_mods(allmods, i, rack)
     pp = plain(nodes[i])
+    comb = str(pp.get("kParamType", "default")) in FX_COMB_MODELS
+    if comb and rack != 0:
+        return None                                 # the buses' Filter FX runs no model
     envs, lfos, ignored, norm = {}, [], [], float(pp.get("kParamFreq", 0.5))
     wet_envs, wet_lfos = [], []
     reso = float(pp.get("kParamReso", 10.0))
@@ -575,9 +585,9 @@ def dynamic_filter(nodes: list[dict], ctx: dict | None, folded: bool = False) ->
         else:
             ignored.append(m["source"])
     wet = float(pp.get("kParamWet", 100.0))
-    if not (envs or lfos or wet_envs or wet_lfos) or (wet < 1.0 and not (wet_envs or wet_lfos)):
+    if not (comb or envs or lfos or wet_envs or wet_lfos) or (wet < 1.0 and not (wet_envs or wet_lfos)):
         return None
-    return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "wet": wet, "envs": envs, "lfos": lfos, "wet_envs": wet_envs, "wet_lfos": wet_lfos, "ignored": ignored}
+    return {"index": i, "model": str(pp.get("kParamType", "default")), "norm": norm, "reso": reso, "wet": wet, "drive": float(pp.get("kParamDrive", 0.0)), "envs": envs, "lfos": lfos, "wet_envs": wet_envs, "wet_lfos": wet_lfos, "ignored": ignored}
 
 
 FX_MODEL_FILE = ROOT / "calibration/fxfilter_models_probe.json"
@@ -661,6 +671,9 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
         ty = str(pp.get("kParamType", "default"))
         kind = "lp" if (ty in FX_FILTER_LP or ty == "default") else "hp" if ty in FX_FILTER_HP else None
         if kind is None and ty not in fx_models():
+            if float(pp.get("kParamWet", 100.0)) < 1.0 and not dynamic:
+                handled.add(i)
+                continue                                # a model the engine has no curve for, but dry at the saved position (Wet 0, nothing moves it): the signal goes past it
             why.append(f"Filter model {ty}")
             continue
         wet = float(pp.get("kParamWet", 100.0))

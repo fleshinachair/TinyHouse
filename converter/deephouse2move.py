@@ -2399,7 +2399,8 @@ FXF_CUTOFF: dict = json.loads(FXF_CUTOFF_FILE.read_text(encoding="utf-8")) if FX
 
 def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
     """The envelope-moved Filter FX as the engine's Filter FX stage (after the distortion; its cutoff follows the filter envelope), cutoff law and models as for the voice filter."""
-    fit = FXF_CUTOFF.get(dyn["model"])
+    comb = dyn["model"] in fxmap.FX_COMB_MODELS
+    fit = None if comb else FXF_CUTOFF.get(dyn["model"])
     model = fit["engine"] if fit else "MgL24" if dyn["model"] == "default" else dyn["model"]
     fkey = filter_model_key(model, None)
     idx, _ = FILTER_MAP.get(model, (None, False))
@@ -2409,10 +2410,20 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
         return [f"Filter FX model {model} not carried"]
     cut = _clamp(dyn["norm"], 0, 1)
     P["fxf_on"] = 1
-    P["fxf_type"] = idx
-    corr = interp([tuple(x) for x in fit["corr"]], cut) if fit else 0.0
-    P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut) + corr, 0, 127))
-    P["fxf_res"] = filter_res_pot(model, dyn["reso"])
+    if comb:
+        # Serum's comb / flange / phaser Filter FX run the voice filter's laws (comb.h), tuned to the knob's note exactly: whole semitones on the pot, the remainder in cents (fxf_cfine, 64 = 0)
+        note_pot = _clamp(cut * CUTOFF_NOTES - 8, 0, 127)
+        P["fxf_type"] = 0
+        P["fxf_vsk"] = 7 + fxmap.FX_COMB_MODELS.index(dyn["model"])
+        P["fxf_freq"] = int(math.floor(note_pot))
+        P["fxf_cfine"] = int(_clamp(64 + round((note_pot - math.floor(note_pot)) * 100), 0, 127))
+        P["fxf_res"] = round(_clamp(dyn["reso"], 0.0, 100.0) / 100.0 * 127)
+        P["fxf_drive"] = round(_clamp(dyn.get("drive", 0.0), 0.0, 100.0) / 100.0 * 127)       # a plain gain on these models (fx.h serumModelGain)
+    else:
+        P["fxf_type"] = idx
+        corr = interp([tuple(x) for x in fit["corr"]], cut) if fit else 0.0
+        P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut) + corr, 0, 127))
+        P["fxf_res"] = filter_res_pot(model, dyn["reso"])
     P["fxf_wet"] = round(_clamp(dyn["wet"] / 100.0, 0.0, 1.0) * 127)
     if not dyn["envs"]:
         out = [f"Filter FX carried as the effects block's filter: {model}"

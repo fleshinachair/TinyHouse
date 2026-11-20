@@ -925,7 +925,7 @@ public:
     /* The Filter FX in one of Vital's own models (1 Analog, 2 Ladder, 3 Dirty, 4 Digital, 5 Diode; 0 keeps the biquad): called after setFilter each block. */
     void setFilterModel(int model, float blend, bool steep, int cstyle = 0, float ctrans = 0.0f, int skStyle = 0)
     {
-        xfVm = (xfOn && model >= 1 && model <= 6) ? model : 0;
+        xfVm = (xfOn && model >= 1 && model <= 14) ? model : 0;
         xfCstyle = cstyle; xfCtrans = ctrans; xfBlend = blend;
         if (!xfVm) return;
         const float g = xfDriveT;
@@ -936,8 +936,30 @@ public:
         case 3: xfDt.setSampleRate(sr); xfDt.set(xfHz, xfRes, g, blend, steep); break;
         case 4: xfDg.setSampleRate(sr); xfDg.set(xfHz, xfRes, g, blend, steep); break;
         case 6: if (xfCombSr != sr) { xfComb.setSampleRate(sr); xfCombSr = sr; } break;
+        case 7: case 8: case 9: case 10: case 11: case 12: case 13: case 14:         /* Serum's comb / flange / phaser models (the voice filter's laws) */
+            if (xfCombSSr != sr) { xfCombS.setSampleRate(sr); xfPh.setSampleRate(sr); xfCombSSr = sr; }
+            break;
         default: xfDo.setSampleRate(sr); xfDo.set(xfHz, xfRes, g, blend, steep); break;
         }
+    }
+    /* The Drive of Serum's comb / flange / phaser Filter FX is a plain gain (calibration/dev/probe_fxfilter_comb_drive.py: +9.2 dB at 30 %, +16.3 at 60, +24.1 at 100, the same at a low input level;
+     * the shape moves by 0.7-1 dB rms only), ramped across the block. */
+    void serumModelGain(float *L, float *R, int n)
+    {
+        static const float kPct[4] = { 0.0f, 30.0f, 60.0f, 100.0f }, kDb[4] = { 0.0f, 9.2f, 16.3f, 24.1f };
+        const float pct = std::min(std::max(xfDrive01, 0.0f), 1.0f) * 100.0f;
+        int k = 0;
+        while (k < 2 && pct > kPct[k + 1]) k++;
+        const float db = kDb[k] + (kDb[k + 1] - kDb[k]) * (pct - kPct[k]) / (kPct[k + 1] - kPct[k]);
+        const float g1 = std::pow(10.0f, db / 20.0f);
+        if (xfSerumG < 0.0f) xfSerumG = g1;
+        const float g0 = xfSerumG;
+        if (g0 == 1.0f && g1 == 1.0f) return;
+        for (int i = 0; i < n; i++) {
+            const float g = g0 + (g1 - g0) * (float) (i + 1) / (float) n;
+            L[i] *= g; R[i] *= g;
+        }
+        xfSerumG = g1;
     }
     void runFilterModel(float *L, float *R, int n)
     {
@@ -947,6 +969,10 @@ public:
         case 3: xfDt.process(L, R, n); break;
         case 4: xfDg.process(L, R, n); break;
         case 6: xfComb.processVital(L, R, n, xfCstyle % 3, xfRes, xfHz, xfBlend, xfCtrans, xfCstyle >= 3); break;
+        case 7: case 8: case 9: case 10:                  /* Comb +, Comb -, Flange +, Flange - */
+            xfCombS.process(L, R, n, xfVm >= 9 ? 1 : 0, (xfVm & 1) ? 1 : -1, xfRes, xfHz); serumModelGain(L, R, n); break;
+        case 11: case 12: case 13: case 14:               /* Phase 12 / 24 / 36 / 48 + (2, 4, 6, 8 all-passes) */
+            xfPh.process(L, R, n, 2 * (xfVm - 10), xfRes, xfHz); serumModelGain(L, R, n); break;
         default: xfDo.process(L, R, n); break;
         }
     }
@@ -1007,7 +1033,7 @@ public:
     void setFilter(bool on, int type, float hz, float q, float wet = 1.0f, float drive01 = 0.0f, float res01 = 0.0f, bool vitalLaw = false)
     {
         xfWetKnob = std::min(std::max(wet, 0.0f), 1.0f);
-        xfHz = hz; xfRes = res01;
+        xfHz = hz; xfRes = res01; xfDrive01 = drive01;
         xfDriveT = std::pow(10.0f, drive01 * 30.0f / 20.0f);
         /* Vital's filter saturates at every drive, 0 dB included, and its input gain 1 / (1 + 2 res) costs the passband about a ^ 0.8 (calibration probe: -5.2 dB at res 0.54, -2.1 at 0.2, -7.6 at 0.8) */
         xfDriveOn = vitalLaw || drive01 > 0.0f;
@@ -1025,7 +1051,7 @@ public:
             xf.setParams(hz, q);
         } else if (xfOn) {
             xf.reset();
-            xfSk.reset(); xfLd.reset(); xfDt.reset(); xfDg.reset(); xfDo.reset(); xfComb.reset();
+            xfSk.reset(); xfLd.reset(); xfDt.reset(); xfDg.reset(); xfDo.reset(); xfComb.reset(); xfCombS.reset(); xfPh.reset();
         }
         xfOn = on;
         anyActive = baseActive || xfOn;
@@ -2031,6 +2057,8 @@ private:
     float xfHz = 1000.0f, xfRes = 0.0f, xfBlend = 0.0f, xfCtrans = 0.0f;
     int xfCstyle = 0;
     CombFilter xfComb; double xfCombSr = 0.0;
+    float xfDrive01 = 0.0f, xfSerumG = -1.0f;                             /* the Filter FX Drive knob (0..1) and the comb models' gain at the end of the last block */
+    CombFilter xfCombS; PhaserFilter xfPh; double xfCombSSr = 0.0;       /* Serum's comb / flange / phaser models in the Filter FX (models 7..14) */
     VitalSK xfSk; VitalLadder xfLd; VitalDirty xfDt; VitalDigital xfDg; VitalDiode xfDo;
     float xfDriveG = 1.0f, xfDriveT = 1.0f, xfDriveA = 1.0f, xfPass = 1.0f;  /* its gain as it was, as it is set to be, and its a = 1 / (1 + 2 resonance) */
     float xfWetKnob = 1.0f, xfS = 1.0f;                       /* the Filter FX Wet knob (0..1) and the smoothstep weight it has reached */

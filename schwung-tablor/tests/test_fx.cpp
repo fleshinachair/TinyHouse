@@ -1347,7 +1347,7 @@ static void testVitalDist()
         for (int i = n / 2; i < n; i++) pk = std::max(pk, (double) std::fabs(L[(size_t) i]));
         return pk;
     };
-    const double full = 0.46345;
+    const double full = 0.33650;      /* 10^(-9.45 / 20) */
     FxSettings s;
     s.distVital = true; s.distMix = 1.0f; s.distMode = 0; s.distGain = 4.0f;
     const double soft = peakOf(s, 0.07);
@@ -1382,6 +1382,22 @@ static void testVitalDist()
     CHECK(std::fabs(peakOf(s, 0.1) - full) < 0.004, "the sine fold peaks at a quarter turn (%.4f)", peakOf(s, 0.1));
     s.distMode = 2; s.distGain = 8.0f; s.distMix = 0.5f;
     CHECK(std::fabs(peakOf(s, 0.1) - (0.5 * 0.1 + 0.5 * full)) < 0.004, "the mix is a linear crossfade of the dry and the wet (%.4f)", peakOf(s, 0.1));
+    {   /* the same stage at 2x (distOs): a hard clip still stops at full scale; a 220 Hz sine through Down Sample at 0 dB drive (a hold of 4 samples, 11 kHz) has its image near 44100 / 3.96 - 220 Hz and a clean pass at 0 */
+        FxSettings o = s; o.distOs = true; o.distMode = 2; o.distGain = 8.0f; o.distMix = 1.0f;
+        CHECK(std::fabs(peakOf(o, 0.1) - full) < 0.004, "the 2x hard clip stops at full scale (%.4f)", peakOf(o, 0.1));
+        o.distMode = 4; o.distGain = 1.0f; o.distDriveDb = 0.0f;
+        Fx fx(SR); fx.set(o);
+        const int n = (int) SR;
+        std::vector<float> L((size_t) n), R((size_t) n);
+        for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin(6.283185307 * 220.0 * i / SR));
+        run(fx, L, R);
+        std::vector<float> t(L.begin() + n / 2, L.end());
+        const double img = goertzelDb(t, 44100.0 / 3.96 - 220.0), fund = goertzelDb(t, 220.0);
+        double bm = -200, bf = 0;
+        for (double f = 5000; f < 20000; f += 10) { const double g = goertzelDb(t, f); if (g > bm) { bm = g; bf = f; } }
+        (void) img;
+        CHECK(fund > bm + 20.0 && std::fabs(bf - (44100.0 / 3.96 - 220.0)) < 60.0, "2x Down Sample at 0 dB: the sine stays (%.1f dB) and the strongest image above 5 kHz is at the hold rate less 220 Hz (%.1f dB at %.0f Hz)", fund, bm, bf);
+    }
     /* the filter: response against the unfiltered path, in the linear range */
     auto filt = [&](int where, float note, float res, float blend, double hz) {
         FxSettings f;

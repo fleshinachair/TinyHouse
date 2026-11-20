@@ -767,6 +767,7 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.distMode = std::clamp((int) pots[TB_P_DIST_MODE], 0, 6);
     s.distHold = 1 + (int) pots[TB_P_DIST_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one (1..128 samples; calibration/dev/probe_dist_downsample.py) */
     s.distVital = pots[TB_P_DIST_CAL] >= 2.0f;
+    s.distOs = pots[TB_P_DIST_CAL] >= 3.0f;
     s.distCal = pots[TB_P_DIST_CAL] >= 1.0f && !s.distVital;
     if (s.distVital) {
         /* Vital's distortion: Drive is the gain in dB (-30..+30), Mix a linear crossfade, and the filter's Cutoff a MIDI note (8..136) */

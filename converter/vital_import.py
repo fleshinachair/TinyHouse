@@ -1138,6 +1138,7 @@ def env_seconds(s: dict, key: str, squared: bool = False) -> float:
     return sec
 
 
+VITAL_DIST_OS = True                                                    # Vital's distortion at 2x (dist_cal 3)
 VITAL_DELAY = True                                                      # Vital's delay as the engine's own port of it (dly_vital)
 VITAL_SK = True                                                         # Vital's Analog filter (Sallen-Key) as the engine's flt_vsk
 ENV_DECAY_CURVE = True                                                  # the filter and spare envelopes draw Vital's own decay curve (engine flt_dpow / meN_dpow) instead of fitting the analog fall to it
@@ -1675,11 +1676,11 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         ty = int(s["distortion_type"])
         # Vital's measured law (calibration/vital_dist_probe.py, vital_distfilt_probe.py), the engine's Distortion Calibrated = Vital: drive in dB -30..30 over the pot's 0..127, the mix a linear crossfade,
         # the curve one of tanh / hard clip / triangle fold / sin(pi/2 x) / hold, and the filter a Q 0.5..14 state-variable before (order 1) or after (order 2) the curve, on the wet part only
-        P["dist_cal"] = 2
+        P["dist_cal"] = 3 if VITAL_DIST_OS and int(s.get("oversampling", 1)) >= 1 else 2        # 3: the same stage at 2x like Vital's own (its Oversampling is 2x by default; fx.h DistOs2)
         P["dist_mode"] = {0: 0, 1: 2, 2: 5, 3: 3, 4: 6, 5: 4}[ty]
         P["dist_drive"] = pot((s["distortion_drive"] + 30.0) * 127.0 / 60.0)
         P["dist_mix"] = pot(127 * s["distortion_mix"])
-        if ty == 5:
+        if ty == 5 and P["dist_cal"] == 2:
             notes.append("distortion Down Sample: a plain hold of the measured length (Vital's own output past ~12 dB drive is a ping-pong that is not reproduced)")
         order = int(s.get("distortion_filter_order", 0))
         if order in (1, 2):

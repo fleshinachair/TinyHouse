@@ -552,7 +552,7 @@ TONE = dict(
     # Calibrated distortion (Serum's measured transfer curves; the converter's Serum Distortion translation). On: Drive is the pre-gain G
     # (-16..+54 dB), Mode adds Sine (3), Wet Gain is the curve's output gain K (-36..+12 dB, 64 = -12), Mix is the wet part s with the dry part
     # (1 - s^2), and Level is a gain on the sum (-24..+24 dB, 64 = 0). Off is the earlier law (drive 0 off, 1/sqrt(g) scaling, linear mix).
-    dcal   = enum("dist_cal",  "DCAL", "Distortion Calibrated", ["Off", "On", "Vital"], 0),
+    dcal   = enum("dist_cal",  "DCAL", "Distortion Calibrated", ["Off", "On", "Vital", "Vital 2x"], 0),
     dout   = pot("dist_out",   "DOUT", "Distortion Wet Gain", 64),
     dlvl   = pot("dist_level", "DLVL", "Distortion Level",    64),
     # The Distortion effect's own filter when it sits BEFORE the distorting (Serum's PrePost 2): a 12 dB/octave low-pass or high-pass ahead of the
@@ -573,7 +573,7 @@ TONE = dict(
     # Multiband mode: three bands (crossovers 120 Hz and 2.4 kHz, Linkwitz-Riley), each with its own threshold (band 1 uses Comp Threshold,
     # bands 2 and 3 these), a gain of -24..+24 dB (64 = 0), and upward compression below a threshold 11 dB under the band's own, with
     # slope Below/127 (0 = none, 127 = the signal is pulled up to the floor). Ratio, Attack, Release, Makeup and Mix are shared.
-    cmulti = enum("comp_multi", "CMUL", "Comp Multiband", ["Off", "On", "Vital"], 0),
+    cmulti = enum("comp_multi", "CMUL", "Comp Multiband", ["Off", "On", "Vital", "Vital 2x"], 0),
     ct2    = pot("comp_thresh2", "CTH2", "Comp Threshold Mid",  127),
     ct3    = pot("comp_thresh3", "CTH3", "Comp Threshold High", 127),
     cg1    = pot("comp_gain1",   "CGN1", "Comp Gain Low",  64),

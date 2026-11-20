@@ -239,6 +239,7 @@ struct FxSettings {
     float distDriveDb = 0;                  /* the Vital law's drive in dB (distGain is its linear gain) */
     int   distFlt = 0;                      /* Vital's distortion filter: 0 off, 1 before the curve, 2 after it; on the wet part only */
     float distFltNote = 60, distFltRes = 0, distFltBlend = 0;      /* cutoff as a MIDI note, resonance 0..1, blend 0 low-pass .. 1 band-pass .. 2 high-pass */
+    bool  distOs = false;                   /* Vital's distortion at 2x (Oversampling), see DistOs2 */
     bool  distAudio = false;                /* Vital's keyboard-following LFO on the distortion, run at audio rate inside the stage (the voices' LFOs only step once per block) */
     float distAudioAmt[4] = { 0, 0, 0, 0 }; /* its route amounts to Drive, filter Cutoff, Res, Blend (a fraction of each control's range) */
     float distAudioTrans = 0;               /* semitones added to the newest note for its frequency */
@@ -1403,9 +1404,145 @@ private:
 
     /* Vital's law (calibration/vital_dist_probe.py, vital_distfilt_probe.py): the wet part is the curve of gain x signal, in units of Vital's own full scale (the engine's pre-master level is 6.7 dB
      * under it, so the signal is divided by kVitalFull going in and multiplied coming out), through the filter before or after it; the dry part is not filtered, and the mix is a plain crossfade. */
+    /* Vital runs its whole effect chain at twice the sample rate (its Oversampling setting, 2x unless a preset says otherwise) and decimates at the end, so a curve that makes harmonics (a clip at high drive, a fold,
+     * a bit crush) aliases a good deal less there than at 44.1 kHz. This is the same stage at 2x: a 47-tap half-band up, the curve at 88.2 kHz, the same filter down; the dry part is delayed to match (23 samples).
+     * Down Sample is distortion.cpp's: the stage works on pairs of samples, takes the first of a pair into the hold whenever the sample counter (one per pair) reaches max(0.99 / d^2, 1) x sampleRate / 88200 (d = 1 - the
+     * drive's 0..1 position), and the pair repeats it. */
+    struct DistOs2 {
+        static constexpr int T = 47, H = 23, P = 46;
+        float h[T];
+        std::vector<float> uPrev[2], dPrev[2], us[2], ys[2];
+        float dry[2][32] = {};
+        int dryPos = 0;
+        float cnt = 0.0f, hold[2] = { 0.0f, 0.0f };
+        int parity = 0;
+        DistOs2()
+        {
+            auto i0 = [](float x) { float s = 1.0f, t = 1.0f; for (int k = 1; k < 30; k++) { t *= (x / (2.0f * (float) k)) * (x / (2.0f * (float) k)); s += t; } return s; };
+            float sum = 0.0f;
+            for (int t = 0; t < T; t++) {
+                const float k = (float) (t - H), x = k * 0.5f;
+                const float sinc = k == 0.0f ? 1.0f : std::sin(3.14159265f * x) / (3.14159265f * x);
+                const float r = k / (float) (H + 1);
+                const float w = i0(7.0f * std::sqrt(std::max(0.0f, 1.0f - r * r))) / i0(7.0f);
+                h[t] = sinc * w * 0.5f; sum += h[t];
+            }
+            for (int t = 0; t < T; t++) h[t] /= sum;                /* unity at DC (x2 for the zero-stuffed up path is applied there) */
+            for (int c = 0; c < 2; c++) { uPrev[c].assign((size_t) P, 0.0f); dPrev[c].assign((size_t) P, 0.0f); }
+        }
+        void reset() { for (int c = 0; c < 2; c++) { uPrev[c].assign((size_t) P, 0.0f); dPrev[c].assign((size_t) P, 0.0f); for (float &v : dry[c]) v = 0.0f; } cnt = 0.0f; hold[0] = hold[1] = 0.0f; parity = 0; }
+        /* n samples in x -> 2n out in y (zero-stuffed, filtered, x2) */
+        void up(int c, const float *x, int n, float *y)
+        {
+            auto &u = us[c]; u.assign((size_t) (P + 2 * n), 0.0f);
+            for (int t = 0; t < P; t++) u[(size_t) t] = uPrev[c][(size_t) t];
+            for (int i = 0; i < n; i++) u[(size_t) (P + 2 * i)] = x[i];
+            for (int j = 0; j < 2 * n; j++) {
+                float a = 0.0f;
+                for (int t = 0; t < T; t++) { if (t == H || ((t - H) & 1)) a += h[t] * u[(size_t) (P + j - t)]; }
+                y[j] = 2.0f * a;
+            }
+            for (int t = 0; t < P; t++) uPrev[c][(size_t) t] = u[(size_t) (2 * n + t)];
+        }
+        /* 2n samples in x -> n out in y */
+        void down(int c, const float *x, int n, float *y)
+        {
+            auto &u = ys[c]; u.assign((size_t) (P + 2 * n), 0.0f);
+            for (int t = 0; t < P; t++) u[(size_t) t] = dPrev[c][(size_t) t];
+            for (int j = 0; j < 2 * n; j++) u[(size_t) (P + j)] = x[j];
+            for (int m = 0; m < n; m++) {
+                float a = 0.0f;
+                for (int t = 0; t < T; t++) { if (t == H || ((t - H) & 1)) a += h[t] * u[(size_t) (P + 2 * m - t)]; }
+                y[m] = a;
+            }
+            for (int t = 0; t < P; t++) dPrev[c][(size_t) t] = u[(size_t) (2 * n + t)];
+        }
+    } dos;
+    std::vector<float> dosBuf[2], dosUp[2], dosOut[2], dosG, dosCs, dosPer;
+
+    void processDistVitalOs(float *L, float *R, int n)
+    {
+        constexpr float kVitalFull = 0.33650f;
+        constexpr float kMinMult = 32.0f / 2147483647.0f;
+        float *io[2] = { L, R };
+        for (int c = 0; c < 2; c++) { dosBuf[c].resize((size_t) n); dosUp[c].resize((size_t) (2 * n)); dosOut[c].resize((size_t) (2 * n)); }
+        dosG.resize((size_t) n); dosCs.resize((size_t) n);
+        const float m = std::min(std::max(st.distMix, 0.0f), 1.0f);
+        auto crushStep = [&]() { const float db = 20.0f * std::log10(std::max(distGainNow, 1e-6f)); const float d = std::min(std::max((db + 30.0f) / 60.0f, 0.0f), 1.0f); return std::min(std::max(d * d, kMinMult), 1.0f); };
+        dosPer.resize((size_t) n);
+        for (int i = 0; i < n; i++) {
+            if (st.distAudio) {
+                distAudioPhase += distAudioHz / sr;
+                distAudioPhase -= std::floor(distAudioPhase);
+                const float px = distAudioPhase * 16.0f;
+                const int i0 = std::min((int) px, 15), i1 = (i0 + 1) & 15;
+                const float u = st.distAudioShape[i0] + (st.distAudioShape[i1] - st.distAudioShape[i0]) * (px - (float) i0);
+                float mm[4];
+                for (int k = 0; k < 4; k++) mm[k] = distVModSeen[k] + st.distAudioAmt[k] * u;
+                applyVitalDist(mm, st.distAudioAmt[0] != 0.0f, st.distAudioAmt[1] != 0.0f || st.distAudioAmt[2] != 0.0f || st.distAudioAmt[3] != 0.0f);
+            }
+            dosG[(size_t) i] = distGainNow / kVitalFull;
+            dosCs[(size_t) i] = st.distMode == 6 ? crushStep() : 1.0f;
+            if (st.distMode == 4) {
+                const float db = 20.0f * std::log10(std::max(distGainNow, 1e-6f));
+                const float d = 1.0f - std::min(std::max((db + 30.0f) / 60.0f, 0.0f), 1.0f);
+                dosPer[(size_t) i] = std::max(0.99f / std::max(d * d, kMinMult), 1.0f) * (2.0f * sr / 88200.0f);       /* sample rate here is the oversampled one */
+            }
+            for (int c = 0; c < 2; c++) dosBuf[c][(size_t) i] = st.distFlt == 1 ? distVf.tick(c, io[c][i]) : io[c][i];
+        }
+        for (int c = 0; c < 2; c++) dos.up(c, dosBuf[c].data(), n, dosUp[c].data());
+        for (int j = 0; j < 2 * n; j++) {
+            const int i = j >> 1;
+            const float g = dosG[(size_t) i], cs = dosCs[(size_t) i];
+            if (st.distMode == 4) {
+                if (dos.parity == 0) {
+                    dos.cnt += 1.0f;
+                    const float per = dosPer[(size_t) i];
+                    if (dos.cnt >= per) { dos.hold[0] = dosUp[0][(size_t) j]; dos.hold[1] = dosUp[1][(size_t) j]; dos.cnt -= per; }
+                }
+            }
+            for (int c = 0; c < 2; c++) {
+                const float vf = dosUp[c][(size_t) j];
+                const float t = g * vf;
+                float f;
+                switch (st.distMode) {
+                case 2:  f = std::min(std::max(t, -1.0f), 1.0f); break;
+                case 3:  f = std::sin(1.57079633f * t); break;
+                case 4:  f = dos.hold[c] / kVitalFull; break;
+                case 5:  { float p = std::fmod(t + 1.0f, 4.0f); if (p < 0.0f) p += 4.0f; f = p < 2.0f ? p - 1.0f : 3.0f - p; break; }
+                case 6:  f = std::round(vf / kVitalFull / cs) * cs; break;
+                default: f = std::tanh(t); break;
+                }
+                dosOut[c][(size_t) j] = f * kVitalFull;
+            }
+            dos.parity ^= 1;
+        }
+        for (int c = 0; c < 2; c++) dos.down(c, dosOut[c].data(), n, dosBuf[c].data());
+        const float dw = (distTarget - distCur) / (float) n;
+        for (int i = 0; i < n; i++) {
+            distCur += dw;
+            const float w = distCur;
+            const float x[2] = { L[i], R[i] };
+            float y[2];
+            for (int c = 0; c < 2; c++) {
+                float wv = dosBuf[c][(size_t) i];
+                if (st.distFlt == 2) wv = distVf.tick(c, wv);
+                float &slot = dos.dry[c][dos.dryPos & 31];
+                const float dv = dos.dry[c][(dos.dryPos - DistOs2::H) & 31];
+                slot = x[c];
+                y[c] = dv + m * (wv - dv);
+            }
+            dos.dryPos++;
+            L[i] = x[0] + w * (y[0] - x[0]);
+            R[i] = x[1] + w * (y[1] - x[1]);
+        }
+        distCur = distTarget;
+    }
+
     void processDistVital(float *L, float *R, int n)
     {
-        constexpr float kVitalFull = 0.33650f;                     /* 10^(-9.45 / 20): the engine level against Vital (re-measured; it was 10^(-6.7 / 20) before the converter's level offset moved) */
+        if (st.distOs) { processDistVitalOs(L, R, n); return; }
+        constexpr float kVitalFull = 0.33650f;                    /* 10^(-9.45 / 20): the engine level against Vital (re-measured; it was 10^(-6.7 / 20) before the converter's level offset moved) */
         constexpr int kAudioStep = 1;                              /* the audio-rate LFO is applied every this many samples (a power of 2) */
         /* Down Sample (a high sine through the plugin, calibration/vital_dist_probe.py): Vital holds each sample for a length that grows with Drive, 2 samples at the bottom of the knob, 4 at 0 dB, doubling every ~9 dB; the plugin's own
          * output past that is a ping-pong of two held values that this plain hold does not reproduce, so the length is capped at 12 */

@@ -16,6 +16,8 @@ Not released. Everything here comes from comparing the engine with the Vital plu
 
 **Fixes found by testing properly.** A Vital preset has no level glide at note-on any more (it was the plugin's own start-up smoothing, which only shows when a note starts within 0.1 s of loading, and it made low-level oscillators 2 to 10 times too loud for 100 ms of every note) and no 3 ms attack floor; the distortion's level against Vital's is the re-measured 9.45 dB (soft and hard clip were 3 dB too gentle at high drive).
 
+**Distortion runs at 2x like Vital's.** Vital runs its whole effect chain at twice the sample rate (its Oversampling setting, 2x unless a preset says otherwise), so a clip at high drive, a fold or a bit crush makes much less aliasing there. A Vital preset's distortion now does the same (a new "Vital 2x" value on Distortion Calibrated: a 47-tap half-band up and down around the curve), and Down Sample is a port of Vital's own (the hold length follows its drive law and works on pairs of samples). A soft clip of a note an octave and a half up at 25 dB drive went from 3.4 to 0.1 dB of error, Float Chords from 12.7 to 6.9, Snowcrash 13.0 to 11.9; Fun Pulse (8.0 to 9.2) and FM Drum Circle (7.4 to 9.3, a chaotic preset) are a little worse. Over the 32 local presets with a hard distortion the mean went from 6.83 to 6.65 dB.
+
 **Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
 
 

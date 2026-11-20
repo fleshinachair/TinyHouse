@@ -811,6 +811,7 @@ private:
         adsr.setAttack(potAttackTime(P[TB_P_VCA_A]));
         adsr.setAttackPower(attackPower(P[TB_P_VCA_APOW]), P[TB_P_VCA_APOW] >= 0.5f, true);
         adsr.setDecay(potEnvTime(decayPot(P[TB_P_VCA_D])));
+        adsr.setReleasePower(P[TB_P_VCA_RPOW] >= 0.5f ? (P[TB_P_VCA_RPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f, true);
         adsr.setDecayPower(P[TB_P_VCA_DPOW] >= 0.5f ? (P[TB_P_VCA_DPOW] - 64.0f) * (20.0f / 63.0f) : 0.0f);
         adsr.setSustainLevel(pot01(P[TB_P_VCA_S]));
         adsr.setRelease(fastKill ? 0.01f : potEnvTime(P[TB_P_VCA_R]));

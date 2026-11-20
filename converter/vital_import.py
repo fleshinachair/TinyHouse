@@ -440,7 +440,7 @@ def stage_rank(seq: list[int]) -> int:
 
 
 VELOCITY_NOMINAL = 100 / 127.0
-DPOW_HOLD, DPOW_FAST = 3.0, -8.0                                                # amp decay power from which (a positive one holds and then plunges, a very negative one drops at once) the engine draws Vital's own decay curve (adsr.h setDecayPower); the one-pole fit does better between: -5 to 2 measured
+DPOW_HOLD, DPOW_FAST = 0.0, 0.0                                                # amp decay power from which (a positive one holds and then plunges, a very negative one drops at once) the engine draws Vital's own decay curve (adsr.h setDecayPower); the one-pole fit does better between: -5 to 2 measured
 
 
 def env_stage_pot(s: dict, k: int, stage: str) -> int:
@@ -1349,11 +1349,19 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
     dpow = float(s.get("env_1_decay_power", 0.0))
     if dpow >= DPOW_HOLD or dpow <= DPOW_FAST:                                                                 # a strong positive power holds the level and then plunges, which the engine's one-pole fall cannot follow (Kick Drum 1 at 5.5: 24 -> 4.6; powers of 1.8 to 2 fit as before): the engine draws Vital's own curve (adsr.h setDecayPower), over the stored time itself
         P["vca_dpow"] = pot(64 + CLAMP(dpow, -20.0, 20.0) * 63.0 / 20.0)
+        if P["vca_dpow"] == 64:                                                       # the pot's centre is "off" (the analog fall): a straight Vital decay is a power a hair above 0
+            P["vca_dpow"] = 65 if dpow >= 0.0 else 63
         P["vca_d"] = d2m.pot_time(max(float(s["env_1_decay"]), 0.0) ** 4)
     else:
         P["vca_d"] = d2m.pot_time(env_seconds(s, "env_1_decay", True))
     P["vca_s"] = pot(127 * CLAMP(s["env_1_sustain"], 0, 1) ** 2)                        # Vital squares the amplitude envelope into the gain (measured: sustain 0.5 plays at 0.25); the engine sustain is the gain itself
     P["vca_r"] = d2m.pot_time(env_seconds(s, "env_1_release", True))
+    if ENV_DECAY_CURVE:                                                                    # the release is Vital's curve too (the analog fall was 2 to 8 dB off over the tail)
+        rpow = float(s.get("env_1_release_power", 0.0))
+        P["vca_rpow"] = pot(64 + CLAMP(rpow, -20.0, 20.0) * 63.0 / 20.0)
+        if P["vca_rpow"] == 64:
+            P["vca_rpow"] = 65 if rpow >= 0.0 else 63
+        P["vca_r"] = d2m.pot_time(max(float(s["env_1_release"]), 0.0) ** 4)
     P["vca_delay"], P["vca_hold"] = env_stage_pot(s, 1, "delay"), env_stage_pot(s, 1, "hold")
 
     # --- the two voice filters (cutoff is a MIDI note, 8..136, the same space the engine uses)

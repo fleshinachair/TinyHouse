@@ -57,7 +57,15 @@ public:
     void noteOff()
     {
         state = (output > 0.0f) ? State::release : State::idle;
+        if (state == State::release && relPow != 0.0f) {                  /* Vital's own release curve: start * (1 - powerScale(x, p)) over the release time, from the level (square-rooted for the gain) it is at */
+            relStart = relSq ? std::sqrt(output) : output;
+            relPos = 0.0f;
+            const float samples = (float) (sampleRate * release);
+            relStep = samples > 1.0f ? 1.0f / samples : 1.0f;
+        }
     }
+    /* p not 0: the release stage is Vital's curve (powerScale(x, p) = (exp(p x) - 1) / (exp(p) - 1), x over the release time); squared into the gain for the amplitude envelope. 0 keeps the analog fall. */
+    void setReleasePower(float p, bool squared) { relPow = p; relSq = squared; }
 
     /* Vital's Delay and Hold stages, in seconds (0 = off, which leaves the envelope exactly as it was). */
     void setDelay(float d) { delaySec = d; }
@@ -132,6 +140,12 @@ public:
             break;
         case State::sustain: break;
         case State::release:
+            if (relPow != 0.0f) {
+                relPos += relStep;
+                if (relPos >= 1.0f) { output = 0.0f; state = State::idle; }
+                else { const float v = relStart * (1.0f - (std::exp(relPow * relPos) - 1.0f) / (std::exp(relPow) - 1.0f)); output = relSq ? v * v : v; }
+                break;
+            }
             output = releaseOffset + output * releaseCoeff;
             if (output <= 0.0f || release == 0.0f) { output = 0.0f; state = State::idle; }
             break;
@@ -215,6 +229,8 @@ private:
 
     State state = State::idle;
     bool controlRate = false;
+    float relPow = 0.0f, relPos = 0.0f, relStep = 0.0f, relStart = 0.0f;
+    bool relSq = true;
     double sampleRate = 44100.0;
     float attack = 0.0f, decay = 0.0f, sustain = 0.0f, release = 0.0f;
     float attackCoeff = 0.0f, decayCoeff = 0.0f, releaseCoeff = 0.0f;

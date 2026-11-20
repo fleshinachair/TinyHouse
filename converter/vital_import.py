@@ -505,6 +505,17 @@ CTRANS_LIVE = True                                                              
 LFO_BLEND_MEAN = True                                                                   # an LFO route to the Blend knob at the LFO's mean (2 presets: Destruction 8.6 to 8.1)
 FILTER_BLEND_DROP_DB = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}                                  # how far the low-pass / high-pass passband falls at full resonance (engine flt_vbg). Measured per model (Analog 10 dB, Dirty 7.4, Ladder 11, Digital 2: calibration/vital_vfilter_probe.py at res 0.5, taken as res^0.9) but it made the A/B scores worse overall (92 presets: 7.42 without, 7.46 with half, 7.55 with all of it), so it is off
 ROUTE_CURVES = True
+ROUTE_CURVES_LFO = True                                                   # a route's own curve / power on an LFO source: the LFO's shape is bent by it in an engine LFO slot of its own (virtual LFO 10000 + 10 route + LFO)
+
+
+class Route(tuple):
+    """A (source, destination, amount, bipolar) route that remembers which of the preset's routes it came from."""
+    idx = None
+
+    def __new__(cls, t, idx=None):
+        o = super().__new__(cls, t)
+        o.idx = idx
+        return o
 
 
 def static_source_value(s: dict, src: str):
@@ -776,7 +787,8 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     def drop(why: str) -> None:
         dropped[why] = dropped.get(why, 0) + 1
 
-    for src, dest, a, bip in routes:
+    for route in routes:
+        src, dest, a, bip = route
         if dest.startswith("macro_control_") and static_source_value(s, src) is not None:
             continue                                                    # folded into the macro's value above
         if dest.endswith(("_spectral_morph_amount", "_distortion_amount")) and static_source_value(s, src) is not None:
@@ -828,7 +840,10 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             if spec["lr"] is None:
                 drop(f"lfo->{dest}")
             else:
-                lr.append((abs(x), int(src[4:]), spec["lr"], x, bip))
+                kk = int(src[4:])
+                if ROUTE_CURVES_LFO and getattr(route, "idx", None) is not None and spec["lr"] < 1000 and route_shaped(s, route.idx):
+                    kk = 10000 + 10 * route.idx + kk                    # the route's curve bends this LFO's shape: its own engine slot
+                lr.append((abs(x), kk, spec["lr"], x, bip))
         elif src.startswith("env_"):
             if spec["lr"] is None:
                 drop(f"env->{dest}")
@@ -879,7 +894,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     strength: dict[int, float] = {}
     for w, k, dst, *_ in lr:
         strength[k] = strength.get(k, 0.0) + w
-        if dst >= 1000 and k < 100:
+        if dst >= 1000:
             tk = (dst - 1000) // 10
             strength[tk] = strength.get(tk, 0.0) + w * 0.5                                  # the LFO being moved needs an engine slot too
     for w, k, dst, *_ in me:
@@ -888,6 +903,9 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
             strength[tk] = strength.get(tk, 0.0) + w * 0.5
     chosen = sorted(strength, key=lambda k: -strength[k])[:LFO_SLOTS]
     for slot, k in enumerate(chosen, 1):
+        vroute = None
+        if k >= 10000:                                                                       # an LFO whose route bends it (the route's curve / power): the same LFO with its shape put through that curve
+            vroute, k = (k - 10000) // 10, (k - 10000) % 10
         if k >= 100:                                                                         # a Key / Key Oct lookup: the engine LFO's mode, and the route's curve as its Hi-Res table
             what, table = key_tables[k - 100]
             P[f"lfo{slot}_mode"] = 3 if what == "note" else 4
@@ -921,6 +939,9 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         if keyflat:
             shape = [int(round(float(np.mean(shape))))] * len(shape)
             hi = [int(round(float(np.mean(hi))))] * len(hi)
+        if vroute is not None:
+            shape = [int(round(127.0 * CLAMP(route_static_value(s, vroute, v / 127.0), 0.0, 1.0))) for v in shape]
+            hi = [int(round(127.0 * CLAMP(route_static_value(s, vroute, v / 127.0), 0.0, 1.0))) for v in hi]
         for j, v in enumerate(shape):
             P[f"lfo{slot}_s{j}"] = v
         P[f"lfo{slot}_hr"] = 1
@@ -960,13 +981,16 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
         P[f"rn{k}_rate"] = pot(127.0 * math.log(CLAMP(hz, 0.05, 120.0) / 0.05) / math.log(2400.0))
         if int(s.get(f"random_{k}_sync_type", 0)):
             notes.append(f"random {k} is synced to the song position: it draws a new value per note instead")
-    def resolve_dst(dst: int):
-        """A placeholder destination (1000 + 10 k + kind: LFO k's rate or phase) as the engine's index for the slot LFO k took; None when it has none."""
+    def real_lfo(k: int) -> int:
+        return (k - 10000) % 10 if k >= 10000 else k
+
+    def resolve_dsts(dst: int) -> list[int]:
+        """A placeholder destination (1000 + 10 k + kind: LFO k's rate or phase) as the engine's indices for every slot LFO k took (its bent copies move together); [] when it has none."""
         if dst < 1000:
-            return dst
+            return [dst]
         tk = (dst - 1000) // 10
-        return None if tk not in slot_of else 70 + (slot_of[tk] - 1) + (8 if (dst - 1000) % 10 == 1 else 0)
-    combined = [(w, lfo_source(slot_of[k]), rd, x, bip) for w, k, dst, x, bip in lr if k in slot_of and (rd := resolve_dst(dst)) is not None] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
+        return [70 + (slot_of[kv] - 1) + (8 if (dst - 1000) % 10 == 1 else 0) for kv in chosen if kv < 100 + 1 and kv == tk or (kv >= 10000 and real_lfo(kv) == tk)]
+    combined = [(w, lfo_source(slot_of[k]), rd, x, bip) for w, k, dst, x, bip in lr if k in slot_of for rd in resolve_dsts(dst)] + [(w, 4 + k, dst, x, bip) for w, k, dst, x, bip in rn]
     combined += ex
     # velocity routes go live while the eight route slots last (the rest, and any with a control to fold into, are added at velocity 100 as before)
     vel_live.sort(key=lambda r: -r[0])
@@ -989,7 +1013,7 @@ def map_modulation(s: dict, P: dict, routes: list, main_filter: int, notes: list
     for w, src_slot, dst, x, bip in combined[ROUTE_SLOTS:]:
         drop(f"lfo routes past the engine's {ROUTE_SLOTS}")
     # envelope routes: the four strongest onto the engine's spare envelopes (1 and 2 are on its pages, 3 and 4 hidden)
-    me = [(w, k, rd, x, dn) for w, k, dst, x, dn in me if (rd := resolve_dst(dst)) is not None]
+    me = [(w, k, rd, x, dn) for w, k, dst, x, dn in me for rd in resolve_dsts(dst)]
     me.sort(key=lambda r: -r[0])
     for n, (w, k, dst, x, _dn) in enumerate(me[:MOD_ENVS], 1):
         P[f"me{n}_dst"] = dst
@@ -1296,7 +1320,7 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
                 src = f"const:{route_static_value(s, i, v):.6f}"           # a static source through the route's own curve / power: a fixed value
             if KEY_LIVE and src in ("note", "note_in_octave"):
                 src = f"key:{src}:{i}"                                         # resolved in map_modulation: the route's curve becomes a table over the note
-            routes.append((src, m["destination"], amounts[i], bool(s.get(f"modulation_{i + 1}_bipolar"))))
+            routes.append(Route((src, m["destination"], amounts[i], bool(s.get(f"modulation_{i + 1}_bipolar"))), i))
     # macros and velocity aimed at an envelope's attack / decay / release / sustain: added to the stored value (a fraction of its range; times are the value to the 4th) at the macro's saved value and velocity 100
     s = dict(s)
     env_folded = 0

@@ -20,6 +20,8 @@ Not released. Everything here comes from comparing the engine with the Vital plu
 
 **One LFO moves another.** A route from an LFO or an envelope to another LFO's Tempo, Phase (or, while it stays below audio rate, Frequency) was dropped (Staggered Phrases, Thumpus, LORN Style Lead, Strings Section, Abbysun, 6 of the 100 local presets). The engine has sixteen more route destinations, LFO 1..8 Rate and Phase (the Tempo knob steps by octaves as Vital's does); isolated, a phase route follows the plugin (Thumpus 3.2 to 2.5 dB), inside a full preset the results are mixed within the scan noise.
 
+**A route's own curve on an LFO.** A Vital route can carry a drawn transfer curve (and a power) between its source and its destination. For a macro or velocity that was folded in; for an LFO it was ignored, so the LFO swept the wrong shape (Squish Clicker's filter sweep was a rising ramp in the engine and a hump in the plugin). The LFO now takes an engine slot of its own with its shape put through the route's curve (any LFO moves that way together: rate and phase routes reach all its copies). Squish Clicker 12.1 to 8.3 dB, Thumpus 12.0 to 11.1.
+
 **Envelope curves.** The amplitude envelope's decay and release, the filter envelope and the spare envelopes draw Vital's own curve at every power (the analog fall was 2 to 10 dB off over a tail); Vital's control-rate envelopes take one stage a block.
 
 

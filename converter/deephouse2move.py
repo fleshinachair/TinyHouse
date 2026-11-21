@@ -252,6 +252,18 @@ def arp_from_tree(tree: dict):
     return ",".join(str(v) for v in head)
 
 
+def ratio_semitones(p: dict) -> float:
+    """An oscillator in Serum 2's Ratio pitch mode plays the note times its Ratio: Ratio r >= 1 multiplies by r, under 1 by 2^(r - 1), held at a quarter
+    (r <= -1); an unwritten Ratio is 1. Octave, Coarse (Pitch) and Fine do nothing in this mode. Measured on a saw at notes 48 and 60 (r = -4 .. 24), the same with the
+    RM-from-Sub and Sync warps on. With Pitch Track off the Ratio does nothing (the oscillator keeps its fixed pitch). Not carried: Hz Offset, which acts only in this mode
+    (a fixed shift in Hz: ratio 2, -26.3 Hz played 235.3 Hz at note 48) and has no engine control."""
+    if float(p.get("kParamPitchTrack", 1.0)) == 0.0:
+        return 0.0
+    r = float(p.get("kParamPitchRatio", 1.0))
+    mult = r if r >= 1.0 else 2.0 ** (max(r, -1.0) - 1.0)
+    return 12.0 * math.log2(mult)
+
+
 def physical(tree: dict, header: dict) -> dict:
     """Decode a Serum tree into plain physical units."""
     g = _pp(tree.get("Global0", {}))
@@ -270,9 +282,10 @@ def physical(tree: dict, header: dict) -> dict:
             "gran": ({"osc": p, "gran": _pp(tree.get(f"Oscillator{i}", {}).get(f"GranularOsc{i}", {})), "node": {k: v for k, v in tree.get(f"Oscillator{i}", {}).get(f"GranularOsc{i}", {}).items() if k in ("gain", "trimHead", "edgeFadeMs", "baseDetune")}}
                      if kind == "kOsc_Granular" else None),          # the grain settings, read by granular_pots
             "level": p.get("kParamVolume", DEFAULTS["osc_level"]),
-            "octave": p.get("kParamOctave", 0.0),
-            "semitone": p.get("kParamPitch", p.get("kParamCoarsePit", 0.0)),
-            "fine_cents": p.get("kParamFine", 0.0),
+            "ratio": p.get("kParamPitchMode") == "Ratio",           # Serum 2's Ratio pitch mode: the Ratio sets the pitch, the Octave / Pitch / Fine knobs are ignored (ratio_semitones)
+            "octave": 0.0 if p.get("kParamPitchMode") == "Ratio" else p.get("kParamOctave", 0.0),
+            "semitone": ratio_semitones(p) if p.get("kParamPitchMode") == "Ratio" else p.get("kParamPitch", p.get("kParamCoarsePit", 0.0)),
+            "fine_cents": 0.0 if p.get("kParamPitchMode") == "Ratio" else p.get("kParamFine", 0.0),
             "pan": p.get("kParamPan", 0.0),
             "track": p.get("kParamPitchTrack", 1.0),
             "unison": int(p.get("kParamUnison", 1)),
@@ -366,6 +379,8 @@ def physical(tree: dict, header: dict) -> dict:
         x = fxmap.macro_value(m, macros)
         eff = m["amount_pct"] / 100.0 * ((x - 0.5) if m["bipolar"] else x)
         o, par = oscs[oid], m["dest_param"]
+        if o.get("ratio") and par in ("kParamCoarsePit", "kParamPitch", "kParamOctave", "kParamFine"):
+            continue                                  # the knobs a Ratio-mode oscillator ignores
         if m["dest_type"] == "WTOsc" and par in ("kParamWarp", "kParamWarp2"):
             for w in o["warp"]:
                 if w.get("slot") == (1 if par == "kParamWarp2" else 0):
@@ -1782,8 +1797,8 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         pos = _clamp((o["table_pos"] - 1) / 255 + fold[("WTOsc", "kParamTablePos", o["id"])], 0, 1)
         P[f"{k}_pos"] = round(pos * 127)
         P[f"{k}_level"] = pot_level(eff_level(o), o["unison"], wt=True)
-        tune = o["octave"] * 12 + o["semitone"] + bipfold[o["id"]]
-        P[f"{k}_tune"] = round(_clamp(tune, -72, 72))
+        tune = o["octave"] * 12 + o["semitone"] + o["fine_cents"] / 100.0 + bipfold[o["id"]]
+        P[f"{k}_tune"] = round(_clamp(tune, -72, 72), 3)        # semitones, fractional: the loader keeps the fraction, so Fine (cents) and a Ratio pitch are carried
         if abs(tune) > 72:
             appr.append(f"{k} tune {tune:+.0f} st clamped to +/-72")
         if o.get("track", 1.0) == 0.0:
@@ -1990,8 +2005,9 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P[f"{sk}_level"] = round(_clamp(pot_level(slevel) * CAL["smp_scale"], 0, 127))
         P[f"{sk}_fixed"] = int(bool(so.get("noise")))
         # the oscillator's Octave / Pitch / Fine with the macro, velocity and wheel routes into them folded in (the same fold as a wavetable oscillator's tune; a noise stand-in has none)
-        P[f"{sk}_tune"] = round(_clamp(so.get("octave", sinfo["octave"]) * 12 + so.get("semitone", sinfo["pitch"]), -48, 48))
-        P[f"{sk}_fine"] = round(_clamp(so.get("fine_cents", sinfo["fine"]), -100, 100))
+        st = _clamp(so.get("octave", sinfo["octave"]) * 12 + so.get("semitone", sinfo["pitch"]) + so.get("fine_cents", sinfo["fine"]) / 100.0, -48, 48)
+        P[f"{sk}_tune"] = round(st)
+        P[f"{sk}_fine"] = round(_clamp((st - round(st)) * 100.0, -100, 100))      # the part under a semitone (Fine, and a Ratio pitch between semitones)
         P[f"{sk}_post"] = post_of(so["id"])
         if not so.get("noise"):
             P[f"{sk}_pan"] = int(round(_clamp(so["pan"], -50, 50)))          # the slot's own Pan, applied by the engine with Serum's law

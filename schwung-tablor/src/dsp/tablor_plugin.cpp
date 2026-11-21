@@ -30,6 +30,7 @@
 #include "wt/scanner.h"
 #include "wt/loader.h"
 #include "partjoin.h"
+#include "async_render.h"
 #include "preset_digest.h"
 
 static const host_api_v1_t *g_host = nullptr;
@@ -173,6 +174,10 @@ struct tablor_instance {
     std::shared_ptr<const std::string> smp_shape[3];
 
     float *params() { return engine.pots; }
+
+    /* The render thread (async_render.h): block N+1 renders there while the callback hands the host block N. Off (sync) when FIFO
+     * scheduling is refused, when TB_RENDER_SYNC is set, or when /data/UserData/schwung/tinyhouse_sync_render exists. */
+    tb::AsyncRender async;
 
     /* The parameters the host has written lately (the Move's clip automation plays a knob by writing it; no write is announced to the remote UI, which only
      * hears a hardware knob turn). A ring of the last kLive changed parameter indices, newest last, served as `live_vals`. */
@@ -887,7 +892,7 @@ static void set_table_path(tablor_instance *inst, int osc, const char *path, boo
                 if (which == 2) inst->engine.setSample3(std::move(s)); else if (which == 1) inst->engine.setSample2(std::move(s)); else inst->engine.setSample(std::move(s));
             };
             if (p.empty()) { put(nullptr); return; }
-            auto set = std::make_shared<tb::SampleSet>();
+            auto set = tb::makeGrave<tb::SampleSet>();
             if (tb::sampleLoad(p.c_str(), *set)) put(set);
             else put(nullptr);
         });
@@ -1737,6 +1742,10 @@ static void tb_set_param(void *instance, const char *key, const char *val)
 {
     auto *inst = (tablor_instance *) instance;
     if (!inst || !key || !val) return;
+    if (inst->async.on()) {                                 /* the engine is the render thread's until its block is done; MIDI queued before this goes first */
+        inst->async.quiesce();
+        inst->async.drainMidi([inst](const uint8_t *m, int n) { inst->engine.onMidi(m, n); });
+    }
 
     /* state restore: host sends "<prefix>:state" resolved to "state" upstream
      * or the raw prefixed key — accept both spellings. */
@@ -2212,6 +2221,13 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         return write_str(buf, buf_len,
                          inst->ready.load(std::memory_order_relaxed) ? "1" : "0");
 
+    if (!strcmp(key, "async")) {                  /* the render thread: on, its FIFO priority (0 SCHED_OTHER, -1 none), blocks, waits, the longest wait and block */
+        char tmp[160];
+        snprintf(tmp, sizeof tmp, "on=%d prio=%d stuck=%d blocks=%ld late=%ld waitmax_us=%lld rendermax_us=%lld", inst->async.on() ? 1 : 0, inst->async.prio(),
+                 inst->async.wasStuck() ? 1 : 0, inst->async.blocks(), inst->async.lateCount(), inst->async.waitMaxUs(), inst->async.renderMaxUs());
+        return write_str(buf, buf_len, tmp);
+    }
+
     if (!strcmp(key, "state")) {
         const long long t0 = inst->diag ? steady_us() : 0;
         /* The host's preset browser reads the state after EVERY detent (and the slot's autosave reads it too). A sound still waiting for the knob to rest is
@@ -2274,6 +2290,11 @@ static void tb_on_midi(void *instance, const uint8_t *msg, int len, int source)
 {
     auto *inst = (tablor_instance *) instance;
     if (!inst || !msg) return;
+    if (inst->async.on() && (inst->async.busy() || inst->async.midiPending())) {
+        if (inst->async.queueMidi(msg, len)) return;           /* applied, in order, before the next block starts */
+        inst->async.quiesce();
+        inst->async.drainMidi([inst](const uint8_t *m, int n) { inst->engine.onMidi(m, n); });
+    }
     inst->engine.onMidi(msg, len);
 }
 
@@ -2301,16 +2322,34 @@ static void tb_render_block(void *instance, int16_t *out_lr, int frames)
         memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
         return;
     }
+    const bool async = inst->async.on() && frames <= tb::AsyncRender::kMaxFrames;
+    if (inst->async.on()) {
+        /* The block the thread rendered during the last period goes out now; the engine is ours until the next launch. */
+        inst->async.quiesce();
+        if (!async || !inst->async.collect(out_lr, frames))
+            memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
+        inst->async.drainMidi([inst](const uint8_t *m, int n) { inst->engine.onMidi(m, n); });
+    }
     if (inst->pend_idx.load(std::memory_order_relaxed) >= 0 && steady_ms() >= inst->pend_due.load(std::memory_order_relaxed))
         apply_pending(inst, "the rest");                    /* the knob has rested */
     FlushToZero ftz;
+    float bpm = 120.0f;
     if (g_host && g_host->get_bpm)
-        inst->engine.setHostBpm(g_host->get_bpm());
-    if (g_host && g_host->get_beat_position)                 /* the Move's transport, for the demo (guarded: an older host has no such entry) */
-        inst->engine.setHostBeat(g_host->get_beat_position(), true);
-    else
+        inst->engine.setHostBpm(bpm = g_host->get_bpm());
+    if (g_host && g_host->get_beat_position) {               /* the Move's transport, for the demo (guarded: an older host has no such entry) */
+        double beat = g_host->get_beat_position();
+        if (async && beat >= 0.0)                            /* the block rendered now plays one block later: render it at the beat it will play at */
+            beat += (double) frames / (double) MOVE_SAMPLE_RATE * (double) bpm / 60.0;
+        inst->engine.setHostBeat(beat, true);
+    } else
         inst->engine.setHostBeat(-1.0, false);
-    inst->engine.renderBlock(out_lr, frames);
+    if (async) inst->async.launch(frames);
+    else inst->engine.renderBlock(out_lr, frames);
+}
+
+static void tb_async_render(void *ctx, int16_t *out, int frames)
+{
+    static_cast<tablor_instance *>(ctx)->engine.renderBlock(out, frames);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2327,6 +2366,13 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
 
     if (module_dir)
         snprintf(inst->module_dir, sizeof inst->module_dir, "%s", module_dir);
+
+    {   /* the render thread (async_render.h), unless asked not to */
+        struct stat sb;
+        const bool sync = getenv("TB_RENDER_SYNC") || stat("/data/UserData/schwung/tinyhouse_sync_render", &sb) == 0;
+        const int prio = getenv("TB_RT_PRIO") ? std::min(std::max(atoi(getenv("TB_RT_PRIO")), 1), 60) : 20;
+        if (!sync) inst->async.start(tb_async_render, inst, prio, getenv("TB_ASYNC_ALLOW_OTHER") != nullptr);
+    }
 
     /* create_instance runs on the SPI callback too (MODULES.md, "Threading:
      * there is no control thread"). Everything below is file I/O, a directory
@@ -2394,12 +2440,13 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
             }
         inst->ready = true;
         if (g_host && g_host->log) {
-            char msg[160];
+            char msg[200];
             snprintf(msg, sizeof msg,
-                     TB_MODULE_ID ": v" TB_VERSION " ready, %d wavetables, %d packs, %d presets",
+                     TB_MODULE_ID ": v" TB_VERSION " ready, %d wavetables, %d packs, %d presets, render %s (priority %d)",
                      (int) inst->scanner.list().size(),
                      (int) inst->selection()->packs.size(),
-                     (int) inst->presetList()->items.size());
+                     (int) inst->presetList()->items.size(),
+                     inst->async.on() ? "thread" : "callback", inst->async.prio());
             g_host->log(msg);
         }
     });
@@ -2413,6 +2460,7 @@ static void tb_destroy_instance(void *instance)
     /* Join the worker FIRST: member destruction runs in reverse declaration
      * order, which would free presets/sel/wt_shape while a job still writes
      * them. */
+    inst->async.stop();                                     /* the render thread uses the engine */
     inst->loader.stop();
     delete inst;
 }

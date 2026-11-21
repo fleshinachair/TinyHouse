@@ -130,7 +130,7 @@ public:
                 if (decayPos >= 1.0f) { output = sustain; state = State::sustain; }
                 else {
                     const float sl = decaySq ? std::sqrt(sustain) : sustain;
-                    const float v = sl + (1.0f - sl) * (1.0f - (std::exp(decayPow * decayPos) - 1.0f) / (std::exp(decayPow) - 1.0f));
+                    const float v = sl + (1.0f - sl) * (1.0f - (std::exp(decayPow * decayPos) - 1.0f) / expDen(decayPow, decayDenP, decayDen));
                     output = decaySq ? v * v : v;
                 }
                 break;
@@ -143,7 +143,7 @@ public:
             if (relPow != 0.0f) {
                 relPos += relStep;
                 if (relPos >= 1.0f) { output = 0.0f; state = State::idle; }
-                else { const float v = relStart * (1.0f - (std::exp(relPow * relPos) - 1.0f) / (std::exp(relPow) - 1.0f)); output = relSq ? v * v : v; }
+                else { const float v = relStart * (1.0f - (std::exp(relPow * relPos) - 1.0f) / expDen(relPow, relDenP, relDen)); output = relSq ? v * v : v; }
                 break;
             }
             output = releaseOffset + output * releaseCoeff;
@@ -185,9 +185,15 @@ public:
     }
 
 private:
+    /* exp(p) - 1 for a curve's power, kept while the power stays the same: the curves ask for it every sample and it only changes with the knob (the value is the same one). */
+    static float expDen(float p, float &seen, float &den)
+    {
+        if (p != seen || den == 0.0f) { seen = p; den = std::exp(p) - 1.0f; }
+        return den;
+    }
     float attackCurve(float x) const
     {
-        return std::fabs(attackPow) < 0.01f ? x : (std::exp(-attackPow * x) - 1.0f) / (std::exp(-attackPow) - 1.0f);
+        return std::fabs(attackPow) < 0.01f ? x : (std::exp(-attackPow * x) - 1.0f) / expDen(-attackPow, attackDenP, attackDen);
     }
     /* where on the power curve the stage starts: at the beginning, or (a note on over a sounding envelope) at the point that matches the level it is at */
     void startAttack()
@@ -229,6 +235,7 @@ private:
 
     State state = State::idle;
     bool controlRate = false;
+    mutable float decayDenP = 1e30f, decayDen = 0.0f, relDenP = 1e30f, relDen = 0.0f, attackDenP = 1e30f, attackDen = 0.0f;
     float relPow = 0.0f, relPos = 0.0f, relStep = 0.0f, relStart = 0.0f;
     bool relSq = true;
     double sampleRate = 44100.0;

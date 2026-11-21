@@ -146,6 +146,7 @@ public:
     /* Refresh mod slots from the pot array (call after any m*_ change). */
 
     void setHostBpm(float bpm) { hostBpm = bpm; }
+    FxSettings fxSettingsNow() const { return fxSettings(this->pots); }       /* the effects' settings for the current pots (tests) */
     /* The Move's transport: beats since it started (< 0: stopped). `known` says the host reports it at all; without that the demo runs on a clock of its own. */
     void setHostBeat(double beats, bool known) { hostBeat = beats; hostBeatKnown = known; }
 
@@ -340,6 +341,7 @@ private:
     float modSeen[TB_P_PHAS_POLES - TB_P_CHOR_ON + 1] = {};           /* the chorus, flanger and phaser pots are contiguous */
     float splitSeen[TB_P_SPLIT_STAGES - TB_P_SPLIT_BAND + 1] = {};               /* the Split pots are contiguous */
     float distPreSeen[TB_P_DIST_PRE_Q - TB_P_DIST_PRE + 1] = {};                /* the distortion's pre-filter pots are contiguous */
+    float dist2Seen[TB_P_DIST2_PRE_MORPH - TB_P_DIST_PRE_MORPH + 1] = {};                /* the morph and second-distortion pots are contiguous */
     float dly2Seen[TB_P_DLY2_MODE - TB_P_DLY2_MIX + 1] = {};              /* the second delay's pots are contiguous */
     float hydSeen[TB_P_HYD_WET - TB_P_HYD_UNI + 1] = {};              /* the HyperD pots are contiguous */
     float msSeen[TB_P_EQS4_Q - TB_P_EQM1_TYPE + 1] = {};              /* so are the SplitMS branch EQs' */

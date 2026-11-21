@@ -9217,5 +9217,636 @@
    ],
    "reverb_wet": 0.365
   }
+ },
+ "[4.22, 3924, 0.1, 0.173, 0.7]": {
+  "params": {
+   "rev_mix": 24,
+   "rev_decay": 82,
+   "rev_damp": 125,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    4.22,
+    4.18
+   ],
+   "reverb_centroid": [
+    3924,
+    3892
+   ],
+   "reverb_level_db": [
+    0.7,
+    5.8
+   ],
+   "reverb_wet": 0.193
+  }
+ },
+ "[2.32, 3881, -0.1, 0.098, -4.2]": {
+  "params": {
+   "rev_mix": 14,
+   "rev_decay": 66,
+   "rev_damp": 125,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    2.32,
+    2.31
+   ],
+   "reverb_centroid": [
+    3881,
+    4084
+   ],
+   "reverb_level_db": [
+    -4.2,
+    5.5
+   ],
+   "reverb_wet": 0.108
+  }
+ },
+ "[3.06, 860, -13.8, 0.028, -16.6]": {
+  "params": {
+   "rev_mix": 6,
+   "rev_decay": 74,
+   "rev_damp": 103,
+   "rev_width": 25
+  },
+  "notes": [
+   "Reverb: Serum's level is -15 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    3.06,
+    3.12
+   ],
+   "reverb_centroid": [
+    860,
+    825
+   ],
+   "reverb_level_db": [
+    -16.6,
+    -2.0
+   ],
+   "reverb_wet": 0.049
+  }
+ },
+ "[3.46, 2687, 0.3, 0.028, 5.4]": {
+  "params": {
+   "rev_mix": 13,
+   "rev_decay": 77,
+   "rev_damp": 120,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    3.46,
+    3.53
+   ],
+   "reverb_centroid": [
+    2687,
+    2531
+   ],
+   "reverb_level_db": [
+    5.4,
+    4.5
+   ],
+   "reverb_wet": 0.106
+  }
+ },
+ "[2.08, 3720, 0.1, 0.084, -5.0]": {
+  "params": {
+   "rev_mix": 12,
+   "rev_decay": 63,
+   "rev_damp": 124,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    2.08,
+    2.08
+   ],
+   "reverb_centroid": [
+    3720,
+    3741
+   ],
+   "reverb_level_db": [
+    -5.0,
+    5.2
+   ],
+   "reverb_wet": 0.096
+  }
+ },
+ "[2.06, 2276, -0.3, 1.0, -16.7]": {
+  "params": {
+   "rev_mix": 42,
+   "rev_decay": 63,
+   "rev_damp": 117,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: Serum's level is -20 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    2.06,
+    2.05
+   ],
+   "reverb_centroid": [
+    2276,
+    2204
+   ],
+   "reverb_level_db": [
+    -16.7,
+    3.8
+   ],
+   "reverb_wet": 0.327
+  }
+ },
+ "[2.02, 3484, -0.1, 0.233, -3.9]": {
+  "params": {
+   "rev_mix": 22,
+   "rev_decay": 63,
+   "rev_damp": 123,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    2.02,
+    2.09
+   ],
+   "reverb_centroid": [
+    3484,
+    3358
+   ],
+   "reverb_level_db": [
+    -3.9,
+    5.1
+   ],
+   "reverb_wet": 0.177
+  }
+ },
+ "[5.47, 3769, -2.2, 0.587, -2.6]": {
+  "params": {
+   "rev_mix": 39,
+   "rev_decay": 89,
+   "rev_damp": 125,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.47,
+    5.46
+   ],
+   "reverb_centroid": [
+    3769,
+    3889
+   ],
+   "reverb_level_db": [
+    -2.6,
+    5.8
+   ],
+   "reverb_wet": 0.305
+  }
+ },
+ "[5.6, 3340, -2.4, 0.538, -1.4]": {
+  "params": {
+   "rev_mix": 41,
+   "rev_decay": 90,
+   "rev_damp": 123,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    5.6,
+    5.6
+   ],
+   "reverb_centroid": [
+    3340,
+    3309
+   ],
+   "reverb_level_db": [
+    -1.4,
+    5.4
+   ],
+   "reverb_wet": 0.322
+  }
+ },
+ "[2.72, 3299, 0.1, 0.1, 5.5]": {
+  "params": {
+   "rev_mix": 25,
+   "rev_decay": 70,
+   "rev_damp": 123,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    2.72,
+    2.68
+   ],
+   "reverb_centroid": [
+    3299,
+    3359
+   ],
+   "reverb_level_db": [
+    5.5,
+    5.1
+   ],
+   "reverb_wet": 0.2
+  }
+ },
+ "[0.58, 6485, 0.2, 0.98, -14.3]": {
+  "params": {
+   "rev_mix": 41,
+   "rev_decay": 28,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: Serum's level is -19 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    0.58,
+    0.59
+   ],
+   "reverb_centroid": [
+    6485,
+    6267
+   ],
+   "reverb_level_db": [
+    -14.3,
+    5.2
+   ],
+   "reverb_wet": 0.324
+  }
+ },
+ "[0.97, 1920, 0.1, 0.765, -30.3]": {
+  "params": {
+   "rev_mix": 36,
+   "rev_decay": 42,
+   "rev_damp": 111,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: Serum's level is -33 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    0.97,
+    0.97
+   ],
+   "reverb_centroid": [
+    1920,
+    1741
+   ],
+   "reverb_level_db": [
+    -30.3,
+    2.5
+   ],
+   "reverb_wet": 0.281
+  }
+ },
+ "[1.21, 2234, 0.3, 0.654, -19.0]": {
+  "params": {
+   "rev_mix": 33,
+   "rev_decay": 48,
+   "rev_damp": 115,
+   "rev_width": 127
+  },
+  "notes": [
+   "Reverb: Serum's level is -22 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    1.21,
+    1.2
+   ],
+   "reverb_centroid": [
+    2234,
+    2141
+   ],
+   "reverb_level_db": [
+    -19.0,
+    3.3
+   ],
+   "reverb_wet": 0.257
+  }
+ },
+ "[0.5, 2475, -145.8, 0.488, -16.1]": {
+  "params": {
+   "rev_mix": 28,
+   "rev_decay": 26,
+   "rev_damp": 113,
+   "rev_width": 0
+  },
+  "notes": [
+   "Reverb: Serum's level is -16 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    0.5,
+    0.52
+   ],
+   "reverb_centroid": [
+    2475,
+    2579
+   ],
+   "reverb_level_db": [
+    -16.1,
+    0.3
+   ],
+   "reverb_wet": 0.219
+  }
+ },
+ "[1.07, 3054, -151.1, 0.235, -3.3]": {
+  "params": {
+   "rev_mix": 30,
+   "rev_decay": 45,
+   "rev_damp": 119,
+   "rev_width": 0
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.07,
+    1.06
+   ],
+   "reverb_centroid": [
+    3054,
+    3206
+   ],
+   "reverb_level_db": [
+    -3.3,
+    1.0
+   ],
+   "reverb_wet": 0.238
+  }
+ },
+ "[1.03, 3400, -152.4, 0.213, -1.4]": {
+  "params": {
+   "rev_mix": 32,
+   "rev_decay": 44,
+   "rev_damp": 120,
+   "rev_width": 0
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.03,
+    1.02
+   ],
+   "reverb_centroid": [
+    3400,
+    3385
+   ],
+   "reverb_level_db": [
+    -1.4,
+    1.2
+   ],
+   "reverb_wet": 0.252
+  }
+ },
+ "[0.91, 1728, -0.7, 0.045, -1.4]": {
+  "params": {
+   "rev_mix": 13,
+   "rev_decay": 40,
+   "rev_damp": 110,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    0.91,
+    0.87
+   ],
+   "reverb_centroid": [
+    1728,
+    1888
+   ],
+   "reverb_level_db": [
+    -1.4,
+    2.3
+   ],
+   "reverb_wet": 0.103
+  }
+ },
+ "wide:-19.8": {
+  "params": {
+   "fx_wide": 12
+  },
+  "notes": [],
+  "info": {
+   "wide_side_added_db": [
+    -19.8,
+    -19.7
+   ]
+  }
+ },
+ "[0.79, 3470, -153.2, 0.134, -1.3]": {
+  "params": {
+   "rev_mix": 25,
+   "rev_decay": 37,
+   "rev_damp": 119,
+   "rev_width": 0
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    0.79,
+    0.78
+   ],
+   "reverb_centroid": [
+    3470,
+    3420
+   ],
+   "reverb_level_db": [
+    -1.3,
+    1.1
+   ],
+   "reverb_wet": 0.197
+  }
+ },
+ "[8.78, 4068, -5.2, 1.026, 17.1]": {
+  "params": {
+   "rev_mix": 127,
+   "rev_decay": 101,
+   "rev_damp": 127,
+   "rev_width": 71
+  },
+  "notes": [
+   "Reverb: Serum's level is +13 dB from the engine's, limited to 12 dB",
+   "Reverb: Serum's is 12.2 dB louder than the engine's maximum, so the tail is that much quieter"
+  ],
+  "info": {
+   "reverb_rt60": [
+    8.78,
+    8.77
+   ],
+   "reverb_centroid": [
+    4068,
+    4294
+   ],
+   "reverb_level_db": [
+    17.1,
+    4.6
+   ],
+   "reverb_wet": 1.0
+  }
+ },
+ "[7.44, 3219, -14.2, 0.094, 4.1]": {
+  "params": {
+   "rev_mix": 27,
+   "rev_decay": 98,
+   "rev_damp": 123,
+   "rev_width": 25
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    7.44,
+    7.59
+   ],
+   "reverb_centroid": [
+    3219,
+    3205
+   ],
+   "reverb_level_db": [
+    4.1,
+    2.5
+   ],
+   "reverb_wet": 0.21
+  }
+ },
+ "[1.44, 3616, -154.9, 0.059, -0.4]": {
+  "params": {
+   "rev_mix": 16,
+   "rev_decay": 53,
+   "rev_damp": 123,
+   "rev_width": 0
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.44,
+    1.42
+   ],
+   "reverb_centroid": [
+    3616,
+    3818
+   ],
+   "reverb_level_db": [
+    -0.4,
+    1.8
+   ],
+   "reverb_wet": 0.13
+  }
+ },
+ "[0.62, 2254, -139.0, 0.101, -15.3]": {
+  "params": {
+   "rev_mix": 12,
+   "rev_decay": 31,
+   "rev_damp": 113,
+   "rev_width": 0
+  },
+  "notes": [
+   "Reverb: Serum's level is -16 dB from the engine's, limited to 12 dB"
+  ],
+  "info": {
+   "reverb_rt60": [
+    0.62,
+    0.62
+   ],
+   "reverb_centroid": [
+    2254,
+    2385
+   ],
+   "reverb_level_db": [
+    -15.3,
+    0.2
+   ],
+   "reverb_wet": 0.095
+  }
+ },
+ "[0.24, 2175, -7.5, 0.877, -1.8]": {
+  "params": {
+   "rev_mix": 127,
+   "rev_decay": 8,
+   "rev_damp": 104,
+   "rev_width": 55
+  },
+  "notes": [
+   "Reverb: Serum's is 0.3 dB louder than the engine's maximum, so the tail is that much quieter"
+  ],
+  "info": {
+   "reverb_rt60": [
+    0.24,
+    0.25
+   ],
+   "reverb_centroid": [
+    2175,
+    2051
+   ],
+   "reverb_level_db": [
+    -1.8,
+    -3.2
+   ],
+   "reverb_wet": 1.0
+  }
+ },
+ "[1.28, 6089, 0.1, 0.158, -1.2]": {
+  "params": {
+   "rev_mix": 21,
+   "rev_decay": 50,
+   "rev_damp": 127,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.28,
+    1.3
+   ],
+   "reverb_centroid": [
+    6089,
+    5093
+   ],
+   "reverb_level_db": [
+    -1.2,
+    5.3
+   ],
+   "reverb_wet": 0.167
+  }
+ },
+ "[1.47, 4800, 0.2, 0.182, -0.5]": {
+  "params": {
+   "rev_mix": 24,
+   "rev_decay": 53,
+   "rev_damp": 126,
+   "rev_width": 127
+  },
+  "notes": [],
+  "info": {
+   "reverb_rt60": [
+    1.47,
+    1.45
+   ],
+   "reverb_centroid": [
+    4800,
+    4576
+   ],
+   "reverb_level_db": [
+    -0.5,
+    5.2
+   ],
+   "reverb_wet": 0.19
+  }
  }
 }

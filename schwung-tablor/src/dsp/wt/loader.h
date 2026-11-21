@@ -15,10 +15,12 @@
 #include "../engine.h"
 #include "../../ported/wav.h"
 #include "../rt.h"
+#include "../grave.h"
 
 #include <functional>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <map>
 #include <mutex>
@@ -141,13 +143,22 @@ private:
 
     void run()
     {
+        Grave::onWorker() = true;
+        Grave::get().workerUp();
+        runLoop();
+        Grave::get().workerDown();
+    }
+
+    void runLoop()
+    {
         for (;;) {
+            Grave::get().drain();                                   /* the big data the audio thread let go of is freed here */
             WtEntry entry;
             int osc = -1;
             std::function<void()> job;
             {
                 std::unique_lock<std::mutex> lk(m);
-                cv.wait(lk, [this] {
+                cv.wait_for(lk, std::chrono::milliseconds(250), [this] {
                     return quit || anyPending() || !jobs.empty();
                 });
                 if (quit) return;
@@ -311,7 +322,7 @@ private:
             for (float &v : samples) v *= g;
         }
 
-        auto wt = std::make_shared<Wavetable>();
+        auto wt = makeGrave<Wavetable>();
         const size_t slash = entry.path.find_last_of("/\\");
         const bool vitalTable = entry.path.compare(slash == std::string::npos ? 0 : slash + 1, 6, "vital_") == 0;      /* a table the Vital importer wrote */
         if (!wtBuild(*wt, samples.data(), nFrames, frameSize, 44100.0f, rate, 6, nullptr, vitalTable))

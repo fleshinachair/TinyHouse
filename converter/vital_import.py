@@ -1696,6 +1696,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         sync = int(s.get("chorus_sync", 0))
         hz = 1.0 / lfo_period_s(sync, s.get("chorus_tempo", 4.0)) if sync in (1, 2, 3) else 2.0 ** s["chorus_frequency"]      # tempo-synced at the 120 BPM the engine renders at
         P["chor_rate"] = pot(127 * CLAMP(hz / 20.0, 0, 1) ** (1 / 3))
+        if sync in (1, 2, 3):
+            P["chor_sync"] = 1                                                            # the rate is the one at 120 BPM; the engine scales it by the host tempo
+            notes.append("chorus is tempo-synced: it follows the host tempo")
         P["chor_depth"] = pot(127 * s["chorus_mod_depth"])
         P["chor_d1"] = pot(127 * (CLAMP(s["chorus_delay_1"], -10.0, -5.64386) + 10.0) / 4.35614)
         P["chor_d2"] = pot(127 * (CLAMP(s["chorus_delay_2"], -10.0, -5.64386) + 10.0) / 4.35614)
@@ -1715,6 +1718,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["flan_vital"] = 1
         P["flan_mix"] = pot(127 * CLAMP(s["flanger_dry_wet"], 0.0, 1.0))
         P["flan_rate"] = pot(127 * CLAMP(fx_rate_hz("flanger") / 20.0, 0, 1) ** (1 / 3))
+        if int(s.get("flanger_sync", 0)) in (1, 2, 3):
+            P["flan_sync"] = 1
+            notes.append("flanger is tempo-synced: it follows the host tempo")
         P["flan_depth"] = pot(127 * CLAMP(s["flanger_mod_depth"], 0.0, 1.0))
         P["flan_fb"] = pot(127 * (CLAMP(s["flanger_feedback"], -1.0, 1.0) + 1.0) / 2.0)
         P["flan_vcenter"] = pot(127 * (CLAMP(s["flanger_center"], 8.0, 136.0) - 8.0) / 128.0)
@@ -1726,6 +1732,9 @@ def map_vital(d: dict, name: str, wt_root: Path, subdir: str = "Vital") -> dict:
         P["phas_vital"] = 1
         P["phas_mix"] = pot(127 * CLAMP(s["phaser_dry_wet"], 0.0, 1.0))
         P["phas_rate"] = pot(127 * CLAMP(fx_rate_hz("phaser") / 20.0, 0, 1) ** (1 / 3))
+        if int(s.get("phaser_sync", 0)) in (1, 2, 3):
+            P["phas_sync"] = 1
+            notes.append("phaser is tempo-synced: it follows the host tempo")
         P["phas_depth"] = pot(127 * CLAMP(s["phaser_mod_depth"] / 48.0, 0, 1))
         P["phas_fb"] = pot(127 * (CLAMP(s["phaser_feedback"], -1.0, 1.0) + 1.0) / 2.0)
         P["phas_vcenter"] = pot(127 * (CLAMP(s["phaser_center"], 8.0, 136.0) - 8.0) / 128.0)

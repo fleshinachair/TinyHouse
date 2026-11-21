@@ -736,6 +736,114 @@ static void testDelaySync()
     CHECK(std::fabs(tOff / t120 - 1.0) < 0.15, "Sync Off ignores the host tempo (%.0f vs %.0f ms)", tOff, t120);
 }
 
+/* Mod FX tempo sync: the Rate knob is the rate at 120 BPM; with Sync On the chorus / flanger / phaser rate scales with the host tempo (x BPM / 120), Off ignores it. */
+static void testModFxSync()
+{
+    printf("== mod fx tempo sync ==\n");
+    auto rates = [](float bpm, int sync, float *c, float *f, float *p) {
+        Engine e;
+        e.setHostBpm(bpm);
+        e.pots[TB_P_CHOR_RATE] = 80; e.pots[TB_P_FLAN_RATE] = 80; e.pots[TB_P_PHAS_RATE] = 80;
+        e.pots[TB_P_CHOR_SYNC] = e.pots[TB_P_FLAN_SYNC] = e.pots[TB_P_PHAS_SYNC] = (float) sync;
+        const auto s = e.fxSettingsNow();
+        *c = s.chorRate; *f = s.flanRate; *p = s.phasRate;
+    };
+    float c120, f120, p120, c60, f60, p60, c240, f240, p240, co, fo, po;
+    rates(120.0f, 1, &c120, &f120, &p120);
+    rates(60.0f, 1, &c60, &f60, &p60);
+    rates(240.0f, 1, &c240, &f240, &p240);
+    rates(60.0f, 0, &co, &fo, &po);
+    CHECK(c120 > 0.1f && f120 > 0.1f && p120 > 0.1f, "the rates are set (%.2f %.2f %.2f Hz)", c120, f120, p120);
+    CHECK(std::fabs(c60 / c120 - 0.5f) < 0.01f && std::fabs(f60 / f120 - 0.5f) < 0.01f && std::fabs(p60 / p120 - 0.5f) < 0.01f, "Sync On at 60 BPM halves every rate");
+    CHECK(std::fabs(c240 / c120 - 2.0f) < 0.01f && std::fabs(f240 / f120 - 2.0f) < 0.01f && std::fabs(p240 / p120 - 2.0f) < 0.01f, "Sync On at 240 BPM doubles every rate");
+    CHECK(std::fabs(co / c120 - 1.0f) < 0.01f && std::fabs(fo / f120 - 1.0f) < 0.01f && std::fabs(po / p120 - 1.0f) < 0.01f, "Sync Off ignores the host tempo");
+}
+
+/* Audio-thread hygiene: a reverb that switches off has its memory wiped a slice per block, and a stage that runs again first finishes the wipe (no stale tail); the big shared data
+ * a voice lets go of is freed by the worker, not where the last reference drops. */
+struct GraveProbe { static inline int dead = 0; ~GraveProbe() { dead++; } };
+static void testHygiene()
+{
+    printf("== audio-thread hygiene ==\n");
+    {
+        Fx fx(44100.0f);
+        FxSettings s; s.revMix = 0.6f; s.revT60 = 3.0f; fx.set(s);
+        float L[128], R[128];
+        uint32_t r = 12345;
+        for (int b = 0; b < 40; b++) {
+            for (int i = 0; i < 128; i++) { r = r * 1664525u + 1013904223u; L[i] = R[i] = ((int) (r >> 9) - 4194304) / 4194304.0f; }
+            fx.process(L, R, 128);
+        }
+        s.revMix = 0.0f; fx.set(s);
+        for (int i = 0; i < 128; i++) L[i] = R[i] = 0.0f;
+        for (int b = 0; b < 3; b++) { for (int i = 0; i < 128; i++) L[i] = R[i] = 0.0f; fx.process(L, R, 128); }      /* the wipe is queued and goes a slice per block */
+        s.revMix = 0.6f; fx.set(s);
+        float peak = 0.0f;
+        for (int b = 0; b < 4; b++) {
+            for (int i = 0; i < 128; i++) L[i] = R[i] = 0.0f;
+            fx.process(L, R, 128);
+            for (int i = 0; i < 128; i++) peak = std::max(peak, std::max(std::fabs(L[i]), std::fabs(R[i])));
+        }
+        CHECK(peak < 1e-9f, "a reverb switched off and on again carries no old tail (peak %.3g)", (double) peak);
+    }
+    {
+        std::vector<float> a(100000, 1.0f), b(50000, 1.0f);
+        Fx::SliceClear sc;
+        sc.add(a); sc.add(b);
+        int steps = 0;
+        while (sc.pending()) { sc.step(16384); steps++; }
+        bool zero = true;
+        for (float v : a) zero = zero && v == 0.0f;
+        for (float v : b) zero = zero && v == 0.0f;
+        CHECK(zero && steps == 10, "a queued wipe clears every buffer, %d slices of 16384", steps);
+    }
+    {
+        Grave::get().workerUp();
+        GraveProbe::dead = 0;
+        { auto p = makeGrave<GraveProbe>(); }
+        CHECK(GraveProbe::dead == 0, "the last reference dropped off the worker only queues the free");
+        Grave::get().drain();
+        CHECK(GraveProbe::dead == 1, "the worker's drain does the delete");
+        Grave::get().workerDown();
+        { auto p = makeGrave<GraveProbe>(); }
+        CHECK(GraveProbe::dead == 2, "with no worker running the delete is done in place");
+    }
+}
+
+/* The Distortion's pre-filter morph (LP -> BP -> HP by Serum's LPHP) and the second distortion stage. */
+static void testDistMorphAndSecond()
+{
+    printf("== distortion pre-filter morph and second distortion ==\n");
+    /* a tiny pre-gain with the output gain made up: the curve is linear, so what comes out is the pre-filtered signal */
+    auto through = [](int pre, float morph, float hz, float freqHz, bool second, bool before) {
+        Fx fx(44100.0f);
+        FxSettings s; s.distCal = true; s.distMode = 0; s.distMix = 1.0f; s.distGain = 0.05f; s.distOut = 20.0f; s.distLevel = 1.0f;
+        s.distPre = pre; s.distPreHz = hz; s.distPreQ = 0.7f; s.distPreMorph = morph;
+        if (second) { s.dist2Mix = 1.0f; s.dist2Mode = 2; s.dist2Gain = 8.0f; s.dist2Out = 0.5f; s.dist2Level = 1.0f; s.dist2Before = before; }
+        fx.set(s);
+        double acc = 0.0; int cnt = 0;
+        float L[128], R[128];
+        for (int b = 0; b < 96; b++) {
+            for (int i = 0; i < 128; i++) { const float v = 0.3f * (float) std::sin(2.0 * M_PI * freqHz * (double) (b * 128 + i) / 44100.0); L[i] = R[i] = v; }
+            fx.process(L, R, 128);
+            if (b >= 48) for (int i = 0; i < 128; i++) { acc += (double) L[i] * L[i]; cnt++; }
+        }
+        return std::sqrt(acc / cnt) / (0.3 / std::sqrt(2.0));
+    };
+    const double lo0 = through(3, 0.0f, 1000.0f, 250.0f, false, false), hi0 = through(3, 0.0f, 1000.0f, 4000.0f, false, false);
+    const double lo1 = through(3, 1.0f, 1000.0f, 250.0f, false, false), hi1 = through(3, 1.0f, 1000.0f, 4000.0f, false, false);
+    const double lo5 = through(3, 0.5f, 1000.0f, 250.0f, false, false), hi5 = through(3, 0.5f, 1000.0f, 4000.0f, false, false);
+    const double lpLo = through(1, 0.0f, 1000.0f, 250.0f, false, false), lpHi = through(1, 0.0f, 1000.0f, 4000.0f, false, false);
+    CHECK(lo0 > 0.85 && hi0 < 0.12, "Morph 0 is a low-pass (250 Hz %.2f, 4 kHz %.2f)", lo0, hi0);
+    CHECK(hi1 > 0.85 && lo1 < 0.12, "Morph 1 is a high-pass (250 Hz %.2f, 4 kHz %.2f)", lo1, hi1);
+    CHECK(lo5 > 0.12 && lo5 < 0.5 && hi5 > 0.12 && hi5 < 0.5, "Morph 0.5 is a band-pass around the cutoff (250 Hz %.2f, 4 kHz %.2f)", lo5, hi5);
+    CHECK(std::fabs(lo0 - lpLo) < 0.05 && std::fabs(hi0 - lpHi) < 0.03, "Morph 0 matches the plain low-pass (%.3f / %.3f against %.3f / %.3f)", lo0, hi0, lpLo, lpHi);
+    const double base = through(0, 0.0f, 1000.0f, 1000.0f, false, false), two = through(0, 0.0f, 1000.0f, 1000.0f, true, false), twoB = through(0, 0.0f, 1000.0f, 1000.0f, true, true);
+    CHECK(std::fabs(base - 1.0) < 0.05, "no second stage leaves the linear curve alone (%.3f)", base);
+    CHECK(std::fabs(two - base) > 0.1, "a second (hard) distortion changes the level (%.3f against %.3f)", two, base);
+    CHECK(std::fabs(twoB - two) < 0.05, "with a linear first stage the order of the two makes no difference (%.3f / %.3f)", twoB, two);
+}
+
 /* The Serum velocity law: flat with VCA Velocity 0, linear in the velocity at 127, and the same gain at velocity 100 whatever the depth. */
 static void testVelocityLaw()
 {
@@ -1554,6 +1662,26 @@ static void testGranularSlot()
       const uint8_t off[] = { 0x80, 60, 0 }; e.onMidi(off, 3); render(e, 600);
       CHECK(e.activeStreams() == 0, "a released note ends"); }
 
+    /* an envelope route into the slot's Start moves where the grains read: on a ramp file a held scan reads the ramp's level at Start */
+    {
+        auto ramp = std::make_shared<SampleSet>();
+        SampleRegion rr; rr.rate = 44100.0f; rr.root = 60; rr.frames = 44100 * 4; rr.pcm.resize((size_t) rr.frames);
+        for (int i = 0; i < rr.frames; i++) rr.pcm[(size_t) i] = (int16_t) (24000.0 * i / rr.frames);
+        ramp->regions.push_back(std::move(rr));
+        auto level = [&](int amt) {
+            Engine e; e.pots[TB_P_WT1_LEVEL] = 0; e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127; e.pots[TB_P_SMP_LEVEL] = 127; e.setSample(ramp);
+            e.pots[TB_P_SMP_KIND] = 1; e.pots[TB_P_SMP_GDENS] = 100; e.pots[TB_P_SMP_GLEN] = 40; e.pots[TB_P_SMP_GWINP] = 100; e.pots[TB_P_SMP_GSCAN] = 0;
+            if (amt >= 0) { e.pots[TB_P_ME1_DST] = MD_SMP1_GSTART; e.pots[TB_P_ME1_AMT] = (float) amt; e.pots[TB_P_ME1_A] = 0; e.pots[TB_P_ME1_S] = 127; }
+            note(e, 60);
+            auto y = render(e, 600);
+            double acc = 0.0; int n = 0;
+            for (size_t i = 44100; i < 44100 + 8820; i++) { acc += y[i * 2]; n++; }
+            return acc / n;
+        };
+        const double none = level(-1), half = level(96);                 /* amount 96: about +0.5 of the file */
+        CHECK(half > 5.0 * std::max(none, 50.0), "a route into Start moves the read position up the ramp (%.0f against %.0f)", half, none);
+    }
+
     /* ---- tempo scan, ScanRange, the BPM grids and unison (measured on Serum, docs/GRANULAR_PROBE_NOTES.md) ---- */
     {
         auto ramp = std::make_shared<SampleSet>();
@@ -1742,6 +1870,9 @@ int main()
     testNoiseTypes();
     testNoiseColour();
     testDelaySync();
+    testModFxSync();
+    testHygiene();
+    testDistMorphAndSecond();
     testVelocityLaw();
     testFxBuses();
     testFxFilterLfo();

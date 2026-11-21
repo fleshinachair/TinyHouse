@@ -99,10 +99,14 @@ enum ModDst {
     /* One LFO moving another's rate (a fraction of Vital's control range: 16 octaves of Hz for a free LFO, 12 tempo steps for a synced one) and phase (cycles), the engine's LFO 1..8 (the value the routes leave is read one block later) */
     MD_LFO1_RATE, MD_LFO2_RATE, MD_LFO3_RATE, MD_LFO4_RATE, MD_LFO5_RATE, MD_LFO6_RATE, MD_LFO7_RATE, MD_LFO8_RATE,
     MD_LFO1_PHASE, MD_LFO2_PHASE, MD_LFO3_PHASE, MD_LFO4_PHASE, MD_LFO5_PHASE, MD_LFO6_PHASE, MD_LFO7_PHASE, MD_LFO8_PHASE,
+    /* A granular slot's Start, Position (Manual Position mode) and Random Pitch KNOBS (granular.h), three to a slot in this order: the offset is added to the knob as a fraction of its range
+     * (Start and Position 0..1 of the file; Random Pitch moves the knob of its exponential law, as Serum's routes do). */
+    MD_SMP1_GSTART, MD_SMP1_GPOS, MD_SMP1_GRPITCH, MD_SMP2_GSTART, MD_SMP2_GPOS, MD_SMP2_GRPITCH, MD_SMP3_GSTART, MD_SMP3_GPOS, MD_SMP3_GRPITCH,
     MD_COUNT
 };
 /* Saved presets store the destination INDEX: a new destination goes at the end, never in front of one that has shipped (0.9.8 shipped MD_FLT_BLEND = 64). */
 static_assert(MD_WT1_FINE == 61 && MD_FLT_BLEND == 64 && MD_FLT2_BLEND == 65 && MD_VOICE_PITCH == 66 && MD_VOICE_FINE == 67 && MD_FLT_CTRANS == 68 && MD_FLT2_CTRANS == 69, "a mod destination moved: presets store the index");
+static_assert(MD_LFO8_PHASE == 85 && MD_SMP1_GSTART == 86 && MD_SMP3_GRPITCH == 94, "a mod destination moved: presets store the index");
 
 /* The destinations whose route is added to a level KNOB, before the knob's taper. */
 inline bool isLevelDst(int d) {
@@ -602,7 +606,7 @@ public:
         }
 
         /* The granular kind of each sample slot (granular.h): Density / Grain Length are knobs that a route adds to, Scan Rate is a percent (a route of a adds 4a). */
-        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb, int xc, int uniP, int detP, int spreadP, int mLvl, int panP) {
+        const auto addGrains = [&](GrainCloud &gc, int levelP, int fixedP, int tuneP, int fineP, int postP, int balP, int busP, int densP, int lenP, int scanP, int startP, int winP, int winpP, int skewP, int mDens, int xb, int xc, int uniP, int detP, int spreadP, int mLvl, int panP, int mGr) {
             const float knob = sampleKnob(pot01(P[levelP]), lfoLvl[mLvl]);
             if (!gc.on || !(knob > 0.0f)) return;
             const bool fixedPitch = P[fixedP] >= 0.5f;
@@ -632,17 +636,24 @@ public:
             }
             gp.uni = std::min((int) P[uniP], (int) P[TB_P_UNI_CAP]);
             if ((int) P[TB_P_UNI_CAP] < 16) gp.nCap = 2.0f * (float) P[TB_P_UNI_CAP];          /* Unison Cap below 16 also thins a dense cloud: at most 2 grains at once per step of the cap */
+            /* A default budget: at most 64 grains alive per cloud (N x unison copies), so a dense preset cannot take a whole audio block from the others. The cloud keeps its level
+             * (granular.h compensates the thinning). No factory preset gets near it (the densest uses 22). */
+            { const float budgetN = std::max(1.0f, 64.0f / (float) std::max(gp.uni, 1)); gp.nCap = gp.nCap > 0.0f ? std::min(gp.nCap, budgetN) : budgetN; }
             if (gp.uni > 1) { gp.uniDet = 4.0f * std::pow(pot01(P[detP]), 1.25f); gp.uniSpread = pot01(P[spreadP]); }          /* the granular detune: 4 d^1.25 semitones across the stack */
-            gp.start = P[startP] * 0.01f;
+            gp.start = std::clamp(P[startP] * 0.01f + modOff[mGr], 0.0f, 1.0f);
             gp.winShape = (int) P[winP]; gp.winParam = P[winpP]; gp.winSkew = P[skewP];
             gp.loopMode = (int) P[xb]; gp.loopStart = P[xb + 1] * 0.01f; gp.loopEnd = P[xb + 2] * 0.01f; gp.end = P[xb + 3] * 0.01f;      /* xb: the slot's 12 params from _GLOOP (gen_params _gran2) */
-            gp.manual = P[xb + 4] >= 0.5f; gp.position = P[xb + 5] * 0.01f;
-            gp.rDir = P[xb + 6] * 0.01f; gp.rGain = P[xb + 7] * 0.01f; gp.rPitch = P[xb + 8]; gp.rOffset = P[xb + 9] * 0.01f; gp.rLen = P[xb + 10] * 0.01f; gp.rPan = P[xb + 11] * 0.01f;
+            gp.manual = P[xb + 4] >= 0.5f; gp.position = std::clamp(P[xb + 5] * 0.01f + modOff[mGr + 1], 0.0f, 1.0f);
+            gp.rDir = P[xb + 6] * 0.01f; gp.rGain = P[xb + 7] * 0.01f; gp.rPitch = P[xb + 8];
+            if (modOff[mGr + 2] != 0.0f) {                 /* a route moves the KNOB of Random Pitch: stored semitones p = 12 (e^(4.4 x) - 1) / (e^4.4 - 1) */
+                const float x = std::log1p(std::max(gp.rPitch, 0.0f) * (std::exp(4.4f) - 1.0f) / 12.0f) / 4.4f;
+                gp.rPitch = 12.0f * (std::exp(4.4f * std::clamp(x + modOff[mGr + 2], 0.0f, 1.0f)) - 1.0f) / (std::exp(4.4f) - 1.0f);
+            } gp.rOffset = P[xb + 9] * 0.01f; gp.rLen = P[xb + 10] * 0.01f; gp.rPan = P[xb + 11] * 0.01f;
             addSource(P[postP], balP, busP, [&](float *l, float *r) { smpPan(P[panP], l, r, [&](float *a, float *b) { gc.processAdding(gp, semis, knob * knob, (float) sampleRate, a, b, n); }); });
         };
-        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS, TB_P_SMP_GLOOP, TB_P_SMP_GSCX, TB_P_SMP_UNI, TB_P_SMP_DET, TB_P_SMP_SPREAD, MD_SMP1_LEVEL, TB_P_SMP_PAN);
-        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS, TB_P_SMP2_GLOOP, TB_P_SMP2_GSCX, TB_P_SMP2_UNI, TB_P_SMP2_DET, TB_P_SMP2_SPREAD, MD_SMP2_LEVEL, TB_P_SMP2_PAN);
-        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS, TB_P_SMP3_GLOOP, TB_P_SMP3_GSCX, TB_P_SMP3_UNI, TB_P_SMP3_DET, TB_P_SMP3_SPREAD, MD_SMP3_LEVEL, TB_P_SMP3_PAN);
+        addGrains(gran, TB_P_SMP_LEVEL, TB_P_SMP_FIXED, TB_P_SMP_TUNE, TB_P_SMP_FINE, TB_P_SMP_POST, TB_P_SMP_BAL, TB_P_SMP_BUS1, TB_P_SMP_GDENS, TB_P_SMP_GLEN, TB_P_SMP_GSCAN, TB_P_SMP_GSTART, TB_P_SMP_GWIN, TB_P_SMP_GWINP, TB_P_SMP_GSKEW, MD_SMP1_GDENS, TB_P_SMP_GLOOP, TB_P_SMP_GSCX, TB_P_SMP_UNI, TB_P_SMP_DET, TB_P_SMP_SPREAD, MD_SMP1_LEVEL, TB_P_SMP_PAN, MD_SMP1_GSTART);
+        addGrains(gran2, TB_P_SMP2_LEVEL, TB_P_SMP2_FIXED, TB_P_SMP2_TUNE, TB_P_SMP2_FINE, TB_P_SMP2_POST, TB_P_SMP2_BAL, TB_P_SMP2_BUS1, TB_P_SMP2_GDENS, TB_P_SMP2_GLEN, TB_P_SMP2_GSCAN, TB_P_SMP2_GSTART, TB_P_SMP2_GWIN, TB_P_SMP2_GWINP, TB_P_SMP2_GSKEW, MD_SMP2_GDENS, TB_P_SMP2_GLOOP, TB_P_SMP2_GSCX, TB_P_SMP2_UNI, TB_P_SMP2_DET, TB_P_SMP2_SPREAD, MD_SMP2_LEVEL, TB_P_SMP2_PAN, MD_SMP2_GSTART);
+        addGrains(gran3, TB_P_SMP3_LEVEL, TB_P_SMP3_FIXED, TB_P_SMP3_TUNE, TB_P_SMP3_FINE, TB_P_SMP3_POST, TB_P_SMP3_BAL, TB_P_SMP3_BUS1, TB_P_SMP3_GDENS, TB_P_SMP3_GLEN, TB_P_SMP3_GSCAN, TB_P_SMP3_GSTART, TB_P_SMP3_GWIN, TB_P_SMP3_GWINP, TB_P_SMP3_GSKEW, MD_SMP3_GDENS, TB_P_SMP3_GLOOP, TB_P_SMP3_GSCX, TB_P_SMP3_UNI, TB_P_SMP3_DET, TB_P_SMP3_SPREAD, MD_SMP3_LEVEL, TB_P_SMP3_PAN, MD_SMP3_GSTART);
         static_assert(TB_P_SMP_GDENM == TB_P_SMP_GSCX + 5 && TB_P_SMP2_GDENM == TB_P_SMP2_GSCX + 5 && TB_P_SMP3_GDENM == TB_P_SMP3_GSCX + 5, "the granular tempo params of a slot are contiguous");
         static_assert(TB_P_SMP_GRPAN == TB_P_SMP_GLOOP + 11 && TB_P_SMP2_GRPAN == TB_P_SMP2_GLOOP + 11 && TB_P_SMP3_GRPAN == TB_P_SMP3_GLOOP + 11, "the granular scan / loop / random params of a slot are contiguous");
 

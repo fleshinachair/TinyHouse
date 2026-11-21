@@ -166,7 +166,9 @@ def export_multisample(sfz_rel: str, dest: Path) -> Path | None:
     oscillator stores (calibration/dev/probe_loop_mode.py), and a region without a loop in the SFZ does not loop."""
     sfz = _root("Multisamples") / sfz_rel.replace("\\", "/")
     if not sfz.is_file():
-        return None
+        sfz = find_sfz(sfz_rel)
+        if sfz is None:
+            return None
     out = []
     for r in parse_sfz(sfz):
         if _real(r["file"]) is None:
@@ -183,6 +185,22 @@ def export_multisample(sfz_rel: str, dest: Path) -> Path | None:
 
 
 _found: dict = {}
+_found_sfz: dict = {}
+
+
+def find_sfz(rel: str) -> Path | None:
+    """A Multisample's SFZ the preset names by a path the library no longer has: Serum 2's factory folders were sorted into sub-folders (`Factory/Drums/909.sfz` is now
+    `Factory/Drums/Electronic/909.sfz`), and a preset keeps the old path. The file with the same name below the Multisamples folder stands for it (the one sharing most of
+    the path's folders if several)."""
+    rel = rel.replace("\\", "/").lstrip("/")
+    if rel not in _found_sfz:
+        parts = rel.split("/")
+        hits = [p for p in _root("Multisamples").rglob(parts[-1]) if p.is_file()]
+        hits.sort(key=lambda p: (-sum(1 for d in parts[:-1] if d in p.parts), len(p.parts), p.as_posix()))
+        _found_sfz[rel] = hits[0] if hits else None
+    return _found_sfz[rel]
+
+
 
 
 def find_sample(rel: str) -> Path | None:

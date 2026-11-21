@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "sample.h"
+#include "grave.h"
 
 #if defined(__aarch64__)
 #include <arm_neon.h>
@@ -340,7 +341,7 @@ inline std::shared_ptr<ConvPlan> convBuild(const SampleSet &set, float sr, float
     if (set.regions.empty()) return nullptr;
     const SampleRegion &r = set.regions[0];
     if (r.frames < 2 || r.pcm.empty()) return nullptr;
-    auto plan = std::make_shared<ConvPlan>();
+    auto plan = makeGrave<ConvPlan>();
     const int ch = r.channels == 2 ? 2 : 1;
     plan->channels = ch;
     const double ratio = (double) sr / (double) r.rate;

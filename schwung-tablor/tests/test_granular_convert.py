@@ -3,6 +3,7 @@
   * deephouse2move.ME_DST agrees with the engine's destination list in schwung-tablor/tools/gen_params.py (the preset stores the INDEX);
   * granular_pots turns Serum's stored settings into the engine's knob positions (docs/GRANULAR_PROBE_NOTES.md laws) and flags what is not carried.
 """
+import ast
 import re
 import sys
 from collections import Counter
@@ -22,9 +23,9 @@ def check(name, ok, detail=""):
 
 # 1. the destination table
 src = (Path(__file__).resolve().parents[1] / "tools/gen_params.py").read_text(encoding="utf-8")
-block = src[src.index("MOD_DST = ["):]
-block = block[:block.index("]")]
-names = re.findall(r'"([^"]+)"', re.sub(r"#[^\n]*", "", block))
+# the list as Python builds it (it holds comprehensions such as *[f"LFO{n} Rate" ...], so reading its strings up to the first "]" stopped early)
+mod_dst = next(n.value for n in ast.parse(src).body if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "MOD_DST" for t in n.targets))
+names = eval(compile(ast.Expression(mod_dst), "gen_params.py MOD_DST", "eval"), {})
 check("ME_DST matches gen_params MOD_DST", all(names[i] == n for n, i in D.ME_DST.items()) and all(n in names for n in D.ME_DST), "")
 check("ME_DST has the 9 granular names at 27..35", [D.ME_DST[f"Smp{s} {w}"] for s in (1, 2, 3) for w in ("Density", "Length", "Scan")] == list(range(27, 36)))
 
@@ -65,11 +66,15 @@ p, _, _ = D.granular_pots("smp", d, 3, 1, Counter({("Oscillator", "kParamPositio
 check("manual position 40 + a folded route of 10 %; a folded route adds to Random Pan", p["smp_gman"] == 1 and abs(p["smp_gpos"] - 50.0) < 1e-6 and p["smp_grpan"] == 25.0, str(p))
 
 # 4. what is still flagged
-d = {"osc": {"kParamScanRange": 1.0, "kParamPan": 40.0, "kParamPitchTrack": 0.0, "kParamScanBPMRate": 2.0, "kParamScanBPMDivide": 1.0}, "gran": {"kParamRandomWindowSkew": 30.0, "kParamWarpMenu": "kFM_OSC", "kParamLengthMode": "kLengthBPM"}, "node": {"gain": 3.0}}
+d = {"osc": {"kParamScanRange": 1.0, "kParamPan": 40.0, "kParamPitchTrack": 0.0, "kParamScanBPMRate": 2.0, "kParamScanBPMDivide": 1.0}, "gran": {"kParamRandomWindowSkew": 30.0, "kParamWarpMenu": "kFM_OSC", "kParamWarp": 0.4, "kParamLengthMode": "kLengthBPM"}, "node": {"gain": 3.0}}
 p, gaps, _ = D.granular_pots("smp", d, 0, 3, nofold)
 g = " | ".join(gaps)
 check("pitch track off -> fixed pitch", p.get("smp_fixed") == 1)
 check("flags Random Window Skew, warp, gain (pan is carried)", all(s in g for s in ("WindowSkew", "warp", "gain")) and "pan" not in g, g)
+# a warp type with no amount is not a gap when it is a no-op at 0 (measured), but DistAsym and LPF change the sound at 0
+for menu, acts in (("kFM_OSC", False), ("kPD_OSC", False), ("kDistSoftSat", False), ("kFilterHPF", False), ("kDistAsym", True), ("kFilterLPF", True)):
+    _, gp, _ = D.granular_pots("smp", {"osc": {}, "gran": {"kParamWarpMenu": menu}, "node": {}}, 0, 1, nofold)
+    check(f"{menu} at Warp 0 is {'a gap' if acts else 'no gap'}", (any("warp on the grains" in x for x in gp)) == acts, str(gp))
 check("... and no longer scan range, tempo scan, BPM length, unison", not any(s in g for s in ("scan range", "tempo", "grain length", "unison")), g)
 check("ScanRange 1, Divide + BPM rate 2, BPM length carried", p.get("smp_gscx") == 1 and p.get("smp_gscm") == 2 and p.get("smp_gsbr") == 2 and p.get("smp_glenm") == 1 and p.get("smp_gscan") == 100.0, str(p))
 d = {"osc": {"kParamScanTempoLock": 1.0, "kParamBaseTempo": 138.0, "kParamScanRate": -76.9}, "gran": {"kParamDensityMode": "kDensityBPM"}, "node": {}}

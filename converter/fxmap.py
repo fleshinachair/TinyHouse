@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
 import re
 import struct
 import subprocess
@@ -387,9 +388,9 @@ def eq_mod_plan(nodes: list[dict], mods: list, macros: list, rack: int) -> dict:
         if param.startswith("kParamReso"):
             out["why"].append("EQ Reso moved by an envelope/LFO (the band's width is not modulated)")
         elif not isinstance(src, int) or not (6 <= src <= 15 or (2 <= src <= 5 and not m.get("bipolar"))):
-            out["why"].append("EQ band moved by a source the engine has no route for (the sweep is not carried)")
+            out["why"].append("EQ band moved by a source the engine has no route for (the sweep itself is left out)")
         elif i in inside:
-            out["why"].append("EQ band moved by an envelope/LFO in a Split branch (the sweep is not carried)")
+            out["why"].append("EQ band moved by an envelope/LFO in a Split branch (the sweep itself is left out)")
         else:
             want.setdefault((i, b), []).append(m)
     pins = sorted(want)
@@ -600,6 +601,31 @@ FX_MODEL_FIT_MAX_DB = 4.0                       # a model whose three-band fit i
 _fx_models = None
 
 
+# TH_FILTER_FALLBACK=1: a Filter FX model the engine has no stage for is swapped for the nearest one it has (or left out as flat) and the Serum gate judges the result, as for the voice filters.
+FALLBACK_NOTES: list[str] = []          # notes the Filter FX fallbacks add (read back by map_fx)
+FX_MODEL_FALLBACK = {"Combs": "CombP", "Comb2": "CombP", "CombH6P": "CombP", "CombHL6P": "CombP", "CombH6N": "CombN", "CombHL6N": "CombN",
+                     "FlangeHL6N": "FlangeN", "FlangeHL6P": "FlangeP", "FlangeH6N": "FlangeN", "FlangeH6P": "FlangeP",
+                     "Phase12N": "Phase12P", "Phase24N": "Phase24P", "Phase36N": "Phase36P", "Phase48N": "Phase48P",
+                     "Phase48HL6N": "Phase48P", "Phase48HL6P": "Phase48P", "Phase48H6P": "Phase48P", "Phase24H6P": "Phase24P", "Phase12H6P": "Phase12P",
+                     "Allpasses": "Diffuser", "DJMixer": "Diffuser", "Exp": "Diffuser", "Wsp": "Diffuser", "ADD_BASS": "Diffuser", "SNH1": "Diffuser", "RM": "Diffuser",
+                     "Scream3LP": "Diffuser", "Reverb1": "Diffuser", "HEQ6": "Diffuser"}
+
+
+def filter_fx_fallback(nodes: list[dict]) -> tuple[list[dict], list[str]]:
+    """Swap each unsupported Filter FX model (main rack, outside a Split branch) for FX_MODEL_FALLBACK's choice; the notes say which ones."""
+    inside = branch_nodes(nodes)
+    out, notes = [], []
+    known = set(FX_FILTER_LP) | set(FX_FILTER_HP) | set(FX_COMB_MODELS) | set(FX_FLAT_MODELS) | set(fx_models().keys())
+    for i, n in enumerate(nodes):
+        ty = str(plain(n).get("kParamType", "default")) if kind_of(n) == "Filter" else "default"
+        if kind_of(n) == "Filter" and enabled(n) and i not in inside and ty != "default" and ty not in known and ty in FX_MODEL_FALLBACK:
+            n = copy.deepcopy(n)
+            n["FXFilter"]["plainParams"]["kParamType"] = FX_MODEL_FALLBACK[ty]
+            notes.append(f"Filter FX model {ty} approximated by {FX_MODEL_FALLBACK[ty]}" + (" (left out as flat)" if FX_MODEL_FALLBACK[ty] in FX_FLAT_MODELS else ""))
+        out.append(n)
+    return out, notes
+
+
 def fx_models() -> dict:
     """The Filter FX models other than the ladders, as magnitude curves measured on Serum (calibration/dev/probe_fxfilter_models.py): {model: {reso: dB on the probe grid}} at Freq 0.55."""
     global _fx_models
@@ -686,7 +712,8 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
         if wet < 1.0:
             handled.add(i)
             continue                                    # dry: the signal goes past it
-        if dynamic:
+        fallback = bool(os.environ.get("TH_FILTER_FALLBACK"))
+        if dynamic and not fallback:
             why.append("Filter moved by an envelope/LFO/velocity")
             continue
         norm = float(pp.get("kParamFreq", 0.5))
@@ -694,6 +721,15 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             if m.get("dest_param") == "kParamFreq" and foldable_source(m, macros):
                 mv = macro_value(m, macros)
                 norm += m["amount_pct"] / 100.0 * ((mv - 0.5) if m.get("bipolar") else mv)
+        if dynamic:
+            # TH_FILTER_FALLBACK: a modulated Filter FX is carried at its average position (a modulator at its middle: a bipolar one adds nothing, a unipolar one half its depth) and the
+            # Serum gate judges the result; the sweep itself is not carried
+            for m in node_mods(fmods, i, (ctx or {}).get("rack", 0)):
+                if m.get("dest_param") == "kParamFreq" and not foldable_source(m, macros):
+                    norm += m["amount_pct"] / 100.0 * (0.0 if m.get("bipolar") else 0.5)
+            why_note = "Filter FX moved by a modulator carried at its average position (the sweep itself is left out)"
+            if why_note not in FALLBACK_NOTES:
+                FALLBACK_NOTES.append(why_note)
         if kind is None:                                # a measured model (bandpass, notch, band-reject, low + high ...): its curve, fitted by up to three EQ bands
             if "fixed" in fx_models()[ty] and (not 0.4 <= norm <= 0.7 or float(pp.get("kParamReso", 0.0)) > 1.0 or float(pp.get("kParamDrive", 0.0)) > 0.5):
                 why.append(f"Filter model {ty} outside the measured Freq {0.4}-{0.7} / Reso 0")
@@ -917,10 +953,8 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
         pre_engine = pre_post == 2 and float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) > 0.5
         if pre_post == 2 and not pre_engine:
             pre_post = 1
-        if pre_engine and pp.get("kParamWet", 100.0) >= 1.0 and i != dist_chosen(nodes):
+        if pre_engine and pp.get("kParamWet", 100.0) >= 1.0 and i != dist_chosen(nodes) and i != dist2_chosen(nodes):
             why.append("Distortion filter before the distortion (a second distortion)")
-        if pre_engine and pp.get("kParamWet", 100.0) >= 1.0 and 0.2 < float(pp.get("kParamLPHP", 0.0)) / 100.0 < 0.8 and i == dist_chosen(nodes):
-            why.append("Distortion filter morph before the distortion (the engine's pre-filter has only the two ends)")
         if pre_post != 1 or pp.get("kParamWet", 100.0) < 1.0:
             continue
         t = float(pp.get("kParamLPHP", 0.0)) / 100.0
@@ -1023,38 +1057,65 @@ def dist_chosen(nodes: list[dict]) -> int | None:
     return -max(c, key=lambda x: (x[0], x[1]))[1] if c else None
 
 
+DIST2_MIN_SCORE = 0.05         # a second Distortion that does less than this (Wet x Drive, 0..1) is left out as before: its curve is not worth a stage
+
+
+def dist2_chosen(nodes: list[dict]) -> int | None:
+    """The index of the second Distortion the engine's second stage carries (calibrated law, modes Soft / Asym / Hard / Sine / Hold), or None."""
+    c = sorted(dist_candidates(nodes), key=lambda x: (x[0], x[1]), reverse=True)
+    if len(c) < 2 or c[1][0] < DIST2_MIN_SCORE:
+        return None
+    P, _ = dist_params(nodes, pick=1)
+    if not P or P.get("dist_cal") != 1 or P.get("dist_mode", 9) > 4:
+        return None
+    return -c[1][1]
+
+
+def dist2_params(nodes: list[dict]) -> tuple[dict, list[str]]:
+    """The second Distortion as the engine's second distortion stage (dist2_*): the first's law on its own pots, run before the first when it comes first in the rack."""
+    i2 = dist2_chosen(nodes)
+    if i2 is None:
+        return {}, []
+    P, notes = dist_params(nodes, pick=1)
+    out = {"dist2_" + k[5:]: v for k, v in P.items() if k.startswith("dist_") and k != "dist_cal"}
+    out["dist2_pos"] = 1 if i2 < dist_chosen(nodes) else 0
+    return out, [x.replace("Distortion carried", "Second distortion carried") for x in notes]
+
+
 DIST_PRE_FREQ_LO, DIST_PRE_FREQ_HI = 20.0, 20000.0       # the engine's dist_pre_freq pot range (log); Q 0.3 * 10 ** (pot / 127)
 
 
 def dist_pre_params(n: dict) -> dict:
-    """The engine's pre-filter pots for a Distortion whose own filter sits before the distorting (PrePost 2): only the two ends of LPHP, the 12 dB/octave state-variable filter of
-    dist_filter_bands (cutoff serum_filter_hz, Q 0.5 + 0.55 BW)."""
+    """The engine's pre-filter pots for a Distortion whose own filter sits before the distorting (PrePost 2): the 12 dB/octave state-variable filter of dist_filter_bands (cutoff
+    serum_filter_hz, Q 0.5 + 0.55 BW), low-pass or high-pass at the ends of LPHP and, between them, the engine's Morph (the filter's low-pass, band-pass and high-pass outputs weighted as measured)."""
     pp = plain(n)
     if int(round(pp.get("kParamPrePost", 0.0))) != 2:
         return {}
     t = float(pp.get("kParamLPHP", 0.0)) / 100.0
-    if 0.2 < t < 0.8:
-        return {}
-    kind = "lp" if t <= 0.2 else "hp"
+    morph = DIST_MORPH_EDGE < t < 1.0 - DIST_MORPH_EDGE
+    kind = "lp" if t <= 0.5 else "hp"
     fc = serum_filter_hz(float(pp.get("kParamFreq", 0.5)))
-    if (kind == "lp" and fc > 19000) or (kind == "hp" and fc < 25):
+    if not morph and ((kind == "lp" and fc > 19000) or (kind == "hp" and fc < 25)):
         return {}
     q = DIST_FILTER_Q_BASE + DIST_FILTER_Q_PER_BW * float(pp.get("kParamBW", DIST_FILTER_BW_DEFAULT))
     pot = lambda v, lo, hi: int(round(min(max(127.0 * math.log(v / lo) / math.log(hi / lo), 0.0), 127.0)))
-    return {"dist_pre": 1 if kind == "lp" else 2, "dist_pre_freq": pot(fc, DIST_PRE_FREQ_LO, DIST_PRE_FREQ_HI), "dist_pre_q": pot(q, 0.3, 3.0)}
+    P = {"dist_pre": 3 if morph else 1 if kind == "lp" else 2, "dist_pre_freq": pot(fc, DIST_PRE_FREQ_LO, DIST_PRE_FREQ_HI), "dist_pre_q": pot(q, 0.3, 3.0)}
+    if morph:
+        P["dist_pre_morph"] = int(round(min(max(127.0 * t, 0.0), 127.0)))
+    return P
 
 
-def dist_params(nodes: list[dict]) -> tuple[dict, list[str]]:
-    """The first Distortion on the master signal as the engine's distortion stage: mode, drive and wet mix."""
+def dist_params(nodes: list[dict], pick: int = 0) -> tuple[dict, list[str]]:
+    """The first Distortion on the master signal as the engine's distortion stage: mode, drive and wet mix. pick 1: the second-best one (dist2_params renames its keys)."""
     scales = json.loads(DIST_SCALES_FILE.read_text(encoding="utf-8"))
     inside = branch_nodes(nodes)
     # The engine has one distortion stage: the master Distortion that does the most, wet part times drive (an unwritten drive is 25; one at 0 is only its own filter). The first
     # in the rack used to be taken, whatever it did (Bass - SWEDISHMF has a 19 % TapeSat ahead of a 100 % wet drive-72 one; Bass - The Selected a drive-0 filter ahead of a
     # soft clip at 75); a first node that is off ended the search.
-    cands = dist_candidates(nodes)
-    if not cands:
+    cands = sorted(dist_candidates(nodes), key=lambda c: (c[0], c[1]), reverse=True)
+    if len(cands) <= pick:
         return {}, []
-    for _, _, n in [max(cands, key=lambda c: (c[0], c[1]))]:
+    for _, _, n in [cands[pick]]:
         pp = plain(n)
         mode = str(pp.get("kParamMode", "default"))
         wet = float(pp.get("kParamWet", 100.0))
@@ -1983,7 +2044,7 @@ def hyperd_params(nodes: list[dict]) -> tuple[dict, list[str]]:
 def fx_defaults() -> dict:
     P = {"fx_space": 100}
     P.update(map_eq([])[0])
-    P.update({"dist_drive": 0, "dist_mode": 0, "dist_mix": 127, "dist_cal": 0, "dist_out": 64, "dist_level": 64, "dist_pre": 0, "dist_pre_freq": 64, "dist_pre_q": 40, "fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64, "dly_mix": 0, "dly_sync": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50,
+    P.update({"dist_drive": 0, "dist_mode": 0, "dist_mix": 127, "dist_cal": 0, "dist_out": 64, "dist_level": 64, "dist_pre": 0, "dist_pre_freq": 64, "dist_pre_q": 40, "dist_pre_morph": 0, "dist2_mix": 0, "dist2_mode": 0, "dist2_pos": 0, "dist2_drive": 16, "dist2_out": 64, "dist2_level": 64, "dist2_pre": 0, "dist2_pre_freq": 64, "dist2_pre_q": 40, "dist2_pre_morph": 0, "fx_wide": 0, "fx_wrate": 40, "fx_wdepth": 64, "dly_mix": 0, "dly_sync": 0, "dly_time": 94, "dly_timer": 94, "dly_fb": 50,
               "dly_lo": 0, "dly_hi": 127, "dly_mode": 0, "dly2_mix": 0, "dly2_time": 94, "dly2_timer": 94, "dly2_fb": 50, "dly2_lo": 0, "dly2_hi": 127, "dly2_mode": 0, "rev_mix": 0, "rev_decay": 70, "rev_damp": 110, "rev_lo": 0, "rev_width": 127, "conv_mix": 0,
               "comp_on": 1, "comp_thresh": 127, "comp_ratio": 0, "comp_attack": 40, "comp_release": 60, "comp_makeup": 0, "comp_mix": 0, "comp_knee": 32,
               "comp_multi": 0, "comp_thresh2": 127, "comp_thresh3": 127, "comp_gain1": 64, "comp_gain2": 64, "comp_gain3": 64, "comp_below": 0,
@@ -2003,6 +2064,9 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         _cache = json.loads(TABLOR_CACHE.read_text(encoding="utf-8")) if TABLOR_CACHE.exists() else {}
     nodes = fold_macro_wets(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
     nodes = fold_macro_knobs(nodes, (ctx or {}).get("mods", []), (ctx or {}).get("macros", []))
+    fb_notes: list[str] = []
+    if os.environ.get("TH_FILTER_FALLBACK"):
+        nodes, fb_notes = filter_fx_fallback(nodes)
     nodes, hoist = hoist_branch(tag_dynamic_wet(nodes, ctx))
     fp = fingerprint_for(name)
     # A fingerprint is keyed by preset name, so it must not outlive its effects: a rack with no
@@ -2016,11 +2080,13 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         fp = {k: v for k, v in fp.items()
               if k != "reverb" or kinds & {"Reverb", "Conv"}
               if k != "wide" or kinds & {"HyperD"}}
-    P, notes, info = fx_defaults(), [], {}
+    FALLBACK_NOTES.clear()
+    P, notes, info = fx_defaults(), list(fb_notes), {}
     if stray:
         notes.append(f"{', '.join(stray)} in a Split branch (one frequency band only) not carried")
     p, n, i = map_eq(nodes, ctx)
     P.update(p); notes += n; info.update(i)
+    notes += list(FALLBACK_NOTES)
     p, n = conv_plan(name, nodes, info.get("conv_handled", ()), fp, cli)
     P.update(p); notes += n
     if fp and "reverb" in fp and (name in CONV_PLANS or info.get("conv_handled")):
@@ -2042,7 +2108,10 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
         P.update(p); notes += n
         p, n = map_wide_static(outer)
         P.update(p); notes += n
-        left = [x for x in outer if kind_of(x) == "Conv" and enabled(x) and not any(x is nodes[j] for j in info.get("conv_handled", ())) and name not in CONV_PLANS]
+        conv_moved = any(m.get("dest_type") == "FXConv" and m.get("dest_param") == "kParamWet" and not foldable_source(m, (ctx or {}).get("macros", []))      # an envelope / LFO into its Wet
+                         for m in (ctx or {}).get("mods", []))
+        left = [x for x in outer if kind_of(x) == "Conv" and enabled(x) and not any(x is nodes[j] for j in info.get("conv_handled", ())) and name not in CONV_PLANS
+                and not (float(plain(x).get("kParamWet", WET_DEFAULT["Conv"])) < 1.0 and not conv_moved)]          # a Conv at Wet 0 that nothing moves does nothing: not a gap
         if left and not any(x.startswith("Convolution reverb") for x in notes):
             notes.append("Convolution reverb not carried" + (f" ({'; '.join(info['conv_why'])})" if info.get("conv_why") else ""))
     elif not cli.exists():
@@ -2062,6 +2131,8 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     P.update(mp); notes += mn
     dp, dn = dist_params(nodes)
     P.update(dp); notes += [x for x in dn if x.startswith("Distortion carried")]
+    d2p, d2n = dist2_params(nodes)
+    P.update(d2p); notes += d2n
     sp, sn = split_pots(nodes, hoist)
     P.update(sp); notes += sn
     if any(not x.startswith("Distortion carried") for x in dn):

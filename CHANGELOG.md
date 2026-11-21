@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.12
+
+Serum 2 import: 62 more of Serum's own Factory presets are imported (453 to 515 of 626 on the development Move): 28 pass the importer's gate, 12 miss it by 0.5 to 2.6 dB of band error, 13 use the nearest available voice filter where Tablor lacks Serum's model, and 9 play a Spectral oscillator's sample without its scan. All 62 were auditioned and accepted. Heavy sets no longer glitch: each TinyHouse slot now renders on a CPU core of its own. Every new parameter defaults to the old behaviour, so saved presets load and sound the same.
+
+**Each slot renders on its own core.** Schwung runs every slot one after another on one core, so four heavy slots added up: a four-slot set measured 76 % of the 2.9 ms audio block on average and went over it at its peaks (the glitches). Each TinyHouse slot now renders its next block on a thread of its own (real-time priority 20, on the three cores the audio callback does not use) while the callback hands Move the block that thread finished, so the slots render side by side. On the Move, four slots of that set went from 2.74 ms of callback time per block (712 overruns in 9 s) to 0.04 ms (none). The sound is the same sample for sample, one block (2.9 ms) later. If the Move refuses real-time priority, the module renders as before; creating `/data/UserData/schwung/tinyhouse_sync_render` and restarting turns the thread off.
+
+**The Remote UI importer flags fewer gaps.** Three general rules, not per-preset fixes: a Convolve effect left dry is not a gap, a Bode frequency shifter is shown as a small detail, and Serum's kSpace reverb size is translated by a law fitted from Serum (rough, five presets). Of Serum's 626 factory presets all import and play in the browser; 447 now show nothing notable missing (419 in 0.9.11) and 73 are audibly compromised (81). The browser has no Serum to compare against, so it imports these without the gate the Python importer uses.
+
+**Vital's compressor costs less.** It works on left and right together, and the low band is recombined with one all-pass filter where it took four (the same response; the output matches the old one to -86 dB). Super Pluck renders 8 % faster on the Move.
+
+**Other audio-thread work.** A cloud of grains is capped at 64 live grains per voice, with the level kept (no factory preset gets near it; the densest uses 22). The delay, width and reverb memory that a switched-off stage wipes is cleared 64 KB per block instead of all in one block. Wavetables, sample sets and convolution plans are freed by the loader thread instead of wherever the last note lets go of them. Vital's delay and reverb memory is made when the preset is set, not on the first note, and the envelope curves no longer compute the same exponential twice per sample.
+
+**Chorus, flanger and phaser follow the tempo.** A Tempo Sync switch on each scales its Rate (stored at 120 BPM) by the host tempo; the Vital importer sets it where the file says synced.
+
+**A second distortion.** A Serum rack with two Distortion nodes now carries both (the second runs right after the first, or right before it when the rack has it first), and the Distortion's own filter before the curve can sit anywhere between low-pass and high-pass (it only had the two ends). 9 factory presets that were stopped by these pass the gate.
+
+**Granular.** An LFO or envelope can move a granular slot's Start, Position (Manual Position) and Random Pitch. A warp type with no amount on the grains is no longer reported as a gap where Serum leaves the grain untouched at amount 0 (FM, AM, PD, Dist SoftSat / Tube / Diode, HPF; DistAsym and LPF do change it, so they stay reported).
+
+**Multisamples find their SFZ again.** Serum 2's library moved the factory drum kits into subfolders, so the stored path no longer exists; the importer now looks the file up by name (DR - IDM Beat comes in). The browser importer does not do this yet.
+
+**Spectral still needs more work.** The 9 Spectral presets that came in play the oscillator's sample as it stands, with no scan and no spectral filter, so they are approximations. About 29 more Spectral presets stay blocked until a spectral resynthesis stage exists (see docs/ROADMAP.md).
+
+Looked at and left alone: a reverb build-up stage. A longer input diffusion shifts the tail level but not the spread between presets (median error 4.2 against 4.9 dB), so there is nothing to fix with a common stage.
+
 ## 0.9.11
 
 Serum 2 import: 69 more of Serum's own Factory presets now convert and pass the importer's gate (384 to 453 installed on the development Move, of 626), and 33 already installed ones were redone with the fixes below. Every new parameter defaults to the old behaviour, so saved presets load and sound the same. Serum presets need importing again to get the fixes.

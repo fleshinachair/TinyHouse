@@ -41,6 +41,13 @@
      0.325964,
      2.578079
     ]
+   },
+   "kSpace": {
+    "features": "size",
+    "coef": [
+     0.001459,
+     -0.187114
+    ]
    }
   },
   "decay_table": [
@@ -181,7 +188,8 @@
    "kHall": 126,
    "none": 121,
    "kVintage": 115,
-   "kAbyss": 95
+   "kAbyss": 95,
+   "kSpace": 119
   },
   "mix_per_wet": 0.682,
   "none_width_per_w": 1.273

@@ -160,7 +160,7 @@ def bode_only(why):
     the report, even when Serum itself can hear the difference. The sound gate still judges the result against the full Serum render."""
     kinds = set()
     for w in why:
-        if "no Serum fingerprint" in w or "measure the fingerprint again" in w or "in a Split branch" in w:
+        if _needs_fingerprint(w) or "in a Split branch" in w:
             continue
         w = re.sub(r"^FX bus \d: ", "", w)               # a bus rack's Bode is the same Bode
         if not w.startswith("not carried: "):
@@ -175,7 +175,7 @@ def ignored_effects_off(tree, header, name, why):
     The same in an FX bus rack (its plain "not carried: <kinds>", a Filter FX with a modulator, a Utils the engine cannot carry). A Distortion's own filter and every other reason are not this case."""
     kinds = {}                                           # rack (0 = main, 1 / 2 = bus) -> the kinds left out there
     for w in why:
-        if "no Serum fingerprint" in w or "in a Split branch" in w:
+        if _needs_fingerprint(w) or "in a Split branch" in w:
             continue
         mb = re.match(r"FX bus (\d): (.*)$", w)
         rack, w = (int(mb.group(1)), mb.group(2)) if mb else (0, w)
@@ -246,6 +246,14 @@ def effects_inaudible(serum, bank, name, tree, tree_off, notes, refs, end):
     gap = band_gap_db(refs, refs_off)
     lvl = L.rms_db(refs_off, end) - L.rms_db(refs, end)
     return (gap <= noise + AB_SLACK_BANDS and abs(lvl) <= AB_MAX_LEVEL), gap, noise, lvl
+
+
+def _needs_fingerprint(w: str) -> bool:
+    """A reason that measuring the preset's effects in Serum removes. A convolution reverb the converter could not carry WITHOUT saying why (no 'IR file ... not on this machine') is one: the
+    convolver is built from the measurement (before this, the importer never measured a preset whose only gap was its Conv)."""
+    w = re.sub(r"^FX bus \d: ", "", w)
+    return ("no Serum fingerprint" in w or "measure the fingerprint again" in w or w == "Convolution reverb not carried"
+            or (w.startswith("Reverb type ") and w.endswith("is not carried (no measurements for it)")))          # the static laws' own gaps: the measured fingerprint carries what they cannot
 
 
 def measure_fingerprints(name, tree, meas):
@@ -347,13 +355,13 @@ def main():
             why = d2m.unsupported_reasons(m)
             warp_why = [w for w in why if " warp " in w and w.endswith("unsupported (no FM/RM/fold in Tablor)")]
             fx_why = [w for w in why if w not in warp_why]
-            needs_fx = [w for w in fx_why if "no Serum fingerprint" in w or "measure the fingerprint again" in w]
+            needs_fx = [w for w in fx_why if _needs_fingerprint(w)]
             can_ab = not a.no_ab_ignore and not a.no_level
             fx_off = ignored_effects_off(tree, header, name, fx_why) if (len(needs_fx) < len(fx_why) and can_ab) else None
             off = fx_off
             if warp_why and can_ab and (len(needs_fx) == len(fx_why) or fx_off is not None):
                 off = zero_unsupported_warps(fx_off or tree, m)
-            return why, [w for w in why if "no Serum fingerprint" in w or "measure the fingerprint again" in w], off
+            return why, [w for w in why if _needs_fingerprint(w)], off
         why, needs_fx, off_tree = plan(m)
         if needs_fx and (len(needs_fx) == len(why) or off_tree is not None):          # the effects are the only thing missing: measure them in Serum, then convert again
             try:

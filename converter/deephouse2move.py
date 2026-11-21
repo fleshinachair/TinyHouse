@@ -580,7 +580,8 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "WT3 Pos": 18, "WT3 Level": 19, "WT1 Sync": 20, "WT2 Sync": 21, "WT3 Sync": 22, "Filter 2 Freq": 23, "FX Filter Freq": 24, "Dist Wet": 25, "Comp Wet": 26,
           "Smp1 Density": 27, "Smp1 Length": 28, "Smp1 Scan": 29, "Smp2 Density": 30, "Smp2 Length": 31, "Smp2 Scan": 32, "Smp3 Density": 33, "Smp3 Length": 34, "Smp3 Scan": 35, "Util Out": 36, "Bus1 Out": 37, "Bus2 Out": 38,
           "Smp1 Level": 39, "Smp2 Level": 40, "Smp3 Level": 41, "FX Filter Wet": 42, "WT1 Pitch": 43, "WT2 Pitch": 44, "WT3 Pitch": 45, "WT1 Warp": 46, "WT2 Warp": 47, "WT3 Warp": 48,
-          "EQ1 Freq": 49, "EQ1 Gain": 50, "EQ2 Freq": 51, "EQ2 Gain": 52, "EQ3 Freq": 53, "EQ3 Gain": 54, "EQ4 Freq": 55, "EQ4 Gain": 56}
+          "EQ1 Freq": 49, "EQ1 Gain": 50, "EQ2 Freq": 51, "EQ2 Gain": 52, "EQ3 Freq": 53, "EQ3 Gain": 54, "EQ4 Freq": 55, "EQ4 Gain": 56,
+          **{f"Smp{n} {k}": 86 + 3 * (n - 1) + i for n in (1, 2, 3) for i, k in enumerate(("Start", "Position", "RandPitch"))}}      # a granular slot's Start / Position / Random Pitch knobs
 PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/dev/probe_macro_osc.py, probe_lfo_pitch.py)
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
@@ -1200,8 +1201,9 @@ LFO_SCALE: dict = json.loads(LFO_SCALES.read_text(encoding="utf-8")) if LFO_SCAL
 # ---------------------------------------------------------------------------
 # Serum's Granular oscillator (docs/GRANULAR_PROBE_NOTES.md, docs/GRANULAR_DESIGN.md): a mode of the engine's sample slots. Density and Grain Length are held as Serum's KNOB
 # positions k (plain Density = 1000 k^4, Free-mode length = 10 k^4 seconds), so a route adds to k. Scan Rate is -200..200 % and a route of a adds 400 a %, Start 0..100 %.
-GRAN_ROUTE_KEYS = {("GranularOsc", "kParamDensity"), ("GranularOsc", "kParamGrainLength"), ("Oscillator", "kParamScanRate")}
-GRAN_ROUTE_NAME = {"kParamDensity": "Density", "kParamGrainLength": "Length", "kParamScanRate": "Scan"}      # the engine's destination names are "Smp<slot> <name>"
+GRAN_ROUTE_KEYS = {("GranularOsc", "kParamDensity"), ("GranularOsc", "kParamGrainLength"), ("Oscillator", "kParamScanRate"),
+                   ("Oscillator", "kParamStart"), ("Oscillator", "kParamPosition"), ("GranularOsc", "kParamRandomPitch")}
+GRAN_ROUTE_NAME = {"kParamDensity": "Density", "kParamGrainLength": "Length", "kParamScanRate": "Scan", "kParamStart": "Start", "kParamPosition": "Position", "kParamRandomPitch": "RandPitch"}      # the engine's destination names are "Smp<slot> <name>"
 GRAN_WINDOW = {"kWindowTukey": 0, "kWindowExpDec": 1, "kWindowTriangle": 2, "kWindowBlackmanHarris": 3, "kWindowGaussian": 4}
 GRAN_DENSITY_KNOB, GRAN_LENGTH_KNOB = 0.25, 0.5          # Serum's defaults when the preset does not store them (Density 3.9, Length 0.625 s)
 # The settings the engine does not carry yet, each a sound gap until its probe (name in the message, then the keys). The probe numbers are in docs/GRANULAR_DESIGN.md section 6.
@@ -1281,7 +1283,17 @@ def granular_pots(sk: str, g: dict, oid: int, unison: int, fold) -> tuple[dict, 
     rnd = [k[12:] for k, v in gr.items() if k in ("kParamRandomWindowSkew", "kParamRandomWindowAmount", "kParamRandomWarp") and isinstance(v, (int, float)) and v > 0]
     if rnd:
         gaps.append("Random " + " / ".join(rnd) + " (not measured)")
-    if gr.get("kParamWarpMenu") or gr.get("kParamWarpMenu2"):
+    # A warp type on the grains is a gap only when it does something. Measured (calibration/dev warp0 probe, noise and tone files): at Warp 0 or absent the FM, AM and PD types, Dist SoftSat /
+    # Tube / Diode and the HPF type leave the grain untouched (SoftSat to -51 dB, HPF to -25 dB), so a preset that names one without an amount has no gap. DistAsym (+1.4 dB) and LPF (closed) do change.
+    def _grain_warp_acts(menu_key, amount_key):
+        menu = gr.get(menu_key)
+        if not menu or menu == "kNone":
+            return False
+        amount = gr.get(amount_key, 0.0)
+        if isinstance(amount, (int, float)) and amount > 0.0:
+            return True
+        return not (str(menu).startswith(("kFM_", "kAM_", "kPD_")) or menu in ("kDistSoftSat", "kDistTube", "kDistDiode1", "kFilterHPF"))
+    if _grain_warp_acts("kParamWarpMenu", "kParamWarp") or _grain_warp_acts("kParamWarpMenu2", "kParamWarp2"):
         gaps.append("warp on the grains (P8)")
     if unison > 1:                                        # carried by the caller (the slot's unison, detune and spread); what the granular oscillator adds to it is not
         extra = [k[6:] for k in ("kParamUnisonWarp", "kParamUnisonStack") if osc.get(k) not in (None, 0.0, "kOff", "kNone", "kNormal", "kNoStack")]
@@ -2193,8 +2205,8 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     # setting itself. Density / Grain Length / Scan Rate are carried: macro, wheel, velocity and note routes folded in, LFO and envelope routes through the slot's destinations.
     for m in ph["mods"]:
         gid = m["dest_id"]
-        if gid in gslot and abs(m["amount_pct"]) >= 5.0 and ((m["dest_type"] == "GranularOsc" and m["dest_param"] not in ("kParamDensity", "kParamGrainLength"))
-                                                            or (m["dest_type"] == "Oscillator" and m["dest_param"] in ("kParamPosition", "kParamStart", "kParamScanRange", "kParamLoopStart", "kParamLoopEnd"))):
+        if gid in gslot and abs(m["amount_pct"]) >= 5.0 and ((m["dest_type"] == "GranularOsc" and m["dest_param"] not in ("kParamDensity", "kParamGrainLength", "kParamRandomPitch"))
+                                                            or (m["dest_type"] == "Oscillator" and m["dest_param"] in ("kParamScanRange", "kParamLoopStart", "kParamLoopEnd"))):
             if not (m["dest_param"] in GRAN_FOLDED_PARAMS and (25 <= m["source"] <= 32 or m["source"] in (1, 16, 17))):         # a static route into Start / Position / a Random amount is folded in
                 msg = f"osc {'ABC'[gid]} (granular): a route into {m['dest_param'][6:]} not carried"
                 if msg not in crit:

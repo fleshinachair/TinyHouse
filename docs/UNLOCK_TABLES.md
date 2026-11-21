@@ -23,7 +23,7 @@ A fresh census (`python calibration/census.py "<Serum 2 Factory folder>" --name 
 | 9 | **A second Distortion / Comp / Delay / mod effect**, other rack gaps | 21 | 12 | 192 | A second instance of each stage. |
 | 10 | **Filter FX model: Diffuser** | 17 | 14 | 206 | One model probe plus a stage. |
 | 11 | **Filter FX moved by an LFO or velocity** | 17 | 13 | 219 | The engine's FX filter follows the filter envelope only today. |
-| 12 | **MultiSample oscillator** beyond the three sample slots | 10 | 9 | 228 | A fourth sample slot or a different structure. |
+| 12 | **MultiSample oscillator** (was: beyond the three sample slots) | 10 | 1 | 228 | Not a slot-count problem: the stored SFZ path no longer exists in Serum 2's library (kits moved into subfolders). 0.9.12 finds the file by name and recovers DR - IDM Beat; the other 9 are blocked by other things (convolution reverb, modulated Utils, level, two SFZ files missing from this install). |
 | 13 | **Distortion filter morph before the distortion** | 9 | 9 | 237 | The engine's pre-filter has only the two ends. |
 | 14 | **Routes to wave frame** (random, note): random is live now | 8 | A note source |
 | 15 | **Single warp types** (FM_FILT, PD_FILT, DistTapeSat, SelfPD amounts, Flip, ...) | 19 | 19 | 262 | A probe per warp, one or two presets each. |

@@ -162,6 +162,31 @@ struct StereoBiquad {
     void clear() { z1[0] = z1[1] = z2[0] = z2[1] = 0; }
 };
 
+/* A 12 dB/octave state-variable filter (Cytomic's), stereo, mixing its low-pass, band-pass (peak Q) and high-pass outputs: Serum's Distortion filter between its LP and HP ends. */
+struct StereoSVF {
+    float a1 = 0, a2 = 0, a3 = 0, k = 1, wl = 1, wb = 0, wh = 0;
+    float ic1[2] = { 0, 0 }, ic2[2] = { 0, 0 };
+    /* morph 0..1: weights as measured (fxmap.dist_filter_bands): low-pass fading out to 0.5, band-pass peaking at 0.5, high-pass fading in from 0.5 */
+    void set(float hz, float q, float morph, float sr)
+    {
+        const float g = std::tan(3.14159265f * std::min(hz, sr * 0.45f) / sr);
+        k = 1.0f / std::max(q, 0.05f);
+        a1 = 1.0f / (1.0f + g * (g + k)); a2 = g * a1; a3 = g * a2;
+        const float t = std::min(std::max(morph, 0.0f), 1.0f);
+        wl = std::max(1.0f - 2.0f * t, 0.0f); wb = t <= 0.5f ? 2.0f * t : 2.0f - 2.0f * t; wh = std::max(2.0f * t - 1.0f, 0.0f);
+    }
+    inline float tick(int ch, float x)
+    {
+        const float v3 = x - ic2[ch];
+        const float v1 = a1 * ic1[ch] + a2 * v3;
+        const float v2 = ic2[ch] + a2 * ic1[ch] + a3 * v3;
+        ic1[ch] = sanitize(2.0f * v1 - ic1[ch]);
+        ic2[ch] = sanitize(2.0f * v2 - ic2[ch]);
+        return wl * v2 + wb * v1 + wh * (x - k * v1 - v2);
+    }
+    void clear() { ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0; }
+};
+
 /* Vital's distortion filter (calibration/vital_distfilt_probe.py): a two-pole state-variable filter. Measured against a saw through the real plugin: the corner is the MIDI note's
  * frequency, the Q follows the resonance by the table below (0.5 .. 14.2), and the blend mixes the low-pass (1 - b), the band-pass peaking at Q and the high-pass so that their POWER
  * weights are (1 - b)^2 and 1 - (1 - b)^2 (a real mix of the two quadrature outputs does exactly that), which keeps the peak at the corner at Q across the blend. */
@@ -246,6 +271,12 @@ struct FxSettings {
     float distAudioShape[16] = {};          /* one cycle, 0..1 */
     int   distPre = 0;                      /* a filter before the curve, on the distorted part: 0 off, 1 low-pass, 2 high-pass (the calibrated law only) */
     float distPreHz = 1000, distPreQ = 1;
+    float distPreMorph = 0;                 /* distPre 3: Serum's LPHP 0..1 between the ends, the state-variable filter's low-pass -> band-pass -> high-pass outputs */
+    /* A second calibrated distortion (Serum rack with two Distortion nodes), right after the first or right before it; dist2Mix 0 is off. Same law as distCal. */
+    float dist2Mix = 0, dist2Gain = 1, dist2Out = 1, dist2Level = 1;
+    int   dist2Mode = 0, dist2Pre = 0, dist2Hold = 1;      /* mode 4: Serum's Downsample, a sample-and-hold of dist2Hold samples */
+    bool  dist2Before = false;
+    float dist2PreHz = 1000, dist2PreQ = 1, dist2PreMorph = 0;
     float compMix = 0;                      /* compressor: parallel part 0..1 (0 is off) */
     float compThreshDb = 0, compRatio = 1, compAttackMs = 10, compReleaseMs = 100, compMakeupDb = 0, compKneeDb = 12;
     float compBoostDb = 12;                 /* Comp Boost Cap: the most the multiband compressor's upward part may add to a band, dB */
@@ -302,6 +333,37 @@ inline float fastExp2(float x)
     const uint32_t u = (uint32_t) ((int) fl + 127) << 23;
     float sc; std::memcpy(&sc, &u, 4);
     return sc * (1.0f + p);
+}
+/* Two samples at once (left and right of a stereo pair), for the loops whose two channels do the same arithmetic. GCC / clang vector types (NEON on the Move). Every helper does exactly the
+ * scalar function's operations lane by lane, so the results match the scalar ones bit for bit. */
+typedef float v2f __attribute__((vector_size(8)));
+typedef int32_t v2i __attribute__((vector_size(8)));
+typedef uint32_t v2u __attribute__((vector_size(8)));
+inline v2f vsel(v2i m, v2f a, v2f b) { return (v2f) (((v2i) a & m) | ((v2i) b & ~m)); }          /* m ? a : b, per lane (m is a comparison result) */
+inline v2f vmin(v2f a, v2f b) { return vsel(b < a, b, a); }                                       /* std::min(a, b) */
+inline v2f vmax(v2f a, v2f b) { return vsel(a < b, b, a); }                                       /* std::max(a, b) */
+inline v2f vset(float a) { return v2f { a, a }; }
+inline v2f fastLog2v(v2f x)
+{
+    v2u u = (v2u) x;
+    v2i e = (v2i) ((u >> 23) & 255u) - 127;
+    u = (u & 0x7fffffu) | 0x3f800000u;
+    v2f m = (v2f) u;
+    const v2i big = m > 1.41421356f;
+    m = vsel(big, m * 0.5f, m);
+    e = e - big;                                                          /* big is -1 where set */
+    const v2f t = m - 1.0f;
+    return __builtin_convertvector(e, v2f) + t * (1.4427135f + t * (-0.7211319f + t * (0.47934815f + t * (-0.3674897f + t * (0.32215387f + t * -0.20659233f)))));
+}
+inline v2f fastExp2v(v2f x)
+{
+    x = vmin(vmax(x, vset(-126.0f)), vset(126.0f));
+    const v2f tr = __builtin_convertvector(__builtin_convertvector(x, v2i), v2f);
+    const v2f fl = tr + __builtin_convertvector((v2i) (tr > x), v2f);                    /* floor: the truncation, minus one where it rounded up */
+    const v2f f = x - fl;
+    const v2f p = f * (0.69315247f + f * (0.24015282f + f * (0.055835898f + f * (0.0089734188f + f * 0.0018852789f))));
+    const v2u u = (v2u) (__builtin_convertvector(fl, v2i) + 127) << 23;
+    return (v2f) u * (1.0f + p);
 }
 inline float sinCyc(float x)
 {
@@ -792,6 +854,26 @@ public:
     static constexpr int kLines = 8;
     struct DelayUnit { std::vector<float> buf[2]; int pos = 0; float wetCur = 0.0f, dryCur = 1.0f; float timeCur[2] = { 0, 0 }; float fbLp[2] = { 0, 0 }, fbHp[2] = { 0, 0 }; bool ran = false; };
     struct DelayPrm { float mix, ms, rms, fb, lo, hi; int ping; };
+    /* Buffers to zero a slice at a time. A stage that switches off has megabytes of delay / reverb memory to wipe; doing it in one block can take the whole block, so the wipe is
+     * queued and a few thousand samples go per block. Nothing reads the memory until the stage runs again, and every stage that reads it calls finish() first, so the sound is the same. */
+    struct SliceClear {
+        std::vector<std::vector<float> *> q; size_t qi = 0, off = 0;
+        SliceClear() { q.reserve(64); }
+        bool pending() const { return qi < q.size(); }
+        void add(std::vector<float> &b) { if (!b.empty() && q.size() < 64) q.push_back(&b); else if (!b.empty()) std::fill(b.begin(), b.end(), 0.0f); }
+        void step(size_t budget)
+        {
+            while (qi < q.size() && budget > 0) {
+                auto &b = *q[qi];
+                if (off >= b.size()) { qi++; off = 0; continue; }
+                const size_t k = std::min(budget, b.size() - off);
+                std::fill_n(b.begin() + (std::ptrdiff_t) off, k, 0.0f);
+                off += k; budget -= k;
+            }
+            if (qi >= q.size()) { q.clear(); qi = 0; off = 0; }
+        }
+        void finish() { if (pending()) step((size_t) -1); }
+    } slice;
     static constexpr int kDelayMax = 1 << 17;       /* 2.97 s at 44.1 kHz */
     static constexpr int kChorusMax = 2048;         /* 46 ms */
     static constexpr int kAps = 4;
@@ -810,7 +892,7 @@ public:
     }
 
     /* True if any stage would change the signal: the engine skips process() otherwise. */
-    bool active() const { return anyActive || (st.convMix > 0.0f && convP) || convWetCur > 0.0f || convRan; }
+    bool active() const { return anyActive || (st.convMix > 0.0f && convP) || convWetCur > 0.0f || convRan || slice.pending(); }
 
     /* The convolver's plan (conv.h), built by the loader: the audio thread only swaps the pointer. A new plan starts from silence. */
     void setConvPlan(const std::shared_ptr<ConvPlan> &p)
@@ -845,12 +927,18 @@ public:
         if (s.distVital && s.distFlt) distVf.set(s.distFltNote, s.distFltRes, s.distFltBlend, sr);
         distGainNow = s.distGain;
         for (float &x : distVModSeen) x = 0.0f;
-        if (s.distPre) distPreBq.c.set(s.distPre == 1 ? EQ_LOPASS : EQ_HIPASS, s.distPreHz, 0.0f, s.distPreQ, sr);
+        if (s.distPre == 3) distPreSvf.set(s.distPreHz, s.distPreQ, s.distPreMorph, sr);
+        else if (s.distPre) distPreBq.c.set(s.distPre == 1 ? EQ_LOPASS : EQ_HIPASS, s.distPreHz, 0.0f, s.distPreQ, sr);
+        if (s.dist2Pre == 3) dist2PreSvf.set(s.dist2PreHz, s.dist2PreQ, s.dist2PreMorph, sr);
+        else if (s.dist2Pre) dist2PreBq.c.set(s.dist2Pre == 1 ? EQ_LOPASS : EQ_HIPASS, s.dist2PreHz, 0.0f, s.dist2PreQ, sr);
+        dist2Target = s.dist2Mix > 0.0f ? 1.0f : 0.0f;
         mod.set(s);
         hyper.set(s);
         if (s.splitBand == 1 || s.splitBand == 2) {
             for (int i = 0; i < 2; i++) { spLp[i].set(false, s.splitHz, sr); spHp[i].set(true, s.splitHz, sr); }
         }
+        if (s.delayVital && vdly.buf[0].empty()) { vdly.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); vdly.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }      /* Vital's delay / reverb memory is made when the preset is set, not on the first note */
+        if (s.revVital && vr.fb[0].empty()) { for (auto &b : vr.fb) b.assign(1 << 15, 0.0f); for (auto &b : vr.ap) b.assign(1024 * 4, 0.0f); for (auto &b : vr.pd) b.assign(1 << 14, 0.0f); }
         eqTarget = s.eqEnable ? 1.0f : 0.0f;
         distTarget = s.distVital ? (s.distMix > 0.0f ? 1.0f : 0.0f) : s.distCal ? (s.distMix > 0.0f || std::fabs(s.distLevel - 1.0f) > 1e-3f ? 1.0f : 0.0f) : (s.distDrive > 0.0f ? s.distMix : 0.0f);
         compTarget = (s.compRatio > 1.001f || s.compMulti) ? s.compMix : 0.0f;
@@ -895,7 +983,7 @@ public:
         msMaster = msAny && !bandEq;
         eqAny = eqAny || msAny;
         /* A stage still fading out has to keep running, or it would cut off. */
-        baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.delay2Mix > 0.0f || s.revMix > 0.0f ||
+        baseActive = eqAny || distTarget > 0.0f || distCur > 0.0f || dist2Target > 0.0f || dist2Cur > 0.0f || compTarget > 0.0f || compCur > 0.0f || s.wideMix > 0.0f || s.delayMix > 0.0f || s.delay2Mix > 0.0f || s.revMix > 0.0f ||
                     wideCur > 0.0f || dly[0].wetCur > 0.0f || dly[1].wetCur > 0.0f || revWetCur > 0.0f || wideRan || dly[0].ran || dly[1].ran || revRan || mod.active() || hyper.active();
         anyActive = baseActive || xfOn;
     }
@@ -1090,6 +1178,7 @@ public:
 
     void process(float *L, float *R, int n)
     {
+        slice.step(16384);                                                       /* a queued buffer wipe, 64 KB per block */
         const int inBand = st.splitBand ? st.splitStages : 0;                    /* the stages that work on one band only */
         const bool convNow = (st.convMix > 0.0f && convP) || convWetCur > 0.0f, revNow = st.revMix > 0.0f || revWetCur > 0.0f;
         if (inBand && (((inBand & 64) && convNow) || ((inBand & 128) && revNow) || ((inBand & 1) && hyper.active()) || ((inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) || ((inBand & 4) && mod.active()) || ((inBand & 16) && bandEq) || ((inBand & 32) && (st.wideMix > 0.0f || wideCur > 0.0f)))) processBand(L, R, n, inBand);
@@ -1098,7 +1187,9 @@ public:
         for (int k = 0; k < 7; k++) {
             switch (fxSeq[k]) {
             case 0:
+                if (!(inBand & 2) && (dist2Target > 0.0f || dist2Cur > 0.0f) && st.dist2Before) processDist2(L, R, n);
                 if (!(inBand & 2) && (distTarget > 0.0f || distCur > 0.0f)) processDist(L, R, n);
+                if (!(inBand & 2) && (dist2Target > 0.0f || dist2Cur > 0.0f) && !st.dist2Before) processDist2(L, R, n);
                 break;
             case 1:
                 if (xfOn) processFilterFx(L, R, n);
@@ -1122,7 +1213,7 @@ public:
                 for (int j = 0; j < 2; j++) {
                     if (j == 0 && st.delayVital) {
                         if (st.delayVMix > 0.0f || vdly.wet > 0.0f) { processDelayVital(L, R, n); vdly.ran = true; }
-                        else if (vdly.ran) { vdly.clear(); vdly.ran = false; }
+                        else if (vdly.ran) { slice.finish(); vdly.clear(slice); vdly.ran = false; }
                         continue;
                     }
                     if (q[j].mix > 0.0f || dly[j].wetCur > 0.0f) { processDelay(dly[j], q[j], L, R, n); dly[j].ran = true; }
@@ -1260,69 +1351,89 @@ private:
             loR = std::min(std::max(s.vcLoRatio[b], -1.0f), 1.0f) * 0.5f;
             multTarget = std::pow(10.0f, std::min(std::max(s.vcGainDb[b], -30.0f), 30.0f) * 0.05f);
         }
-        float tick(int c, float x)
+        /* Left and right at once; hiS / loS are the two followers' states for the pair (held by the caller across the block). */
+        fxdetail::v2f tick(fxdetail::v2f x, fxdetail::v2f &hiS, fxdetail::v2f &loS) const
         {
-            const float sq = x * x;
-            const bool hiAtt = sq > hi[c];
-            hi[c] = (sq + hi[c] * (hiAtt ? attN : relN)) * (hiAtt ? attScale : relScale);
-            hi[c] = std::max(hi[c], upThr2);
-            const bool loAtt = sq > lo[c];
-            lo[c] = (sq + lo[c] * (loAtt ? attN : relN)) * (loAtt ? attScale : relScale);
-            lo[c] = std::min(lo[c], loThr2);
-            float g = 1.0f;
-            if (upR > 0.0f) g *= fxdetail::fastExp2(std::min(upR * fxdetail::fastLog2(upThr2 / hi[c]), 20.0f));
-            if (loR != 0.0f) g *= fxdetail::fastExp2(std::min(std::max(loR * fxdetail::fastLog2(loThr2 / (lo[c] + 1e-30f)), -60.0f), 20.0f));
-            return std::min(std::max(g, 0.0f), 32.0f) * x;
+            using namespace fxdetail;
+            const v2f sq = x * x;
+            const v2i hiAtt = sq > hiS;
+            hiS = (sq + hiS * vsel(hiAtt, vset(attN), vset(relN))) * vsel(hiAtt, vset(attScale), vset(relScale));
+            hiS = vmax(hiS, vset(upThr2));
+            const v2i loAtt = sq > loS;
+            loS = (sq + loS * vsel(loAtt, vset(attN), vset(relN))) * vsel(loAtt, vset(attScale), vset(relScale));
+            loS = vmin(loS, vset(loThr2));
+            v2f g = vset(1.0f);
+            if (upR > 0.0f) g = g * fastExp2v(vmin(upR * fastLog2v(upThr2 / hiS), vset(20.0f)));
+            if (loR != 0.0f) g = g * fastExp2v(vmin(vmax(loR * fastLog2v(loThr2 / (loS + 1e-30f)), vset(-60.0f)), vset(20.0f)));
+            return vmin(vmax(g, vset(0.0f)), vset(32.0f)) * x;
+        }
+    };
+    struct VcBq {                                            /* a biquad on a stereo pair (the MbBq recursion, left and right in one vector) */
+        float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+        fxdetail::v2f z1 = { 0, 0 }, z2 = { 0, 0 };
+        void set(const MbBq &q) { b0 = q.b0; b1 = q.b1; b2 = q.b2; a1 = q.a1; a2 = q.a2; }
+        void allpass(const MbBq &q) { b0 = q.a2; b1 = q.a1; b2 = 1.0f; a1 = q.a1; a2 = q.a2; }      /* the same poles with the zeros mirrored */
+        fxdetail::v2f tick(fxdetail::v2f x)
+        {
+            const fxdetail::v2f y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
         }
     };
     struct VcSplit {                                         /* one Linkwitz-Riley split: low and high, each two Butterworth biquads */
-        MbBq lp[2], hp[2];
-        void set(float fc, float sr) { for (int i = 0; i < 2; i++) { lp[i].set(false, fc, sr); hp[i].set(true, fc, sr); } }
-        void reset() { for (int i = 0; i < 2; i++) { lp[i] = MbBq(); hp[i] = MbBq(); } }
-        void tick(int c, float x, float &lo, float &hi) { lo = lp[1].tick(c, lp[0].tick(c, x)); hi = hp[1].tick(c, hp[0].tick(c, x)); }
+        VcBq lp[2], hp[2];
+        VcBq ap;                                             /* low + high of the same split is this all-pass (D(-s) / D(s)): the one biquad that stands in for the recombined pair */
+        void set(float fc, float sr)
+        {
+            MbBq l, h; l.set(false, fc, sr); h.set(true, fc, sr);
+            for (int i = 0; i < 2; i++) { lp[i].set(l); hp[i].set(h); }
+            ap.allpass(l);
+        }
+        void reset() { for (int i = 0; i < 2; i++) { lp[i].z1 = lp[i].z2 = hp[i].z1 = hp[i].z2 = fxdetail::vset(0.0f); } ap.z1 = ap.z2 = fxdetail::vset(0.0f); }
+        void tick(fxdetail::v2f x, fxdetail::v2f &lo, fxdetail::v2f &hi) { lo = lp[1].tick(lp[0].tick(x)); hi = hp[1].tick(hp[0].tick(x)); }
     };
 
     void processCompVital(float *L, float *R, int n)
     {
+        using namespace fxdetail;
         const float dw = (compTarget - compCur) / (float) n;
         VcBand *bd = vcBand;
         float startMult[3] = { bd[0].mult, bd[1].mult, bd[2].mult };
+        v2f hiS[3], loS[3];
+        for (int b = 0; b < 3; b++) { hiS[b] = v2f { bd[b].hi[0], bd[b].hi[1] }; loS[b] = v2f { bd[b].lo[0], bd[b].lo[1] }; }
+        const int bands = st.vcBands;
         for (int i = 0; i < n; i++) {
             compCur += dw;
             const float u = (float) (i + 1) / (float) n;
             float m[3];
             for (int b = 0; b < 3; b++) m[b] = startMult[b] + (bd[b].multTarget - startMult[b]) * u;
-            float out[2];
-            for (int c = 0; c < 2; c++) {
-                const float x = c ? R[i] : L[i];
-                float lo1, hi1, y;
-                switch (st.vcBands) {
-                case 0: {
-                    float lo1L, lo1H, hi1L, hi1H;
-                    vcSplitA.tick(c, x, lo1, hi1);
-                    vcSplitB[0].tick(c, lo1, lo1L, lo1H);
-                    vcSplitB[1].tick(c, hi1, hi1L, hi1H);
-                    y = bd[0].tick(c, lo1L + lo1H) * m[0] + bd[1].tick(c, hi1L) * m[1] + bd[2].tick(c, hi1H) * m[2];
-                    break; }
-                case 1:
-                    vcSplitA.tick(c, x, lo1, hi1);
-                    y = bd[0].tick(c, lo1) * m[0] + bd[1].tick(c, hi1) * m[1];
-                    break;
-                case 2:
-                    vcSplitB[0].tick(c, x, lo1, hi1);
-                    y = bd[1].tick(c, lo1) * m[1] + bd[2].tick(c, hi1) * m[2];
-                    break;
-                default:
-                    y = bd[1].tick(c, x) * m[1];
-                    break;
-                }
-                out[c] = y;
+            const v2f x = { L[i], R[i] };
+            v2f lo1, hi1, y;
+            switch (bands) {
+            case 0: {
+                vcSplitA.tick(x, lo1, hi1);
+                v2f hi1L, hi1H;
+                vcSplitB[1].tick(hi1, hi1L, hi1H);
+                y = bd[0].tick(vcSplitB[0].ap.tick(lo1), hiS[0], loS[0]) * m[0] + bd[1].tick(hi1L, hiS[1], loS[1]) * m[1] + bd[2].tick(hi1H, hiS[2], loS[2]) * m[2];
+                break; }
+            case 1:
+                vcSplitA.tick(x, lo1, hi1);
+                y = bd[0].tick(lo1, hiS[0], loS[0]) * m[0] + bd[1].tick(hi1, hiS[1], loS[1]) * m[1];
+                break;
+            case 2:
+                vcSplitB[0].tick(x, lo1, hi1);
+                y = bd[1].tick(lo1, hiS[1], loS[1]) * m[1] + bd[2].tick(hi1, hiS[2], loS[2]) * m[2];
+                break;
+            default:
+                y = bd[1].tick(x, hiS[1], loS[1]) * m[1];
+                break;
             }
             const float w = compCur;
-            L[i] += w * (out[0] * compMk - L[i]);
-            R[i] += w * (out[1] * compMk - R[i]);
+            const v2f o = x + w * (y * compMk - x);
+            L[i] = o[0]; R[i] = o[1];
         }
-        for (int b = 0; b < 3; b++) bd[b].mult = bd[b].multTarget;
+        for (int b = 0; b < 3; b++) { bd[b].hi[0] = hiS[b][0]; bd[b].hi[1] = hiS[b][1]; bd[b].lo[0] = loS[b][0]; bd[b].lo[1] = loS[b][1]; bd[b].mult = bd[b].multTarget; }
         compCur = compTarget;
     }
 
@@ -1463,10 +1574,14 @@ private:
             auto &u = us[c]; u.assign((size_t) (P + 2 * n), 0.0f);
             for (int t = 0; t < P; t++) u[(size_t) t] = uPrev[c][(size_t) t];
             for (int i = 0; i < n; i++) u[(size_t) (P + 2 * i)] = x[i];
-            for (int j = 0; j < 2 * n; j++) {
+            /* The half-band filter has only its centre tap (t = H = 23) and the even taps, and the zero-stuffed input is zero at the odd positions, so an even output sums the 24 even taps and an odd
+             * one is the centre tap alone. The same terms in the same order as the 47-tap loop with its branch (a zero term adds nothing), so the output is bit for bit the same. */
+            const float *ub = u.data() + P;
+            for (int j = 0; j < 2 * n; j += 2) {
                 float a = 0.0f;
-                for (int t = 0; t < T; t++) { if (t == H || ((t - H) & 1)) a += h[t] * u[(size_t) (P + j - t)]; }
+                for (int t = 0; t < T; t += 2) a += h[t] * ub[j - t];
                 y[j] = 2.0f * a;
+                y[j + 1] = 2.0f * (0.0f + h[H] * ub[j + 1 - H]);
             }
             for (int t = 0; t < P; t++) uPrev[c][(size_t) t] = u[(size_t) (2 * n + t)];
         }
@@ -1476,9 +1591,13 @@ private:
             auto &u = ys[c]; u.assign((size_t) (P + 2 * n), 0.0f);
             for (int t = 0; t < P; t++) u[(size_t) t] = dPrev[c][(size_t) t];
             for (int j = 0; j < 2 * n; j++) u[(size_t) (P + j)] = x[j];
-            for (int m = 0; m < n; m++) {
+            const float *ub = u.data() + P;
+            for (int m = 0; m < n; m++) {                              /* the even taps and the centre one, in ascending order (see up) */
                 float a = 0.0f;
-                for (int t = 0; t < T; t++) { if (t == H || ((t - H) & 1)) a += h[t] * u[(size_t) (P + 2 * m - t)]; }
+                const float *x = ub + 2 * m;
+                for (int t = 0; t < H; t += 2) a += h[t] * x[-t];
+                a += h[H] * x[-H];
+                for (int t = H + 1; t < T; t += 2) a += h[t] * x[-t];
                 y[m] = a;
             }
             for (int t = 0; t < P; t++) dPrev[c][(size_t) t] = u[(size_t) (2 * n + t)];
@@ -1636,7 +1755,7 @@ private:
             float x[2] = { L[i], R[i] }, y[2];
             for (int c = 0; c < 2; c++) {
                 const float v = x[c];
-                const float vf = st.distPre ? distPreBq.tick(c, v) : v;          /* the wet part sees the filtered signal, the dry part does not */
+                const float vf = st.distPre == 3 ? distPreSvf.tick(c, v) : st.distPre ? distPreBq.tick(c, v) : v;          /* the wet part sees the filtered signal, the dry part does not */
                 float f;
                 switch (st.distMode) {
                 case 1:  f = std::tanh(g * (vf + bias)) - biasOut; break;
@@ -1656,11 +1775,45 @@ private:
         distCur = distTarget;
     }
 
+    /* The second distortion: the calibrated law of processDistCal (Soft / Asym / Hard / Sine) on its own settings, filter and state. */
+    void processDist2(float *L, float *R, int n)
+    {
+        const float s = std::min(std::max(st.dist2Mix, 0.0f), 1.0f), dry = 1.0f - s * s;
+        const float g = st.dist2Gain, k = st.dist2Out, lv = st.dist2Level, bias = 0.004f, biasOut = std::tanh(g * bias);
+        const float dw = (dist2Target - dist2Cur) / (float) n;
+        const float dcA = 1.0f - std::exp(-2.0f * 3.14159265f * 8.0f / sr);
+        for (int i = 0; i < n; i++) {
+            dist2Cur += dw;
+            const float w = dist2Cur;
+            float x[2] = { L[i], R[i] }, y[2];
+            for (int c = 0; c < 2; c++) {
+                const float v = x[c];
+                const float vf = st.dist2Pre == 3 ? dist2PreSvf.tick(c, v) : st.dist2Pre ? dist2PreBq.tick(c, v) : v;
+                float f;
+                switch (st.dist2Mode) {
+                case 1:  f = std::tanh(g * (vf + bias)) - biasOut; break;
+                case 2:  f = std::min(std::max(g * vf, -1.0f), 1.0f); break;
+                case 3:  f = std::sin(g * vf); break;
+                case 4:  if (ds2Count == 0) ds2Hold[c] = vf; f = ds2Hold[c]; break;
+                default: f = std::tanh(g * vf); break;
+                }
+                const float o = lv * (dry * v + s * k * f);
+                dist2Dc[c] += dcA * (o - dist2Dc[c]);
+                y[c] = o - dist2Dc[c];
+            }
+            if (st.dist2Mode == 4) { if (++ds2Count >= st.dist2Hold) ds2Count = 0; } else ds2Count = 0;
+            L[i] = x[0] + w * (y[0] - x[0]);
+            R[i] = x[1] + w * (y[1] - x[1]);
+        }
+        dist2Cur = dist2Target;
+    }
+
     /* Two modulated taps per side off the mono sum, and only their DIFFERENCE is added, as
      * +side on the left and -side on the right. So the mono sum of the output is exactly the
      * input, and width costs no phase cancellation when the result is folded down. */
     void processWide(float *L, float *R, int n)
     {
+        slice.finish();
         const float target = st.wideMix;
         const float dg = (target - wideCur) / (float) n;
         const float rate = st.wideRate * fxdetail::kTwoPi / sr;
@@ -1701,6 +1854,7 @@ private:
      * echo lands at the left time plus the right time (measured on Serum's Mode 1). */
     void processDelay(DelayUnit &u, const DelayPrm &q, float *L, float *R, int n)
     {
+        slice.finish();
         const float tgtWet = fxdetail::kDelayOut * wetGain(q.mix);
         const float tgtDry = dryGain(q.mix);
         const float dw = (tgtWet - u.wetCur) / (float) n, dd = (tgtDry - u.dryCur) / (float) n;
@@ -1766,11 +1920,12 @@ private:
         float freq[2] = { 0, 0 }, period[2] = { 0, 0 }, wet = 0, dry = 1, fb[2] = { 0, 0 }, gain = 1, lc = 0.1f, hc = 0.1f;
         float lpS[2] = { 0, 0 }, hpS[2] = { 0, 0 };
         bool ran = false, init = false;
-        void clear() { for (auto &b : buf) std::fill(b.begin(), b.end(), 0.0f); pos = 0; lpS[0] = lpS[1] = hpS[0] = hpS[1] = 0.0f; init = false; wet = 0.0f; }
+        void clear(SliceClear &sc) { for (auto &b : buf) sc.add(b); pos = 0; lpS[0] = lpS[1] = hpS[0] = hpS[1] = 0.0f; init = false; wet = 0.0f; }
     } vdly;
     static float vdCoef(float hz, float sr) { const float x = std::min(std::max(hz, 1.0f), sr * 0.4535f) * 3.14159265f / sr; return std::tan(x / (x + 1.0f)); }
     void processDelayVital(float *L, float *R, int n)
     {
+        slice.finish();
         auto &u = vdly;
         if (u.buf[0].empty()) { u.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); u.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }
         const int style = std::min(std::max(st.delayStyle, 0), 3);
@@ -1841,6 +1996,7 @@ private:
      * damping filter shortens it further at high frequencies. */
     void processReverb(float *L, float *R, int n)
     {
+        slice.finish();
         if (st.revVital) { processReverbVital(L, R, n); return; }
         const float tgtWet = fxdetail::kRevOut * revLevel(st.revT60) * wetGain(st.revMix);
         const float tgtDry = dryGain(st.revMix);
@@ -2009,11 +2165,10 @@ private:
         revWetCur = tgtWet; revDryCur = tgtDry;
     }
 
-    void clearWide() { std::fill(chorusBuf.begin(), chorusBuf.end(), 0.0f); wideCur = 0; }
+    void clearWide() { slice.finish(); slice.add(chorusBuf); wideCur = 0; }
     void clearDelay(DelayUnit &u)
     {
-        std::fill(u.buf[0].begin(), u.buf[0].end(), 0.0f);
-        std::fill(u.buf[1].begin(), u.buf[1].end(), 0.0f);
+        slice.finish(); slice.add(u.buf[0]); slice.add(u.buf[1]);
         u.fbLp[0] = u.fbLp[1] = u.fbHp[0] = u.fbHp[1] = 0;
         u.wetCur = 0; u.dryCur = 1;
     }
@@ -2037,13 +2192,14 @@ private:
 
     void clearReverb()
     {
-        for (auto &l : lines) { std::fill(l.buf.begin(), l.buf.end(), 0.0f); l.lp = 0; }
-        for (auto &a : aps) std::fill(a.buf.begin(), a.buf.end(), 0.0f);
+        slice.finish();
+        for (auto &l : lines) { slice.add(l.buf); l.lp = 0; }
+        for (auto &a : aps) slice.add(a.buf);
         revHp[0] = revHp[1] = 0;
-        std::fill(rpd.begin(), rpd.end(), 0.0f);
-        for (auto &b : vr.fb) std::fill(b.begin(), b.end(), 0.0f);
-        for (auto &b : vr.ap) std::fill(b.begin(), b.end(), 0.0f);
-        for (auto &b : vr.pd) std::fill(b.begin(), b.end(), 0.0f);
+        slice.add(rpd);
+        for (auto &b : vr.fb) slice.add(b);
+        for (auto &b : vr.ap) slice.add(b);
+        for (auto &b : vr.pd) slice.add(b);
         for (int a = 0; a < 2; a++) vr.pre[0][a] = vr.pre[1][a] = 0.0f;
         for (int c = 0; c < 4; c++) for (int l = 0; l < 4; l++) vr.hiSh[c][l] = vr.loSh[c][l] = 0.0f;
         revWetCur = 0; revDryCur = 1;
@@ -2100,6 +2256,10 @@ private:
     int   dsCount = 0;
     float dsHold[2] = { 0.0f, 0.0f };
     StereoBiquad distPreBq;
+    StereoSVF distPreSvf, dist2PreSvf;
+    StereoBiquad dist2PreBq;
+    float dist2Cur = 0.0f, dist2Target = 0.0f, dist2Dc[2] = { 0.0f, 0.0f }, ds2Hold[2] = { 0.0f, 0.0f };
+    int ds2Count = 0;
     VitalDistFilter distVf;
     float vdsPhase = 0.0f; bool vdsNew = true;                  /* the Vital law's Down Sample: samples since the last hold, and whether this one starts a new hold */
     float distAudioHz = 261.63f, distAudioPhase = 0.0f;                           /* the audio-rate LFO's frequency (the newest note's) and phase */

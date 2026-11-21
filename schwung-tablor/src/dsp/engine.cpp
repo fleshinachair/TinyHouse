@@ -787,6 +787,20 @@ FxSettings Engine::fxSettings(const float *pots) const
             for (int k = 0; k < 16; k++) s.distAudioShape[k] = pot01(pots[TB_P_VDL_S0 + k]);
         }
     }
+    /* the second distortion (the calibrated law, Soft / Asym / Hard / Sine): Mix 0 is off, FX Enable switches it with the rest */
+    s.dist2Mix = all ? pot01(pots[TB_P_DIST2_MIX]) : 0.0f;
+    if (s.dist2Mix > 0.0f) {
+        s.dist2Mode = std::clamp((int) pots[TB_P_DIST2_MODE], 0, 4);
+        s.dist2Hold = 1 + (int) pots[TB_P_DIST2_DRIVE];          /* mode 4 (Downsample): Drive is the hold length minus one, as for the first distortion */
+        s.dist2Before = pots[TB_P_DIST2_POS] >= 0.5f;
+        s.dist2Gain = std::pow(10.0f, (-16.0f + pots[TB_P_DIST2_DRIVE] * (70.0f / 127.0f)) / 20.0f);
+        s.dist2Out = std::pow(10.0f, (-36.0f + pots[TB_P_DIST2_OUT] * (48.0f / 127.0f)) / 20.0f);
+        s.dist2Level = std::pow(10.0f, (pots[TB_P_DIST2_LEVEL] - 64.0f) * (24.0f / 64.0f) / 20.0f);
+        s.dist2Pre = std::clamp((int) pots[TB_P_DIST2_PRE], 0, 3);
+        s.dist2PreHz = 20.0f * std::pow(1000.0f, pots[TB_P_DIST2_PRE_FREQ] / 127.0f);
+        s.dist2PreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST2_PRE_Q] / 127.0f);
+        s.dist2PreMorph = pot01(pots[TB_P_DIST2_PRE_MORPH]);
+    }
     if (s.distCal) {
         /* Drive is the pre-gain in dB (-16..+54), Wet Gain the curve's output gain (-36..+12 dB), Level a gain on the sum (-24..+24 dB). Off with FX Enable. */
         s.distGain = std::pow(10.0f, (-16.0f + pots[TB_P_DIST_DRIVE] * (70.0f / 127.0f)) / 20.0f);
@@ -794,7 +808,8 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.distLevel = std::pow(10.0f, (pots[TB_P_DIST_LEVEL] - 64.0f) * (24.0f / 64.0f) / 20.0f);
         if (!all) s.distMix = 0.0f;
         /* the filter ahead of the curve: 0 off, 1 low-pass, 2 high-pass; Freq 20 Hz..20 kHz and Q 0.3..3, both log */
-        s.distPre = std::clamp((int) pots[TB_P_DIST_PRE], 0, 2);
+        s.distPre = std::clamp((int) pots[TB_P_DIST_PRE], 0, 3);
+        s.distPreMorph = pot01(pots[TB_P_DIST_PRE_MORPH]);
         s.distPreHz = 20.0f * std::pow(1000.0f, pots[TB_P_DIST_PRE_FREQ] / 127.0f);
         s.distPreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST_PRE_Q] / 127.0f);
     }
@@ -837,8 +852,11 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.compMakeupDb = 24.0f * pot01(pots[TB_P_COMP_MAKEUP]);
     /* The modulated effects: rates are 0..20 Hz on a cubic knob, delays 0..30 ms, the mixes are gated by their own switches. */
     auto rateHz = [](float v) { const float x = pot01(v); return 20.0f * x * x * x; };
+    /* A tempo-synced rate is stored as the rate at 120 BPM (what the converter writes); Sync On scales it to the host tempo. */
+    const float modBpm = hostBpm >= 20.0f ? std::clamp(hostBpm, 40.0f, 300.0f) : 120.0f;
+    const auto modScale = [&](int syncPot) { return pots[syncPot] >= 1.0f ? modBpm / 120.0f : 1.0f; };
     s.chorMix = all && pots[TB_P_CHOR_ON] >= 1.0f ? pot01(pots[TB_P_CHOR_MIX]) : 0.0f;
-    s.chorRate = rateHz(pots[TB_P_CHOR_RATE]);
+    s.chorRate = rateHz(pots[TB_P_CHOR_RATE]) * modScale(TB_P_CHOR_SYNC);
     s.chorD1Ms = 30.0f * pot01(pots[TB_P_CHOR_D1]);
     s.chorD2Ms = 30.0f * pot01(pots[TB_P_CHOR_D2]);
     s.chorDepth = pot01(pots[TB_P_CHOR_DEPTH]);
@@ -855,12 +873,12 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.chorVSpread = pot01(pots[TB_P_CHOR_VSPREAD]);
     }
     s.flanMix = all && pots[TB_P_FLAN_ON] >= 1.0f ? pot01(pots[TB_P_FLAN_MIX]) : 0.0f;
-    s.flanRate = rateHz(pots[TB_P_FLAN_RATE]);
+    s.flanRate = rateHz(pots[TB_P_FLAN_RATE]) * modScale(TB_P_FLAN_SYNC);
     s.flanDepth = pot01(pots[TB_P_FLAN_DEPTH]);
     s.flanFb = 0.8f * pot01(pots[TB_P_FLAN_FB]);
     s.flanPhase = pot01(pots[TB_P_FLAN_PHASE]);
     s.phasMix = all && pots[TB_P_PHAS_ON] >= 1.0f ? pot01(pots[TB_P_PHAS_MIX]) : 0.0f;
-    s.phasRate = rateHz(pots[TB_P_PHAS_RATE]);
+    s.phasRate = rateHz(pots[TB_P_PHAS_RATE]) * modScale(TB_P_PHAS_SYNC);
     s.phasDepth = pot01(pots[TB_P_PHAS_DEPTH]);
     s.phasDepth2 = pot01(pots[TB_P_PHAS_DEPTH2]);
     s.phasFreqHz = potEqFreq(pots[TB_P_PHAS_FREQ]);
@@ -950,10 +968,10 @@ FxSettings Engine::fxSettings(const float *pots) const
 void Engine::refreshFx()
 {
     /* The FX pots are one contiguous run, so a moved one is a memcmp away. */
-    const float tempoNow = pots[TB_P_DLY_SYNC] >= 1.0f ? hostBpm : 0.0f;
+    const float tempoNow = (pots[TB_P_DLY_SYNC] >= 1.0f || pots[TB_P_CHOR_SYNC] >= 1.0f || pots[TB_P_FLAN_SYNC] >= 1.0f || pots[TB_P_PHAS_SYNC] >= 1.0f) ? hostBpm : 0.0f;
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
-        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 &&
+        std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 && std::memcmp(dist2Seen, pots + TB_P_DIST_PRE_MORPH, sizeof dist2Seen) == 0 &&
         std::memcmp(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen) == 0 && std::memcmp(vdistSeen, pots + TB_P_FX_ORDER, sizeof vdistSeen) == 0 && std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX] && std::memcmp(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen) == 0) return;
     convSeen = pots[TB_P_CONV_MIX];
     tempoSeen = tempoNow;
@@ -964,6 +982,7 @@ void Engine::refreshFx()
     std::memcpy(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen);
     std::memcpy(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen);
     std::memcpy(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen);
+    std::memcpy(dist2Seen, pots + TB_P_DIST_PRE_MORPH, sizeof dist2Seen);
     std::memcpy(vdistSeen, pots + TB_P_FX_ORDER, sizeof vdistSeen);
     std::memcpy(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen);
     std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
@@ -999,7 +1018,8 @@ void Engine::refreshBus(int b)
     const float *bp = busPots[b];
     const float *seen = busSeen[b];
     const float fxOn = pots[TB_P_FX_ON], fxSpace = pots[TB_P_FX_SPACE];
-    const float tempoNow = (TB_P_DLY_SYNC == TB_P_FX_ON ? fxOn : TB_P_DLY_SYNC == TB_P_FX_SPACE ? fxSpace : bp[TB_P_DLY_SYNC]) >= 1.0f ? hostBpm : 0.0f;
+    const bool anySync = (TB_P_DLY_SYNC == TB_P_FX_ON ? fxOn : TB_P_DLY_SYNC == TB_P_FX_SPACE ? fxSpace : bp[TB_P_DLY_SYNC]) >= 1.0f || bp[TB_P_CHOR_SYNC] >= 1.0f || bp[TB_P_FLAN_SYNC] >= 1.0f || bp[TB_P_PHAS_SYNC] >= 1.0f;
+    const float tempoNow = anySync ? hostBpm : 0.0f;
     const auto same = [&](int from, int to) { return to <= from || std::memcmp(seen + from, bp + from, sizeof(float) * (size_t) (to - from)) == 0; };
     if (busSeenValid[b] && busTempoSeen[b] == tempoNow && std::memcmp(&seen[TB_P_FX_ON], &fxOn, sizeof fxOn) == 0 && std::memcmp(&seen[TB_P_FX_SPACE], &fxSpace, sizeof fxSpace) == 0 &&
         same(0, kLo) && same(kLo + 1, kHi) && same(kHi + 1, TB_PARAM_COUNT)) return;
@@ -1290,7 +1310,7 @@ std::shared_ptr<Wavetable> makeInitTable()
     if (peak > 0.0f)
         for (float &v : data) v *= 0.9f / peak;
 
-    auto wt = std::make_shared<Wavetable>();
+    auto wt = makeGrave<Wavetable>();
     wtBuild(*wt, data.data(), F, S, 44100.0f, 44100.0f);
     return wt;
 }

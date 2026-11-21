@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.10"
+VERSION = "0.9.12"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being
@@ -402,7 +402,9 @@ MOD_DST = ["None",
            # The whole voice's pitch (Vital voice_transpose, 48 semitones per unit of the route) and fine tune (voice_tune, 2 per unit).
            "Voice Pitch", "Voice Fine", "Filter Comb Trans", "Filter 2 Comb Trans",
            # One LFO moving another's rate (16 octaves for a free LFO, 12 tempo steps for a synced one) and phase (cycles): the engine's LFO 1..8.
-           *[f"LFO{n} Rate" for n in range(1, 9)], *[f"LFO{n} Phase" for n in range(1, 9)]]
+           *[f"LFO{n} Rate" for n in range(1, 9)], *[f"LFO{n} Phase" for n in range(1, 9)],
+           # A granular slot's Start, Position (Manual Position mode) and Random Pitch knobs, moved by an LFO / envelope route (granular.h; voice.h addGrains).
+           *[f"Smp{n} {k}" for n in range(1, 4) for k in ("Start", "Position", "RandPitch")]]
 
 # Four LFOs and eight routes, set by the converter from a Serum preset's LFOs and no page on the device. An LFO is a
 # rate (0.05 to 120 Hz, log), a mode (Trig restarts it on every note, Free runs on, Env plays the shape once and holds its end), and a 16-point shape (one cycle,
@@ -559,7 +561,7 @@ TONE = dict(
     dlvl   = pot("dist_level", "DLVL", "Distortion Level",    64),
     # The Distortion effect's own filter when it sits BEFORE the distorting (Serum's PrePost 2): a 12 dB/octave low-pass or high-pass ahead of the
     # curve, on the distorted part only. Freq is 20 Hz..20 kHz (log), Q 0.3..3 (log, 40 = 1). Calibrated distortion only. Off by default.
-    dpre   = enum("dist_pre",      "DPRE", "Distortion Pre-Filter", ["Off", "LP", "HP"], 0),
+    dpre   = enum("dist_pre",      "DPRE", "Distortion Pre-Filter", ["Off", "LP", "HP", "Morph"], 0),
     dprf   = pot("dist_pre_freq",  "DPRF", "Distortion Pre-Filter Freq", 64),
     dprq   = pot("dist_pre_q",     "DPRQ", "Distortion Pre-Filter Q", 40),
     # Compressor, after the distortion (before width, delay and reverb): a stereo-linked peak compressor with a soft knee. Threshold
@@ -892,6 +894,16 @@ BANKS = [
     ("Vital Delay", False, [row(enum("dly_vital", "DVL", "Vital Delay", ["Off", "On"], 0), num("dly_vstyle", "DVS", "Vital Delay Style", 0, 3, 0), pot("dly_vmix", "DVM", "Vital Delay Mix", 0))]),
     # Serum's comb / flange / phaser models in the Filter FX (the Filter FX Model list above, 7..14): the voice filter's laws (comb.h). A comb is tuned to its cutoff exactly, so the cutoff pot (whole semitones) gets a cents remainder, 64 = 0.
     ("Filter FX Comb Tune", False, [row(num("fxf_cfine", "XCF", "Filter FX Comb Tune", 0, 127, 64))]),
+    # Tempo-following modulation effects: the Rate knob is the rate at 120 BPM (what the converter writes for a tempo-synced Vital chorus / flanger / phaser); with Sync On it is scaled by host BPM / 120.
+    # The Distortion's pre-filter morph (Serum's LPHP between its ends: low-pass -> band-pass -> high-pass, the 12 dB/octave state-variable filter's three outputs; used when dist_pre is Morph), and a SECOND
+    # calibrated distortion (Serum rack with two Distortion nodes): the same law as the first (Soft / Asym / Hard / Sine), run right after it or right before it. dist2_mix 0 is off.
+    ("Distortion 2", False, [
+        row(pot("dist_pre_morph", "DPRM", "Distortion Pre-Filter Morph", 0), pot("dist2_mix", "D2MX", "Distortion 2 Mix", 0), enum("dist2_mode", "D2MD", "Distortion 2 Mode", ["Soft", "Asym", "Hard", "Sine", "Hold"], 0),
+            enum("dist2_pos", "D2PS", "Distortion 2 Position", ["After", "Before"], 0)),
+        row(pot("dist2_drive", "D2DR", "Distortion 2 Drive", 16), pot("dist2_out", "D2OU", "Distortion 2 Wet Gain", 64), pot("dist2_level", "D2LV", "Distortion 2 Level", 64)),
+        row(enum("dist2_pre", "D2PR", "Distortion 2 Pre-Filter", ["Off", "LP", "HP", "Morph"], 0), pot("dist2_pre_freq", "D2PF", "Distortion 2 Pre-Filter Freq", 64), pot("dist2_pre_q", "D2PQ", "Distortion 2 Pre-Filter Q", 40),
+            pot("dist2_pre_morph", "D2PM", "Distortion 2 Pre-Filter Morph", 0))]),
+    ("Mod FX Tempo Sync", False, [row(enum("chor_sync", "CHS", "Chorus Tempo Sync", ["Off", "On"], 0), enum("flan_sync", "FLS", "Flanger Tempo Sync", ["Off", "On"], 0), enum("phas_sync", "PHS", "Phaser Tempo Sync", ["Off", "On"], 0))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

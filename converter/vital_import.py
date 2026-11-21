@@ -528,8 +528,9 @@ def static_source_value(s: dict, src: str):
         return VELOCITY_NOMINAL
     if src == "mod_wheel":
         return float(s.get("mod_wheel", 0.0))
-    if src.startswith("random_") and RANDOM_AS_MEAN:
-        return 0.5                                           # a random modulator (0..1, a new value each time) cannot be replayed: its average, which is the middle of its range
+    if (src == "random" or src.startswith("random_")) and RANDOM_AS_MEAN:
+        return 0.5                                           # a random modulator (0..1, a new value each time) or the per-note random ("random", 0..1 at each note-on) cannot be replayed: its average, the middle of its range
+                                                             # (Satellites: random x 0.30 into osc 1's low-pass morph; dropped, the morph kept 10 harmonics where the plugin keeps about 29 on average)
     if src.startswith("const:"):
         return float(src[6:])                                # a static source already passed through its route's curve (route_static_value)
     return None

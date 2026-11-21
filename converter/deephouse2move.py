@@ -356,7 +356,7 @@ def physical(tree: dict, header: dict) -> dict:
     for m in mods:
         if m["dest_type"] == "Env" and isinstance(m["dest_id"], int) and 0 <= m["dest_id"] < len(envs) and m["dest_param"] in ("kParamSustain", "kParamAttack", "kParamDecay", "kParamRelease"):
             src = m["source"]
-            x = (fxmap.macro_value(m, macros) if (25 <= src <= 32 or src == 1) else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else None)
+            x = fxmap.macro_value(m, macros) if (25 <= src <= 32 or src in (1, 16, 17)) else None      # through the route's curve (velocity and note too)
             if x is not None:
                 d = m["amount_pct"] / 100.0 * ((x - 0.5) if m["bipolar"] else x)
                 key = m["dest_param"][6:].lower()
@@ -425,7 +425,7 @@ def physical(tree: dict, header: dict) -> dict:
     for m in mods:
         if m["dest_type"] == "RoutingSlot" and m["dest_param"] in ("kParamFXBus1Level", "kParamFXBus2Level") and m["dest_id"] in bus:
             src = m["source"]
-            x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else None)
+            x = fxmap.macro_value(m, macros) if (25 <= src <= 32 or src in (16, 17)) else None
             if x is not None:
                 b = int(m["dest_param"][-6]) - 1
                 bus[m["dest_id"]][b] = _clamp(bus[m["dest_id"]][b] + m["amount_pct"] * ((x - 0.5) if m["bipolar"] else x), 0.0, 100.0)
@@ -439,7 +439,7 @@ def physical(tree: dict, header: dict) -> dict:
         for m in mods:
             if m["dest_type"] == "VoiceFilter" and m["dest_param"] == "kParamWet" and m["dest_id"] == i:
                 src = m["source"]
-                x = (fxmap.macro_value(m, macros) if 25 <= src <= 32 else VELOCITY_NOMINAL / 127.0 if src == 16 else 60 / 127.0 if src == 17 else macros[8] / 100.0 if src == 1 else None)
+                x = fxmap.macro_value(m, macros) if (25 <= src <= 32 or src in (1, 16, 17)) else None
                 if x is None:
                     dynamic = True
                 else:
@@ -453,6 +453,13 @@ def physical(tree: dict, header: dict) -> dict:
     # The main rack's nodes as stored, for fxmap.py. The two bus racks are the sources' sends (bus_nodes below).
     fx_nodes = [dict(n) for n in (tree.get("FXRack0", {}).get("FX", []) or [])]
     bus_fx = sum(len(tree.get(f"FXRack{i}", {}).get("FX", []) or []) for i in (1, 2))
+    # The Global Transpose (semitones) moves every oscillator, the same as each one's Pitch knob (GTR - Intimate Andalusian Pluck, +12: Serum's El Nero multisample
+    # at Octave -1 sounded 12.9 st above its SFZ mapping, 0.9 st with the transpose's octave taken off; five factory presets set it). The engine has no
+    # global transpose, so it goes into each oscillator's tune.
+    gtr = float(g.get("kParamTranspose", 0.0))
+    if gtr:
+        for o in oscs:
+            o["semitone"] += gtr
     return {
         "name": header.get("presetName", ""), "tags": header.get("tags", []), "clip": clip_from_tree(tree), "arp": arp_from_tree(tree),
         "serum_version": header.get("productVersion"),
@@ -462,7 +469,7 @@ def physical(tree: dict, header: dict) -> dict:
         "oscs": oscs,
         "sub": {"enabled": bool(_pp(sub_node).get("kParamEnable", 0)),
                 "level": _pp(sub_node).get("kParamVolume", DEFAULTS["osc_level"]),
-                "octave": _pp(sub_node).get("kParamOctave", 0.0),
+                "octave": _pp(sub_node).get("kParamOctave", 0.0) + gtr / 12.0,
                 "shape": _pp(sub_node.get("SubOsc4", {})).get("kParamShape", "kSine")},
         # A noise slot can hold any sample. One played once and shorter than a quarter of a second is a click (a kick attack), not a
         # noise: the engine's continuous noise at that level would drown the sound in hiss, so it is left out.
@@ -1676,7 +1683,9 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             # Velocity and note number are x / 127 (calibration/dev/probe_aux_source.py, the same sources as an aux). They move with every note; the preset is static, so
             # a velocity is taken at the nominal velocity (the engine's own default) and a note at middle C, which is where the engine's key tracking pivots. A note
             # route to the filter cutoff is carried exactly as key tracking as well (voice_filter_pots: the part per semitone), so only the value at middle C is here.
-            x = (VELOCITY_NOMINAL if src == 16 else 60) / 127.0
+            # Through the route's own curve, like a macro (fxmap.macro_value): GTR - Twelve String Guitar's velocity layers are three curved velocity routes into the
+            # oscillators' volumes; read straight, the main layer folded to silence and a layer the curve shuts at velocity 100 played.
+            x = fxmap.macro_value(m, ph["macros"])
             fold[key] += a * ((x - 0.5) if m.get("bipolar") else x)
             if src == 17 and key[:2] == ("VoiceFilter", "kParamFreq"):
                 keyfold[key[2]] += a / 127.0 * CUTOFF_NOTES          # notes of cutoff per semitone of pitch (the same slope unipolar or bipolar)

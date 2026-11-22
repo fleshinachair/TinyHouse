@@ -24,6 +24,8 @@ native)
     $CXX $SRC "$ROOT/tests/test_partjoin.cpp" -o "$OUT/native_partjoin_test.exe"
     $CXX $SRC "$ROOT/tests/test_granular.cpp" -o "$OUT/native_granular_test.exe"
     $CXX $SRC "$ROOT/../calibration/tablor_cli.cpp" $ENGINE -o "$ROOT/../calibration/tablor_cli.exe"
+    # the same with the same noise every run (calibration/bank_score.py: an untouched preset scores the same before and after a fix)
+    $CXX -DTB_DETERMINISTIC_NOISE $SRC "$ROOT/../calibration/tablor_cli.cpp" $ENGINE -o "$ROOT/../calibration/tablor_cli_det.exe"
     ;;
 arm)
     CXX="zig c++ -target aarch64-linux-gnu.2.35 -O3 -std=c++17 "

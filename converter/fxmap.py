@@ -1543,22 +1543,55 @@ def curve(bands: list[dict]) -> np.ndarray:
     return y
 
 
+_Z1 = np.exp(-1j * 2 * np.pi * np.asarray(FGRID) / SR)
+_Z2 = _Z1 ** 2
+
+
+def biquad_db_rows(kind: str, fc: np.ndarray, gain_db: np.ndarray, q: np.ndarray) -> np.ndarray:
+    """biquad_db on FGRID for many bands at once (one row each), with the same arithmetic element by element: fit_one tries 350 bands per call, and as a loop of
+    biquad_db calls that was most of a preset's conversion time (the Move runs the converter, where it took up to 23 s)."""
+    fc = np.minimum(np.maximum(np.asarray(fc, dtype=float), 10.0), SR * 0.45)
+    w0 = 2 * np.pi * fc / SR
+    A = 10 ** (np.asarray(gain_db, dtype=float) / 40)
+    cw, sw = np.cos(w0), np.sin(w0)
+    al = sw / (2 * np.maximum(np.asarray(q, dtype=float), 0.05))
+    if kind == "bell":
+        b = [1 + al * A, -2 * cw, 1 - al * A]; a = [1 + al / A, -2 * cw, 1 - al / A]
+    elif kind == "loshelf":
+        r = 2 * np.sqrt(A) * al
+        b = [A * ((A + 1) - (A - 1) * cw + r), 2 * A * ((A - 1) - (A + 1) * cw), A * ((A + 1) - (A - 1) * cw - r)]
+        a = [(A + 1) + (A - 1) * cw + r, -2 * ((A - 1) + (A + 1) * cw), (A + 1) + (A - 1) * cw - r]
+    elif kind == "hishelf":
+        r = 2 * np.sqrt(A) * al
+        b = [A * ((A + 1) + (A - 1) * cw + r), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - r)]
+        a = [(A + 1) - (A - 1) * cw + r, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - r]
+    elif kind == "hp":
+        b = [(1 + cw) / 2, -(1 + cw), (1 + cw) / 2]; a = [1 + al, -2 * cw, 1 - al]
+    else:
+        b = [(1 - cw) / 2, 1 - cw, (1 - cw) / 2]; a = [1 + al, -2 * cw, 1 - al]
+    b = [np.broadcast_to(x, fc.shape)[:, None] for x in b]
+    a = [np.broadcast_to(x, fc.shape)[:, None] for x in a]
+    h = (b[0] + b[1] * _Z1 + b[2] * _Z2) / (a[0] + a[1] * _Z1 + a[2] * _Z2)
+    return 20 * np.log10(np.maximum(np.abs(h), 1e-9))
+
+
 def fit_one(target: np.ndarray, kind: str, centre: float, spread: float = 1.2) -> tuple[dict, float]:
-    """The single band of this kind that is closest (rms dB) to a target curve."""
-    best = (1e9, None)
-    for fc in centre * 2 ** np.linspace(-spread, spread, 25):
-        for q in np.geomspace(0.1 if kind in ("bell", "hp", "lp") else 0.4, 14.0 if kind == "bell" else 4.0, 14):
-            if kind in ("hp", "lp"):
-                trial = biquad_db(kind, fc, 0.0, q, FGRID)
-                gain = 0.0
-            else:
-                shape = biquad_db(kind, fc, 6.0, q, FGRID) / 6.0
-                gain = float(np.clip((shape @ target) / max(shape @ shape, 1e-9), -24, 24))
-                trial = biquad_db(kind, fc, gain, q, FGRID)
-            err = float(np.sqrt(np.mean((trial - target) ** 2)))
-            if err < best[0]:
-                best = (err, {"kind": kind, "fc": float(fc), "gain": gain, "q": float(q)})
-    return best[1], best[0]
+    """The single band of this kind that is closest (rms dB) to a target curve: every centre and Q of the grid tried at once, the first best (centre outer, Q inner) kept."""
+    fcs = centre * 2 ** np.linspace(-spread, spread, 25)
+    qs = np.geomspace(0.1 if kind in ("bell", "hp", "lp") else 0.4, 14.0 if kind == "bell" else 4.0, 14)
+    fc, q = np.repeat(fcs, len(qs)), np.tile(qs, len(fcs))
+    if kind in ("hp", "lp"):
+        gains = np.zeros(len(fc))
+    else:
+        shape = biquad_db_rows(kind, fc, np.full(len(fc), 6.0), q) / 6.0
+        gains = np.clip(np.einsum("ij,j->i", shape, target) / np.maximum(np.einsum("ij,ij->i", shape, shape), 1e-9), -24, 24)
+    trial = biquad_db_rows(kind, fc, gains, q)
+    err = np.sqrt(np.mean((trial - target) ** 2, axis=1))
+    err = np.where(np.isnan(err), np.inf, err)
+    i = int(np.argmin(err))
+    if not err[i] < 1e9:
+        return None, 1e9
+    return {"kind": kind, "fc": float(fc[i]), "gain": float(gains[i]), "q": float(q[i])}, float(err[i])
 
 
 _REDUCE_CACHE: dict = {}
@@ -2248,5 +2281,5 @@ def disk_memo(fn, *deps):
     return wrapper
 
 
-fit_filter_curve = disk_memo(fit_filter_curve, fit_one, refine_bands, biquad_db, curve)
-_reduce_bands = disk_memo(_reduce_bands, curve, biquad_db)
+fit_filter_curve = disk_memo(fit_filter_curve, fit_one, biquad_db_rows, refine_bands, biquad_db, curve)
+_reduce_bands = disk_memo(_reduce_bands, fit_one, biquad_db_rows, curve, biquad_db)

@@ -197,8 +197,18 @@ def find_sfz(rel: str) -> Path | None:
         parts = rel.split("/")
         hits = [p for p in _root("Multisamples").rglob(parts[-1]) if p.is_file()]
         hits.sort(key=lambda p: (-sum(1 for d in parts[:-1] if d in p.parts), len(p.parts), p.as_posix()))
-        _found_sfz[rel] = hits[0] if hits else None
+        if not hits:
+            return None                                  # not cached: the browser importer adds the file later
+        _found_sfz[rel] = hits[0]
     return _found_sfz[rel]
+
+
+LIBRARY_DIRS = ("Samples", "Multisamples")
+
+
+def _clean_rel(rel: str) -> str:
+    """rel without "." and ".." parts (the remote UI stores a picked file under the same cleaned path)."""
+    return "/".join(x for x in rel.replace("\\", "/").split("/") if x not in ("", ".", ".."))
 
 
 
@@ -212,6 +222,13 @@ def find_sample(rel: str) -> Path | None:
     direct = _real(_root("Samples") / rel)
     if direct is not None:
         return direct
+    if ".." in rel.split("/"):
+        # A path that climbs out of the Samples folder ("../../../Multisamples/Factory/Keys/MTStrings Samples/XFMellostrings G3.flac") names a file of the
+        # library from one of its top folders: found there, or (the remote UI) under Samples by the cleaned path the page stored it at.
+        clean = _clean_rel(rel)
+        for f in (_root("Samples") / clean, _root(clean.split("/")[0]) / clean.split("/", 1)[-1] if clean.split("/")[0] in LIBRARY_DIRS else None):
+            if f is not None and _real(f) is not None:
+                return _real(f)
     if rel not in _found:
         tail = "/".join(rel.split("/")[-2:])
         hit = next((p for p in (_root("Samples")).rglob("*" + Path(rel).name + "*") if p.as_posix().endswith(tail) or p.as_posix().endswith(tail + ".dec")), None)

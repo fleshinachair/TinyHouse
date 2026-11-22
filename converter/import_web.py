@@ -200,21 +200,24 @@ def sample_needs(tree: dict) -> list[dict]:
 
 def _have_sample(n: dict) -> bool:
     root = "Multisamples" if n["kind"] == "multi" else "Impulses" if n["kind"] == "ir" else "Samples"
-    if n["kind"] == "noise":
+    if n["kind"] in ("noise", "sample"):            # what sample_export reads: the stored path, or the file it stands for (find_sample)
         return SE.find_sample(n["rel"]) is not None
-    return SE._real(SE._root(root) / n["rel"]) is not None
+    if SE._real(SE._root(root) / n["rel"]) is not None:
+        return True
+    return n["kind"] == "multi" and SE.find_sfz(n["rel"]) is not None       # a factory SFZ moved into a sub-folder (export_multisample finds it the same way)
 
 
 def sfz_audio_json(rels_json: str) -> str:
-    """The audio files (paths under Multisamples) the given SFZ files (already added) refer to."""
-    out, root = [], SE._root("Multisamples").resolve()
+    """The audio files the given SFZ files (already added, by their path under Multisamples) refer to, as paths under the library's top folder
+    ("Multisamples/..." or "Samples/...": Serum 2's drum kits play files of the Samples folder)."""
+    out, base = [], SE._root("Multisamples").parent.resolve()
     for rel in json.loads(rels_json):
         f = SE._root("Multisamples") / rel
         if not f.is_file():
             continue
         for r in SE.parse_sfz(f):
             try:
-                out.append(Path(r["file"]).resolve().relative_to(root).as_posix())
+                out.append(Path(r["file"]).resolve().relative_to(base).as_posix())
             except ValueError:
                 pass
     return json.dumps(sorted(set(out)))

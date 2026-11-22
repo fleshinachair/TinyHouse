@@ -2512,7 +2512,23 @@ function findSmp(rel, loose, ir) {
   var r = cleanRel(rel).toLowerCase(), tail = r.split("/").slice(-2).join("/"), hit = null, i, p;
   for (i = 0; i < IMP.smps.length && !hit; i++) { if (!!IMP.smps[i].imp !== !!ir) continue; p = IMP.smps[i].rel.toLowerCase(); if (p === r || p.slice(-(r.length + 1)) === "/" + r) hit = IMP.smps[i]; }      /* impulse responses (ir) are looked for among the Impulses folder's files only, samples among the others */
   if (!hit && loose) for (i = 0; i < IMP.smps.length && !hit; i++) { if (!!IMP.smps[i].imp !== !!ir) continue; p = IMP.smps[i].rel.toLowerCase(); if (p.slice(-(tail.length + 1)) === "/" + tail) hit = IMP.smps[i]; }
+  if (!hit && !ir && /\.sfz$/.test(r)) {          /* Serum 2 sorted its factory SFZs into sub-folders (Factory/Drums/909.sfz is now Factory/Drums/Electronic/909.sfz): the file of that name, sharing most folders (sample_export.find_sfz) */
+    var segs = r.split("/"), leaf = segs.pop(), best = -1;
+    for (i = 0; i < IMP.smps.length; i++) {
+      if (IMP.smps[i].imp) continue;
+      var ps = IMP.smps[i].rel.toLowerCase().split("/");
+      if (ps[ps.length - 1] !== leaf) continue;
+      var score = segs.filter(function (d) { return ps.indexOf(d) >= 0; }).length * 1000 - ps.length;
+      if (score > best) { best = score; hit = IMP.smps[i]; }
+    }
+  }
   return hit;
+}
+/* A picked file's path under its library folder ("Multisamples/Factory/Drums/Electronic/909.sfz" -> "Factory/Drums/Electronic/909.sfz"), or fallback when it is not under one. */
+function underLib(rel, lib, fallback) {
+  var segs = String(rel).split("/"), i;
+  for (i = segs.length - 2; i >= 0; i--) if (segs[i].toLowerCase() === lib.toLowerCase()) return segs.slice(i + 1).join("/");
+  return fallback;
 }
 
 /* ---- the run ---- */
@@ -2672,15 +2688,16 @@ async function importInto(bank, presets) {
       for (var mi = 0; mi < multis.length; mi++) {
         var mf = findSmp(needSmp[multis[mi]].rel, false);
         if (!mf) continue;
-        await putRaw("Multisamples/" + cleanRel(needSmp[multis[mi]].rel), await readBuf(mf.file));
-        sfzs.push(cleanRel(needSmp[multis[mi]].rel)); gotSmp[multis[mi]] = 1;
+        var sfzRel = underLib(cleanRel(mf.rel), "Multisamples", cleanRel(needSmp[multis[mi]].rel));     /* where it really is: its regions' paths are relative to that */
+        await putRaw("Multisamples/" + sfzRel, await readBuf(mf.file));
+        sfzs.push(sfzRel); gotSmp[multis[mi]] = 1;
       }
       var audio = [];
-      if (sfzs.length) audio = JSON.parse(await impCall("sfz", { rels: sfzs }));
-      var jobs = audio.map(function (a) { return { root: "Multisamples/", rel: a, loose: false, key: null }; });
+      if (sfzs.length) audio = JSON.parse(await impCall("sfz", { rels: sfzs }));       /* "Multisamples/..." or "Samples/..." (the drum kits play files of the Samples folder) */
+      var jobs = audio.map(function (a) { return { root: "", rel: a, alt: a.split("/").slice(1).join("/"), loose: false, key: null }; });
       needKeys.forEach(function (k) { if (needSmp[k].kind !== "multi") jobs.push({ root: needSmp[k].kind === "ir" ? "Impulses/" : "Samples/", rel: cleanRel(needSmp[k].rel), loose: needSmp[k].kind === "noise", ir: needSmp[k].kind === "ir", key: k }); });
       for (var ji = 0; ji < jobs.length; ji++) {
-        var jb = jobs[ji], jf = findSmp(jb.rel, jb.loose, jb.ir);
+        var jb = jobs[ji], jf = findSmp(jb.rel, jb.loose, jb.ir) || (jb.alt ? findSmp(jb.alt, false, false) : null);
         impStatus("Decoding samples… " + (ji + 1) + " of " + jobs.length, 56 + 12 * ji / jobs.length);
         if (!jf) continue;
         try {

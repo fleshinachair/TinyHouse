@@ -2532,10 +2532,11 @@ function sfzWords(name) {
 /* The SFZ a renamed one became (Serum 2 renamed some: Choir/Ah Both (Xfade).sfz is Choir/Ah Both.sfz): among the picked SFZs below the folder the preset names, the one
  * whose name shares the most of its words, a word counting less the more of them carry it; none unless exactly one is best (sample_export.renamed_sfz). */
 function renamedSfz(leaf, folder) {
-  var want = sfzWords(leaf), cands = [], names = [], i;
+  var want = sfzWords(leaf), cands = [], names = [], seen = {}, i;
   for (i = 0; i < IMP.smps.length; i++) {
-    var p = IMP.smps[i].rel.toLowerCase();
-    if (IMP.smps[i].imp || !/\.sfz$/.test(p) || ("/" + p).indexOf("/" + folder + "/") < 0) continue;
+    var p = "/" + IMP.smps[i].rel.toLowerCase(), at = p.indexOf("/" + folder + "/");
+    if (IMP.smps[i].imp || !/\.sfz$/.test(p) || at < 0 || seen[p.slice(at)]) continue;
+    seen[p.slice(at)] = 1;                                     /* the same file picked twice (its Multisamples folder, then the whole Serum 2 folder) is one candidate, not a tie */
     cands.push(IMP.smps[i]); names.push(sfzWords(p.split("/").pop()));
   }
   var count = {};
@@ -2853,6 +2854,7 @@ function impAllLines(p) {
   p.not_carried.forEach(function (g) { out.push(/not carried|not imported/.test(g) ? g : g + " not carried"); });
   p.missing_tables.forEach(function (t) { out.push("Wavetable not found: " + t + " (the Init table plays instead)"); });
   p.missing_samples.forEach(function (t) {
+    if (p.samples.some(function (s) { return s.kind === "ir" && s.rel === t; })) return;      /* a missing impulse response: the reverb's own line already says so ("Convolution reverb not carried (its IR file ...)"); no oscillator goes silent */
     var own = !/(^|\/)Packs\//i.test(t);          /* a file of Serum's own library, which a pack leaves out because every Serum owner has it */
     out.push("Sample not found: " + t + (IMP.smps.length ? " (that oscillator stays silent" + (own ? "; it is one of Serum's own sample files and was not found in the folder you chose" : "") + ")"
       : " (" + (own ? "a file of Serum's own library, not in the pack: " : "") + "no Samples folder has been chosen: pick your Serum 2 folder, not only its Presets folder, then import again; that oscillator stays silent)"));

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.15
+
+**Sets keep their presets.** Importing through the Remote UI while a Set was open could move its slots off their presets: each slot remembered its place in the preset list rather than the preset, so when an import changed the list, a slot pointed at another preset or at the bank's first one. The sound stayed, but the Set saved the wrong preset, and after a restart the slots showed the first preset. Slots now stay on their preset by name. If a slot's preset is missing for a while (while its bank is being rewritten, or removed by an update), the slot keeps its sound and keeps naming that preset, and goes back to it when it returns. Only choosing another preset moves a slot.
+
+**Saved Sets follow updates.** A slot playing a preset you have not changed now remembers which converter made it. When you open the Set after an update has converted that preset again, the slot takes the new sound and stays on the same preset. A sound you have edited is never replaced. Sets saved before this version do not have that record: choose the preset once more in those slots and they follow updates from then on.
+
+**Serum 2's renamed factory samples are found.** Serum 2 renamed some factory multisamples ("Ah Both (Xfade)" is now "Ah Both", "Auxiliary Kit" is now "Perc Auxiliary"). When a sample is not found, the importer now looks in the same folder for the one file whose name shares the most words with it, ignoring a part in brackets. If two files match equally, neither is used. KIT - Auxillary Kit, FX - Creepy CB Radio Chatter and VOX - Choir Ascension now import with their samples. Import those three again: their samples were never copied to the Move. No Serum 2 factory preset misses a sample now.
+
 ## 0.9.14
 
 **An update only converts the presets it changes.** Each preset imported through the Remote UI now keeps a small record (about 20 KB, beside its original) of which parts of the converter its conversion went through. After an update, the Move checks that record against the new converter: a preset whose path is unchanged would come out the same, so it is kept as it is (about a tenth of a second) instead of being converted again. Only the presets a fix can change are converted. How many that is depends on the fix: replaying the last eleven converter fixes over Serum's 626 factory presets, a fix to one feature reached between 0 and 420 of them, while a fix to how every preset's parameters are read still reaches all 626. In that replay no preset was kept whose sound would have changed.

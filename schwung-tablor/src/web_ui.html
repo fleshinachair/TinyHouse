@@ -2764,6 +2764,7 @@ async function importInto(bank, presets) {
         if (p.source) {
           try {
             for (var a = 0; a < (p.aux || []).length; a++) await keepOnMove(p.aux[a]);
+            if (p.deps) await keepOnMove(p.deps);          /* its path through the converter (conv_deps.py): an update converts it again only if that changed */
             await keepOnMove(p.source);
           } catch (e) {
             var doc = JSON.parse(js); delete doc.src; js = JSON.stringify(doc) + "\n";

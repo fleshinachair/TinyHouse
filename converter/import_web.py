@@ -19,13 +19,16 @@ converted by vital_import.py (GPL-3.0-or-later: when it is in the bundle, so is 
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import json
+import os
 import re
 import tempfile
 import zipfile
 from pathlib import Path
 
+import conv_deps as CD
 import deephouse2move as d2m
 import sample_export as SE
 from serum2_preset_loader.codec import decode_preset_file
@@ -53,6 +56,14 @@ CONV = _conv_version()
 # Each converted preset keeps its original here on the Move, so it can be converted again when a newer converter arrives (convert on load):
 # <MOVE_SRC_ROOT>/<bank folder>/<original file name>. Samples are not kept: the converted sample sets beside the presets are used again.
 MOVE_SRC_ROOT = "/data/UserData/UserLibrary/TinyHouse Sources"
+# A bundle's conversions record their path through the converter (conv_deps.py) in <MOVE_SRC_ROOT>/<bank folder>/_deps/<original>.deps, so that an update
+# converts a preset again only when that path changed. A run from the repo records nothing unless TH_RECORD_DEPS is set (the tests do).
+RECORD_DEPS = CONV["hash"] != "dev" or bool(os.environ.get("TH_RECORD_DEPS"))
+DEPS_EXT = ".deps"
+
+
+def deps_path(subdir: str, original: str) -> str:
+    return f"{MOVE_SRC_ROOT}/{subdir}/_deps/{original}{DEPS_EXT}"
 
 
 def preset_doc(name: str, state: str, src: str | None) -> str:
@@ -309,34 +320,46 @@ def convert_one(p: Path, name: str, subdir: str, tables_dir: Path | None, pack: 
     Besides the preset it lists what to keep on the Move to convert it again later: "source" (the original) and "aux" (the noise and impulse audio it read),
     each [path on the Move, path here]. Samples and wavetables are not kept a second time: the sets and tables written for the preset are read again."""
     r = {"file": p.stem, "name": name, "json": None, "tier": "", "gaps": [], "approx": [], "not_carried": [], "missing_tables": [], "fx": [], "samples": [], "missing_samples": [], "error": "",
-         "src": f"{subdir}/{p.name}", "source": [f"{MOVE_SRC_ROOT}/{subdir}/{p.name}", p.as_posix()], "aux": []}
+         "src": f"{subdir}/{p.name}", "source": [f"{MOVE_SRC_ROOT}/{subdir}/{p.name}", p.as_posix()], "aux": [], "deps": None}
+    rec = CD.code().recorder() if RECORD_DEPS else None
+    quiet = rec.paused if rec else contextlib.nullcontext          # the report's own work does not shape the preset file: left out of its path
     try:
-        if p.suffix == ".vital":
-            _convert_vital(p, name, r, wt_out, subdir)
-            return r
-        header, tree = decode_preset_file(p)
-        needs = sample_needs(tree)
-        r["samples"] = [n for n in needs]
-        r["missing_samples"] = [n["rel"] for n in needs if not _have_sample(n)]
-        for n in needs:
-            root = AUX_KINDS.get(n["kind"])
-            f = SE.find_sample(n["rel"]) if n["kind"] == "noise" else SE._real(SE._root(root) / n["rel"]) if root else None
-            if f is not None and f.suffix == ".dec" and f.is_relative_to(SE._root(root)):     # the page's decoded copy (the Move has no decoder either); audio held in the preset is not
-                r["aux"].append([f"{MOVE_SRC_ROOT}/{subdir}/audio/{root}/{f.relative_to(SE._root(root)).as_posix()}", f.as_posix()])
-        v = d2m.wrap_preset(d2m.physical(tree, header))
-        v["preset_name"] = name
-        v["serum2move"]["name"] = name
-        v = json.loads(json.dumps(v))
-        m = d2m.map_to_tablor(v, pack, tables_dir, wt_out, subdir)
-        m["notes"] += _level_law(m)
-        gaps, miss = _plain(m["critical"], m["notes"], m["fx"])
-        rule = [("Reverb" if x.startswith("Reverb") else "Width") + " set from Serum's settings by a general rule (not matched by ear)" for x in m["notes"] if x.startswith(("Reverb carried by rule", "Width carried by rule"))]
-        rule += ["Volume set by a general rule, not matched to Serum: adjust by ear" for x in m["notes"] if x.startswith("Volume set by a general rule")]
-        r.update(json=preset_doc(name, d2m.blob(m), r["src"]),
-                 tier=m["tier"], gaps=gaps, approx=_list(m["approx"]) + rule, not_carried=miss,
-                 missing_tables=_list(m["missing_tables"]), fx=sorted(set(m["fx"])))
+        with rec or contextlib.nullcontext():
+            if p.suffix == ".vital":
+                _convert_vital(p, name, r, wt_out, subdir)
+            else:
+                header, tree = decode_preset_file(p)
+                with quiet():
+                    needs = sample_needs(tree)
+                    r["samples"] = [n for n in needs]
+                    r["missing_samples"] = [n["rel"] for n in needs if not _have_sample(n)]
+                    for n in needs:
+                        root = AUX_KINDS.get(n["kind"])
+                        f = SE.find_sample(n["rel"]) if n["kind"] == "noise" else SE._real(SE._root(root) / n["rel"]) if root else None
+                        if f is not None and f.suffix == ".dec" and f.is_relative_to(SE._root(root)):     # the page's decoded copy (the Move has no decoder either); audio held in the preset is not
+                            r["aux"].append([f"{MOVE_SRC_ROOT}/{subdir}/audio/{root}/{f.relative_to(SE._root(root)).as_posix()}", f.as_posix()])
+                v = d2m.wrap_preset(d2m.physical(tree, header))
+                v["preset_name"] = name
+                v["serum2move"]["name"] = name
+                v = json.loads(json.dumps(v))
+                m = d2m.map_to_tablor(v, pack, tables_dir, wt_out, subdir)
+                m["notes"] += _level_law(m)
+                state = d2m.blob(m)
+                with quiet():
+                    gaps, miss = _plain(m["critical"], m["notes"], m["fx"])
+                    rule = [("Reverb" if x.startswith("Reverb") else "Width") + " set from Serum's settings by a general rule (not matched by ear)" for x in m["notes"] if x.startswith(("Reverb carried by rule", "Width carried by rule"))]
+                    rule += ["Volume set by a general rule, not matched to Serum: adjust by ear" for x in m["notes"] if x.startswith("Volume set by a general rule")]
+                    r.update(tier=m["tier"], gaps=gaps, approx=_list(m["approx"]) + rule, not_carried=miss,
+                             missing_tables=_list(m["missing_tables"]), fx=sorted(set(m["fx"])))
+                r["json"] = preset_doc(name, state, r["src"])
+        if rec and r["json"]:                     # its path through the converter, kept beside the original: an update converts it again only if that path changed
+            f = _work() / "deps" / (p.name + DEPS_EXT)
+            f.parent.mkdir(exist_ok=True)
+            f.write_bytes(rec.blob())
+            r["deps"] = [deps_path(subdir, p.name), f.as_posix()]
     except Exception as e:                       # one bad file must not stop a bank
         r["error"] = f"{type(e).__name__}: {e}"[:200]
+        r["json"] = None
     return r
 
 

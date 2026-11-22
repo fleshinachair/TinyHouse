@@ -9,7 +9,9 @@ preset whose stamp differs as it is loaded (and in the background for the rest),
   python3 reconvert.py --serve                 -> the engine's helper: the same, a path per line on stdin ("WAIT <bank sources folder>": that bank's waiting list)
 
 The conversion is import_web.convert_one, the page's own, reading what the import left on the Move: the original, the noise / impulse audio it read (decoded by
-the page), the wavetables and sample sets it wrote. A preset is rewritten only when its state changes (the stamp always is); the write replaces the file whole
+the page), the wavetables and sample sets it wrote. Each conversion's path through the converter is kept beside the original (<bank>/_deps/<original>.deps,
+conv_deps.py): when every step of it is unchanged in the new converter the preset is not converted again, only its stamp moves on (most presets, for most
+fixes). A preset is rewritten only when its state changes (the stamp always is); the write replaces the file whole
 (a temporary file renamed over it), so a reader sees the old preset or the new one, never part of one. A preset without "src" (imported before this, or saved
 from a slot) is never touched.
 """
@@ -50,6 +52,7 @@ try:
 except ImportError:                          # the Move: a stand-in over its own libzstd
     sys.path.insert(0, str(HERE / "shim"))
 
+import conv_deps as CD                       # noqa: E402
 import deephouse2move as d2m                 # noqa: E402
 import import_web as W                       # noqa: E402
 import sample_export as SE                   # noqa: E402
@@ -63,9 +66,18 @@ def _read_doc(path: Path) -> dict:
 
 
 def _write(path: Path, text: str) -> None:
+    _write_bytes(path, text.encode("utf-8"))
+
+
+def _write_bytes(path: Path, data: bytes) -> None:
     tmp = path.with_name("." + path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    tmp.write_bytes(data)
     os.replace(tmp, path)
+
+
+def deps_file(subdir: str, original: str) -> Path:
+    """Where a kept original's recorded path through the converter is (import_web.deps_path, under SRC_ROOT)."""
+    return SRC_ROOT / subdir / "_deps" / (original + W.DEPS_EXT)
 
 
 def convert_kept(orig: Path, name: str, subdir: str) -> dict:
@@ -98,6 +110,13 @@ def reconvert(path: Path) -> dict:
         if not orig.is_file():
             res.update(status="no-source", error=f"original not found: {orig}")
             return res
+        dep = deps_file(subdir, orig.name)
+        if dep.is_file() and CD.code().unchanged(dep.read_bytes()):
+            # every step its conversion took is still in this converter, unchanged: converting again would give the same preset. Only the stamp moves on.
+            doc["conv"], doc["conv_ver"] = W.CONV["hash"], W.CONV["version"]
+            _write(path, json.dumps(doc) + "\n")
+            res.update(status="same", kept=True)
+            return res
         r = convert_kept(orig, doc.get("name") or orig.stem, subdir)
         if r["error"] or not r["json"]:
             res["error"] = r["error"] or "no result"
@@ -105,6 +124,11 @@ def reconvert(path: Path) -> dict:
         new = json.loads(r["json"])
         new["name"] = doc.get("name", new["name"])                  # the name it has in the store (an import may have numbered it)
         changed = new.get("state") != doc.get("state")
+        if r.get("deps"):                                            # the new conversion's path, for the next update (written before the preset: a preset never names an older path)
+            dep.parent.mkdir(parents=True, exist_ok=True)
+            _write_bytes(dep, Path(r["deps"][1]).read_bytes())
+        elif dep.exists():
+            dep.unlink()                                             # it describes a conversion this one replaces
         _write(path, json.dumps(new) + "\n")
         res["status"] = "updated" if changed else "same"
     except Exception as e:                                       # one bad file must not stop the rest
@@ -144,6 +168,10 @@ def retry_waiting(bank_src: Path) -> dict:
             r = convert_kept(orig, e["name"], bank_src.name)
             if r["json"] and not r["error"] and (e.get("rule") == "any" or not W.left_out(r)):
                 dest_dir.mkdir(parents=True, exist_ok=True)
+                if r.get("deps"):
+                    dep = deps_file(bank_src.name, fname)
+                    dep.parent.mkdir(parents=True, exist_ok=True)
+                    _write_bytes(dep, Path(r["deps"][1]).read_bytes())
                 _write(dest, r["json"])
                 del items[fname]
                 res["added"] += 1

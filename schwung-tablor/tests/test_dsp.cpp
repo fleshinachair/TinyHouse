@@ -964,7 +964,7 @@ static void testSampleVelocityLayers()
     CHECK(set.pick(49, 100)->vlo == 70, "100 the third");
     CHECK(set.pick(49, 127)->vlo == 101, "127 the loudest");
     CHECK(set.pick(52, 127)->root == 51, "a key with one region plays it at any velocity");
-    CHECK(set.pick(60, 127)->root == 51, "a key outside every range falls to the nearest key");
+    CHECK(set.pick(60, 127) == nullptr, "a key outside every range plays nothing (Serum: a kit's unmapped keys are silent)");
     tb::SampleSet gap;
     tb::SampleRegion g; g.lo = 0; g.hi = 127; g.vlo = 0; g.vhi = 60; g.frames = 8; g.pcm.assign(8, 1);
     gap.regions.push_back(g);

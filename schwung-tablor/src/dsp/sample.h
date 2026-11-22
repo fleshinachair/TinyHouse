@@ -33,17 +33,18 @@ struct SampleRegion {
 struct SampleSet {
     std::vector<SampleRegion> regions;
 
-    /* The region for a note played at a velocity (1..127): the one whose key range and velocity layer hold them; failing that the nearest key, then the nearest layer. The first
-     * of equals wins. Before the layers were read every note played the first layer of its key: the softest recording, at any velocity. */
+    /* The region for a note played at a velocity (1..127): the one whose key range and velocity layer hold them; failing that, of the regions holding the key, the nearest layer.
+     * The first of equals wins. A key no region holds plays nothing, as in Serum (a drum kit's unmapped keys are silent there: KIT - Mental / Pitched Up Layer Kit, keys 52-63);
+     * it used to play the nearest key's region, a cymbal or a tom on every key above the kit. Before the layers were read every note played the first layer of its key. */
     const SampleRegion *pick(int note, int vel = 100) const
     {
         const SampleRegion *best = nullptr;
-        int bestN = 1 << 20, bestV = 1 << 20;
+        int bestV = 1 << 20;
         for (const auto &r : regions) {
-            const int dn = note < r.lo ? r.lo - note : (note > r.hi ? note - r.hi : 0);
+            if (note < r.lo || note > r.hi) continue;
             const int dv = vel < r.vlo ? r.vlo - vel : (vel > r.vhi ? vel - r.vhi : 0);
-            if (dn < bestN || (dn == bestN && dv < bestV)) { bestN = dn; bestV = dv; best = &r; }
-            if (dn == 0 && dv == 0) break;
+            if (dv < bestV) { bestV = dv; best = &r; }
+            if (dv == 0) break;
         }
         return best;
     }

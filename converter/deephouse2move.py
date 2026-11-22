@@ -1799,8 +1799,10 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             routes.append((src - 2, key, a))
             if m.get("bipolar") and key[:2] in GRAN_ROUTE_KEYS:
                 fold[key] += a * -0.5                     # the same rule for a granular knob: the engine's route adds the envelope x depth, a bipolar Serum route the envelope minus a half
-            if m.get("bipolar") and key[:2] == ("Oscillator", "kParamCoarsePit") and isinstance(key[2], int):
-                bipfold[key[2]] += a * -0.5 * 128.0          # a pitch drop (DR - Kick Minimal: Env 2 into coarse pitch, bipolar 18.75 %): once the envelope has fallen the pitch sits half the depth below the stored one
+            if m.get("bipolar") and key[0] == "Oscillator" and key[1] in PITCH_ROUTE_ST and isinstance(key[2], int):
+                # a pitch drop (DR - Kick Minimal: Env 2 into coarse pitch, bipolar 18.75 %): once the envelope has fallen the pitch sits half the depth below the stored one.
+                # The same for the Pitch and Octave knobs (808 - Diesel: Env 3 into both oscillators' Pitch, bipolar 100 %, sustain 0.42, played 12.5 semitones sharp held)
+                bipfold[key[2]] += a * -0.5 * PITCH_ROUTE_ST[key[1]]
             if m.get("bipolar") and key == ("VoiceFilter", "kParamFreq", 0):
                 # A bipolar route is the source minus one half, so once the envelope has fallen the cutoff sits half the depth below the stored one and the
                 # engine's unipolar envelope only gets the depth: fold the offset into the base (Lead - Let It Go: Env2 -> cutoff +17 % bipolar, sustain 0)

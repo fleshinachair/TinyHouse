@@ -1628,6 +1628,7 @@ static void apply_pending(tablor_instance *inst, const char *why = "?")
  * the converter. A store preset whose file names its original ("src") and another converter ("conv") is converted again from that original: at once when it
  * is chosen (the header reads "Upgrading to v..." meanwhile and the new sound replaces the old when it lands), and in the background after the store is scanned.
  * A preset that could not be converted is left as it is and not tried again until the module is loaded again. */
+static constexpr const char *kSourcesDir = "/data/UserData/UserLibrary/TinyHouse Sources";     /* import_web.MOVE_SRC_ROOT */
 struct ConvStamp { std::string hash, ver; std::atomic<bool> loaded { false }; };      /* hash and ver are written once, before loaded */
 static ConvStamp g_conv;
 static std::once_flag g_conv_once;
@@ -1659,8 +1660,8 @@ static bool preset_stale(const tablor_instance::preset &p)
  * asked for is over, or at once for the chosen preset, which the render then applies from the new list (apply_pending) if it is still the chosen one. */
 static void on_reconverted(tablor_instance *inst, const tb::Reconverter::Result &r)
 {
-    const bool ok = r.status == "updated" || r.status == "same" || r.status == "current";
-    const bool changed = r.status == "updated" || r.status == "current";        /* current: another slot converted it first; this slot's list has the old one */
+    const bool ok = r.status == "updated" || r.status == "same" || r.status == "current" || r.status == "added" || r.status == "none";
+    const bool changed = r.status == "updated" || r.status == "current" || r.status == "added";   /* current: another slot converted it first; added: a waiting preset joined its bank */
     bool rescan = false, reapply = false;
     {
         std::lock_guard<std::mutex> lk(inst->up_mu);
@@ -1701,6 +1702,18 @@ static void queue_stale(tablor_instance *inst)
         std::lock_guard<std::mutex> lk(inst->up_mu);
         for (const auto &p : ps->items)
             if (preset_stale(p) && !inst->up_failed.count(p.path) && inst->up_bg.insert(p.path).second) todo.push_back(p.path);
+        /* The presets an import left out (a bank's waiting.json beside its originals): the helper tries each once per converter and adds the ones that now pass */
+        if (DIR *d = ::opendir(kSourcesDir)) {
+            while (dirent *e = ::readdir(d)) {
+                if (e->d_name[0] == '.') continue;
+                const std::string dir = std::string(kSourcesDir) + "/" + e->d_name;
+                struct stat st;
+                if (::stat((dir + "/waiting.json").c_str(), &st) != 0) continue;
+                const std::string key = "WAIT " + dir;
+                if (!inst->up_failed.count(key) && inst->up_bg.insert(key).second) todo.push_back(key);
+            }
+            ::closedir(d);
+        }
     }
     for (const auto &path : todo)
         rc->request(path, false, inst->reconv_token, [inst](const tb::Reconverter::Result &r) { on_reconverted(inst, r); });

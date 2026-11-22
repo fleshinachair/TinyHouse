@@ -131,6 +131,14 @@ int main(int argc, char **argv)
     if (files.size() < 2 || hash.empty()) return 1;
     for (const auto &f : files) restamp(f, "test-stale");
     CHECK(count_current(files, hash) == 0, "every test preset made stale");
+    /* A preset an import left out, waiting in the bank's waiting.json (rule "any": it is added once it converts) */
+    const std::string srcdir = std::string("/data/UserData/UserLibrary/TinyHouse Sources/") + bank, waitdir = std::string(kStore) + "/" + bank + "_waiting";
+    const std::string orig = field(slurp(files[0]), "src");
+    const std::string origName = orig.substr(orig.rfind('/') + 1);
+    if (FILE *f = fopen((srcdir + "/waiting.json").c_str(), "w")) {
+        fprintf(f, "{\"presets\": {\"%s\": {\"name\": \"Waiting Test\", \"dir\": \"%s\", \"rule\": \"any\", \"tried\": \"\"}}}\n", origName.c_str(), waitdir.c_str());
+        fclose(f);
+    }
     CHECK(helper_pid() < 0, "no helper running before the test");
 
     void *dl = dlopen(so.c_str(), RTLD_NOW | RTLD_LOCAL);
@@ -187,6 +195,9 @@ int main(int argc, char **argv)
     }
     CHECK(pid > 0, "the helper started");
     CHECK(cur == (int) files.size(), "background run upgraded %d of %d presets in %.1f s", cur, (int) files.size(), (now_us() - t0) / 1e6);
+    for (int i = 0; i < 100 && access((waitdir + "/Waiting Test.json").c_str(), F_OK) != 0; i++) R.for_ms(200);
+    CHECK(access((waitdir + "/Waiting Test.json").c_str(), F_OK) == 0, "the waiting preset was added to its bank (%s)", waitdir.c_str());
+    CHECK(slurp(srcdir + "/waiting.json").find("Waiting Test") == std::string::npos, "and taken off the waiting list");
     printf("  render while converting: %d blocks, longest %lld us, %d over a block's 2902 us\n", R.blocks, R.worst, R.late);
     CHECK(R.late == 0, "no render block ran late while the helper worked");
 

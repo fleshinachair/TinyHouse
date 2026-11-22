@@ -2689,6 +2689,39 @@ async function runImport() {
         sent[p.file] = 1;
       }; })(p));
     }
+    /* The presets this import left out ("only presets with nothing missing", or a conversion that failed) are kept on the Move too, listed in the bank's
+     * waiting.json: when an update brings a newer converter the module tries them again and adds the ones that now pass (converter/reconvert.py). A preset
+     * imported now comes off the list. Each new entry is marked as tried by this converter, which has just tried it. */
+    IMP.waiting = 0;
+    var leftOut = list.filter(function (p) { return p.source && (p.skipped || !p.json); });
+    var sentSrc = sendable.filter(function (p) { return p.source && sent[p.file]; });
+    if (leftOut.length || sentSrc.length) {
+      try {
+        var conv = "";
+        sendable.forEach(function (p) { try { conv = conv || JSON.parse(p.json).conv || ""; } catch (e) {} });
+        var srcDir = (leftOut[0] || sentSrc[0]).source[0].replace(/\/[^\/]*$/, ""), wPath = srcDir + "/waiting.json", waiting = { presets: {} };
+        try {
+          var wr = await fetch("/files/download?path=" + encodeURIComponent(wPath), { credentials: "same-origin" });
+          if (wr.ok) { var wj = await wr.json(); if (wj && wj.presets) waiting = wj; }
+        } catch (e) {}
+        var before = JSON.stringify(waiting), nWait = 0;
+        sentSrc.forEach(function (p) { delete waiting.presets[p.source[0].split("/").pop()]; });
+        for (var lo = 0; lo < leftOut.length; lo++) {
+          var q = leftOut[lo];
+          try {
+            for (var a2 = 0; a2 < (q.aux || []).length; a2++) await keepOnMove(q.aux[a2]);
+            await keepOnMove(q.source);
+            waiting.presets[q.source[0].split("/").pop()] = { name: q.name, dir: bankDir, rule: (q.skipped || IMP.onlyComplete) ? "complete" : "any", tried: conv };
+            nWait++;
+          } catch (e) { failed.push(q.name + ": could not be kept on the Move to try again after updates (" + e.message + ")"); }
+        }
+        if (JSON.stringify(waiting) !== before) {
+          var wdir = await ensurePath("/data/UserData/UserLibrary", srcDir.substring("/data/UserData/UserLibrary/".length));
+          await uploadRetry(wdir, "waiting.json", new Blob([JSON.stringify(waiting, null, 1) + "\n"], { type: "application/json" }));
+        }
+        IMP.waiting = nWait;
+      } catch (e) { failed.push("the list of presets to try again after updates could not be written (" + e.message + ")"); }
+    }
     impStatus("Telling the module…", 96);
     var had = PS.banks.map(function (b) { return b.n; });
     send("rescan", 1);
@@ -2762,6 +2795,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
   var nVital = ok.filter(function (p) { return p.tier === "vital"; }).length;
   if (part.length) el("div", "rep-line", body, nSound + " will sound different, an oscillator is silent or plays another wavetable (listed first, in amber). " + (part.length - nSound) + (nVital ? " only miss a detail, an effect or a modulation route: the sound should be close, not identical." : " only miss an effect: the sound is the same, with less of that effect."));
   if (skipped.length) el("div", "rep-line", body, skipped.length + " not imported because “only presets with nothing missing” was chosen. Import again without that choice to get them.");
+  if (IMP.waiting) el("div", "rep-line", body, IMP.waiting + (IMP.waiting === 1 ? " preset that was" : " presets that were") + " left out " + (IMP.waiting === 1 ? "is" : "are") + " kept on the Move: after an update the module tries " + (IMP.waiting === 1 ? "it" : "them") + " again and adds any that now come across complete to this bank.");
   if (IMP.same) el("div", "rep-sub", body, IMP.same + " wavetable or sample file" + (IMP.same === 1 ? " was" : "s were") + " already on the Move, the same, and not sent again.");
   function group(title, arr, cls, fn) {
     if (!arr.length) return;

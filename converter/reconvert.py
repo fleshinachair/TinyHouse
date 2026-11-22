@@ -6,6 +6,7 @@ its original is kept on the Move ("src", under import_web.MOVE_SRC_ROOT). When t
 preset whose stamp differs as it is loaded (and in the background for the rest), so a converter fix reaches presets imported before it without importing them again.
 
   python3 reconvert.py <preset .json> [...]   -> one line of JSON per preset on stdout: {"path", "status": "same"|"updated"|"current"|"no-source"|"error", "ms", "error"}
+  python3 reconvert.py --serve                 -> the engine's helper: the same, a path per line on stdin ("WAIT <bank sources folder>": that bank's waiting list)
 
 The conversion is import_web.convert_one, the page's own, reading what the import left on the Move: the original, the noise / impulse audio it read (decoded by
 the page), the wavetables and sample sets it wrote. A preset is rewritten only when its state changes (the stamp always is); the write replaces the file whole
@@ -67,6 +68,19 @@ def _write(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def convert_kept(orig: Path, name: str, subdir: str) -> dict:
+    """import_web.convert_one on an original kept on the Move, with what its import left there: the noise / impulse audio beside the originals, the
+    wavetables and sample sets it wrote."""
+    audio = SRC_ROOT / subdir / "audio"                           # the noise / impulse audio the import kept (Samples/, Impulses/); sample sets are found as written
+    if SE.BROWSER_DIR != audio:                                   # another bank's audio: what was found (by name) and measured in the last one does not hold here
+        SE._found.clear()
+        SE._standin.clear()
+        SE.BROWSER_DIR = audio
+    tables = WT_ROOT / subdir
+    pack = {p.name.lower(): p for p in tables.rglob("*.wav")} if tables.is_dir() else {}
+    return W.convert_one(orig, name, subdir, tables if tables.is_dir() else None, pack, WT_ROOT)
+
+
 def reconvert(path: Path) -> dict:
     t = time.perf_counter()
     res = {"path": str(path), "status": "error", "ms": 0, "error": ""}
@@ -84,14 +98,7 @@ def reconvert(path: Path) -> dict:
         if not orig.is_file():
             res.update(status="no-source", error=f"original not found: {orig}")
             return res
-        audio = SRC_ROOT / subdir / "audio"                           # the noise / impulse audio the import kept (Samples/, Impulses/); sample sets are found as written
-        if SE.BROWSER_DIR != audio:                                   # another bank's audio: what was found (by name) and measured in the last one does not hold here
-            SE._found.clear()
-            SE._standin.clear()
-            SE.BROWSER_DIR = audio
-        tables = WT_ROOT / subdir
-        pack = {p.name.lower(): p for p in tables.rglob("*.wav")} if tables.is_dir() else {}
-        r = W.convert_one(orig, doc.get("name") or orig.stem, subdir, tables if tables.is_dir() else None, pack, WT_ROOT)
+        r = convert_kept(orig, doc.get("name") or orig.stem, subdir)
         if r["error"] or not r["json"]:
             res["error"] = r["error"] or "no result"
             return res
@@ -102,6 +109,53 @@ def reconvert(path: Path) -> dict:
         res["status"] = "updated" if changed else "same"
     except Exception as e:                                       # one bad file must not stop the rest
         res["error"] = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        res["ms"] = round((time.perf_counter() - t) * 1000)
+    return res
+
+
+WAITING = "waiting.json"
+
+
+def retry_waiting(bank_src: Path) -> dict:
+    """The presets an import left out (<bank sources>/waiting.json, written by the page): each is converted again with this converter, once, and one that
+    now passes the rule it was left out by ("complete": nothing missing, import_web.left_out; "any": converts at all) is written into its bank and taken
+    off the list. One that does not is marked as tried by this converter and waits for the next.
+      waiting.json: {"presets": {"<original file name>": {"name", "dir": the bank's folder in the store, "rule", "tried": converter hash}}}"""
+    t = time.perf_counter()
+    key = "WAIT " + str(bank_src)
+    res = {"path": key, "status": "none", "added": 0, "left": 0, "ms": 0, "error": ""}
+    try:
+        f = bank_src / WAITING
+        doc = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {"presets": {}}
+        items = doc.get("presets") or {}
+        dirty = False
+        for fname, e in list(items.items()):
+            if e.get("tried") == W.CONV["hash"]:
+                continue
+            orig, dest_dir = bank_src / fname, Path(e.get("dir") or "")
+            if not orig.is_file() or not e.get("name") or not dest_dir.is_absolute():
+                del items[fname]; dirty = True
+                continue
+            dest = dest_dir / (e["name"] + ".json")
+            if dest.exists():                                    # imported since (or by hand): nothing left to wait for
+                del items[fname]; dirty = True
+                continue
+            r = convert_kept(orig, e["name"], bank_src.name)
+            if r["json"] and not r["error"] and (e.get("rule") == "any" or not W.left_out(r)):
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                _write(dest, r["json"])
+                del items[fname]
+                res["added"] += 1
+            else:
+                e["tried"] = W.CONV["hash"]
+            dirty = True
+        res["left"] = len(items)
+        if dirty:
+            _write(f, json.dumps({"presets": items}, indent=1) + "\n")
+        res["status"] = "added" if res["added"] else "none"
+    except Exception as e:
+        res.update(status="error", error=f"{type(e).__name__}: {e}"[:300])
     finally:
         res["ms"] = round((time.perf_counter() - t) * 1000)
     return res
@@ -123,7 +177,9 @@ def main(argv: list[str]) -> int:
         answer({"ready": W.CONV})
         for line in sys.stdin:
             p = line.strip()
-            if p:
+            if p.startswith("WAIT "):                    # a bank's waiting list (retry_waiting)
+                answer(retry_waiting(Path(p[5:])))
+            elif p:
                 answer(reconvert(Path(p)))
         return 0
     for a in argv:

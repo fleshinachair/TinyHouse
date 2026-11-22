@@ -337,6 +337,29 @@ def convert_one(p: Path, name: str, subdir: str, tables_dir: Path | None, pack: 
     return r
 
 
+# The page's "only presets with nothing missing" rule (web_ui.html impLines / impVitalSilent), for the Move to apply to presets that rule left out when an
+# update brings a newer converter (reconvert.py, waiting.json). Sample files are not counted here: on the Move the oscillators' audio is not kept (their sets
+# are), and a sample that could not be carried is a gap of its own ("Oscillator A: its sample was not carried").
+_VITAL_MINOR = re.compile(r"^not carried: |^LFO \d|key tracking not carried|drive not carried|serial routing not carried|^filter \d mix [\d.]+ not carried|^amp envelope delay|"
+                          r"random start phase|transpose quantize|^portamento|slope .* straight glide")
+
+
+def gap_lines(r: dict) -> list[str]:
+    """What a converted preset (convert_one's entry) has that did not come across and counts as missing, one line each (impLines without the samples)."""
+    out = list(r["gaps"]) + [g if re.search("not carried|not imported", g) else g + " not carried" for g in r["not_carried"]]
+    out += [f"Wavetable not found: {t}" for t in r["missing_tables"]]
+    small = (lambda l: bool(_VITAL_MINOR.search(l))) if r["tier"] == "vital" else (lambda l: bool(re.search(r"\bBode\b", l)) and "Split" not in l)
+    return [l for l in out if not small(l)]
+
+
+def left_out(r: dict) -> bool:
+    """True when "only presets with nothing missing" leaves this one out: any gap in a Serum preset; a Vital preset only when something would not sound."""
+    lines = gap_lines(r)
+    if r["tier"] == "vital":
+        return any(re.match(r"SILENT|Wavetable not found", l) for l in lines)
+    return bool(lines)
+
+
 def convert(bank: str = "Imports", only=None) -> dict:
     w = _work()
     tables_dir, wt_out = w / "tables", w / "Wavetables"

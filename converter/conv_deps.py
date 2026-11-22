@@ -38,7 +38,13 @@ HERE = Path(__file__).resolve().parent
 EPOCH = 1                       # raise it to convert every kept preset again with the next update (a change the line tables cannot see)
 DATA_EXT = (".json", ".npz", ".npy")
 SKIP_DIRS = {"lib", "__pycache__", "licenses"}       # numpy (the Move's copy) and licence texts are not the converter's code
-MAGIC = b"TDEP1"
+MAGIC = b"TDEP2"
+# Tracing every line is slow on the Move's Python 3.10 (a light preset 0.2 -> 1.7 s). A small function (SMALL code lines or fewer) called HOT times in one
+# conversion, or running LOOP lines in one call, is recorded whole from then on (any change in it counts) and no longer traced. Big functions are always
+# traced line by line: they hold most of the converter's branches, and recording one whole would convert every preset again for any fix in it.
+SMALL = 80
+HOT = 3
+LOOP = 200
 
 # (module, attribute, how to empty it): every cache that lets one conversion skip work another one did. Lists and dicts are emptied in place.
 CACHES = [
@@ -126,13 +132,31 @@ class _File:
         self.indent = {ln: int(self.logical[self.lines[ln]][0]) for ln in self.order}
         # the function each line is in (innermost), for the line's identity
         self.owner: dict[int, str] = {}
+        self.defs: dict[int, tuple[int, int]] = {}      # a function's first line (its decorator or def) and its def line -> its span
+        self.inside: dict[int, tuple[int, int]] = {}    # line -> span of the innermost function holding it
         spans = []
         for node in ast.walk(self.tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                spans.append((node.lineno, node.end_lineno or node.lineno, node.name, min([d.lineno for d in node.decorator_list] + [node.lineno])))
-        for a, b, name, first in sorted(spans, key=lambda s: s[1] - s[0], reverse=True):     # outer first: inner spans overwrite
+                spans.append((node.lineno, node.end_lineno or node.lineno, node.name, min([d.lineno for d in node.decorator_list] + [node.lineno]), not isinstance(node, ast.ClassDef)))
+        for a, b, name, first, func in sorted(spans, key=lambda s: s[1] - s[0], reverse=True):     # outer first: inner spans overwrite
             for ln in range(first, b + 1):
                 self.owner[ln] = name
+                if func:
+                    self.inside[ln] = (first, b)
+            if func:
+                self.defs[first] = self.defs[a] = (first, b)
+
+    def span_for(self, line: int) -> tuple[int, int]:
+        """The code a code object starting at `line` belongs to: its function, else the function holding it (a comprehension, a lambda), else its statement."""
+        if line in self.defs:
+            return self.defs[line]
+        if line in self.inside:
+            return self.inside[line]
+        k = self.lines.get(line)
+        if k is None:
+            return (line, line)
+        last = max(ln for ln, kk in self.lines.items() if kk == k)
+        return (self.first[k], last)
 
 
 class Code:
@@ -173,6 +197,25 @@ class Code:
         m = re.search(r"^EPOCH\s*=\s*(\d+)", own.read_text(encoding="utf-8"), re.M) if own.is_file() else None
         self.glob = _h32(int(m.group(1)) if m else EPOCH, self._global_text())
         self._keys: dict[str, str | None] = {}
+        self._whole: dict = {}
+        self._small: dict = {}
+
+    def small(self, fn: str, line: int) -> bool:
+        """Whether the function a code object starting at `line` belongs to is small enough to be recorded whole (SMALL code lines or fewer)."""
+        k = (fn, line)
+        if k not in self._small:
+            F = self.files[fn]
+            a, b = F.span_for(line)
+            self._small[k] = sum(1 for ln in range(a, b + 1) if ln in F.lines) <= SMALL
+        return self._small[k]
+
+    def whole_hash(self, fn: str, span: tuple[int, int]) -> int:
+        """One function as a whole (every line's identity): a function recorded whole holds only while none of it changes."""
+        k = (fn, span)
+        if k not in self._whole:
+            ids = self.ids[fn]
+            self._whole[k] = _h32(*(ids[ln] for ln in range(span[0], span[1] + 1) if ln in ids))
+        return self._whole[k]
 
     def _constants(self) -> None:
         """const_hash: NAME -> hash of every module-level assignment to that name (in any file), following the constants each definition uses."""
@@ -263,18 +306,28 @@ class Code:
     def recorder(self) -> "Recorder":
         return Recorder(self)
 
-    def encode(self, edges: set) -> bytes:
-        """The steps of one conversion: the line identities it went through and, per step, the two lines (as indices into those) and its signature."""
+    def encode(self, edges: dict, whole: set = frozenset()) -> bytes:
+        """The steps of one conversion: the line identities it went through and, per step, the two lines (as indices into those) and its signature;
+        then the functions recorded whole (hot ones): the identity of each one's first line and its hash."""
         steps = []
-        for fn, a, b in edges:
-            s = self._sig(fn, a, b)
-            if s is not None:
-                steps.append((self.ids[fn][a], self.ids[fn][b], s))
+        for fn, packed in edges.items():
+            for v in packed:
+                a, b = v >> 20, v & 0xFFFFF
+                s = self._sig(fn, a, b)
+                if s is not None:
+                    steps.append((self.ids[fn][a], self.ids[fn][b], s))
         idl = sorted({x for st in steps for x in st[:2]})
         ix = {v: i for i, v in enumerate(idl)}
         body = struct.pack("<II", self.glob, len(idl)) + struct.pack(f"<{len(idl)}I", *idl)
         steps = sorted(set((ix[a], ix[b], s) for a, b, s in steps))
         body += struct.pack("<I", len(steps)) + b"".join(struct.pack("<HHI", a, b, s) for a, b, s in steps)
+        wl = set()
+        for fn, line in whole:
+            span = self.files[fn].span_for(line)
+            if span[0] in self.ids[fn]:
+                wl.add((self.ids[fn][span[0]], self.whole_hash(fn, span)))
+        wl = sorted(wl)
+        body += struct.pack("<I", len(wl)) + b"".join(struct.pack("<II", i, h) for i, h in wl)
         return MAGIC + zlib.compress(body, 9)
 
     def unchanged(self, blob: bytes) -> bool:
@@ -295,6 +348,13 @@ class Code:
                 pa, pb = self.byid.get(idl[a]), self.byid.get(idl[b])
                 if pa is None or pb is None or pa[0] != pb[0] or self._sig(pa[0], pa[1], pb[1]) != s:
                     return False
+            off += 8 * m
+            w, = struct.unpack_from("<I", body, off)
+            for k in range(w):
+                i, h = struct.unpack_from("<II", body, off + 4 + 8 * k)
+                p = self.byid.get(i)
+                if p is None or self.whole_hash(p[0], self.files[p[0]].span_for(p[1])) != h:
+                    return False
             return True
         except (zlib.error, struct.error, IndexError, ValueError):
             return False
@@ -305,22 +365,48 @@ class Recorder:
 
     def __init__(self, code: Code):
         self.code = code
-        self.edges: set = set()
+        self.edges: dict = {}                           # file -> {(from line << 20) | to line}
+        self.whole: set = set()
+        self.calls: dict = {}
         self._old = None
 
     def _call(self, frame, event, arg):
-        fn = self.code.key(frame.f_code.co_filename)
+        co = frame.f_code
+        fn = self.code.key(co.co_filename)
         if fn is None:
             return None
-        edges, last = self.edges, [frame.f_code.co_firstlineno]
+        small = self.code.small(fn, co.co_firstlineno)
+        if small:
+            n = self.calls.get(co, 0) + 1
+            self.calls[co] = n
+            if n > HOT:                                 # a helper called often: recorded whole from here on, not traced line by line
+                self.whole.add((fn, co.co_firstlineno))
+                return None
+        edges = self.edges.get(fn)
+        if edges is None:
+            edges = self.edges[fn] = set()
+        last = [co.co_firstlineno, 0]                   # a step is kept as (from << 20) | to: the cheapest thing to add per traced line
+        if not small:
+            def line(frame, event, arg):
+                if event == "line":
+                    ln = frame.f_lineno
+                    edges.add(last[0] << 20 | ln)
+                    last[0] = ln
+                return line
+            return line
+        whole = self.whole
 
-        def line(frame, event, arg):
+        def line_small(frame, event, arg):
             if event == "line":
                 ln = frame.f_lineno
-                edges.add((fn, last[0], ln))
+                edges.add(last[0] << 20 | ln)
                 last[0] = ln
-            return line
-        return line
+                last[1] += 1
+                if last[1] > LOOP:                      # a long loop: the whole function stands for the rest of this call
+                    whole.add((fn, co.co_firstlineno))
+                    frame.f_trace_lines = False
+            return line_small
+        return line_small
 
     def __enter__(self):
         reset_caches()
@@ -350,7 +436,7 @@ class Recorder:
         return _P()
 
     def blob(self) -> bytes:
-        return self.code.encode(self.edges)
+        return self.code.encode(self.edges, self.whole)
 
 
 _CODE: Code | None = None

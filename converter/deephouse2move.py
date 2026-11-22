@@ -348,6 +348,8 @@ def physical(tree: dict, header: dict) -> dict:
             "table": wt.get("relativePathToWT"),
             "embedded": wt.get("embeddedWTData") or None,        # a table stored in the preset itself: the only copy when it was edited in Serum, the fallback when the file named in table is not on this machine
             "table_pos": wtp.get("kParamTablePos", 1.0),            # 1..256
+            "xfade": float(wtp.get("kParamXfadeMode", 0.0)),        # 1 / 2: frames sit 256 / N apart (table_pos_norm)
+            "frames": (int(wt.get("numFrames", 0)) // 2048) if int(wt.get("numFrames", 0) or 0) % 2048 == 0 else 0,
             "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0), "slot": si}
                      for si, (m, a) in enumerate((("kParamWarpMenu", "kParamWarp"),
                                                   ("kParamWarpMenu2", "kParamWarp2"))) if wtp.get(m)],
@@ -872,6 +874,18 @@ def pot_time(t: float) -> int:        # Tablor potEnvTime inverse: 1 ms .. 10 s
 
 def pot_attack(t: float) -> int:      # Tablor potAttackTime inverse: 0.5 ms + 10 s * x^5
     return round(127 * min(1.0, max(0.0, (t - 0.0005) / 10.0) ** 0.2))
+
+
+def table_pos_norm(o: dict, x: float) -> float:
+    """A Serum table position (0..1 over its 1..256 knob) as the engine's, which spreads a table's N frames evenly over 0..1 and crossfades between neighbours.
+    With no Xfade Mode stored Serum does the same (snapping such presets to a frame scored worse: Fretless Bass 7.4 -> 9.8 dB). With Xfade Mode 1 or 2 stored it
+    still crossfades linearly, but frame k sits at knob 1 + 256 k / N, so the last frame is reached early and held (calibration/dev/probe_xfade_mode.py, Default
+    Shapes, 9 frames: knob 5 / 17 / 25 is 86 / 43 / 16 % of frame 0 by the saw's harmonics, the law's 86 / 44 / 16 %; knob 29.33 already plays frame 1 alone).
+    DR - Kick Synth 1 (knob 29.33, mode 1) played 11 % saw over its sine body: 21.0 -> 6.5 dB."""
+    n = o.get("frames", 0)
+    if o.get("xfade", 0.0) >= 1.0 and n > 1:
+        x = min(_clamp(x, 0, 1) * 255.0 / 256.0 * n, n - 1) / (n - 1)
+    return _clamp(x, 0, 1)
 
 
 def pot_hold(e: dict) -> int:
@@ -1891,7 +1905,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     unsup_warps = []           # the warps no stage carries: which oscillator (Serum's id) and which of its two warp slots, for the importer's audibility test
     for n, o in enumerate(keep, 1):
         k = f"wt{n}"
-        pos = _clamp((o["table_pos"] - 1) / 255 + fold[("WTOsc", "kParamTablePos", o["id"])], 0, 1)
+        pos = table_pos_norm(o, (o["table_pos"] - 1) / 255 + fold[("WTOsc", "kParamTablePos", o["id"])])
         P[f"{k}_pos"] = round(pos * 127)
         P[f"{k}_level"] = pot_level(eff_level(o), o["unison"], wt=True)
         tune = o["octave"] * 12 + o["semitone"] + o["fine_cents"] / 100.0 + bipfold[o["id"]]

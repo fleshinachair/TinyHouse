@@ -198,9 +198,33 @@ def find_sfz(rel: str) -> Path | None:
         hits = [p for p in _root("Multisamples").rglob(parts[-1]) if p.is_file()]
         hits.sort(key=lambda p: (-sum(1 for d in parts[:-1] if d in p.parts), len(p.parts), p.as_posix()))
         if not hits:
-            return None                                  # not cached: the browser importer adds the file later
+            folder = _root("Multisamples").joinpath(*parts[:-1])
+            renamed = renamed_sfz(parts[-1], sorted(folder.rglob("*.sfz")) if len(parts) > 1 and folder.is_dir() else [])
+            if renamed is None:
+                return None                              # not cached: the browser importer adds the file later
+            hits = [renamed]
         _found_sfz[rel] = hits[0]
     return _found_sfz[rel]
+
+
+def sfz_words(name: str) -> set[str]:
+    """The words of an SFZ's file name, without a part in brackets: "Ah Both (Xfade).sfz" -> {"ah", "both"}."""
+    stem = re.sub(r"\([^)]*\)", " ", name.rsplit(".", 1)[0].lower())
+    return set(re.findall(r"[a-z0-9]+", stem))
+
+
+def renamed_sfz(name: str, candidates: list):
+    """The SFZ a renamed one became (Serum 2 renamed some factory SFZs: "Choir/Ah Both (Xfade).sfz" is "Choir/Ah Both.sfz", "Drums/Auxiliary Kit.sfz" is
+    "Drums/Electronic/Perc Auxiliary.sfz"): among the SFZs below the folder the preset names, the one whose name shares the most of its words, a word counting
+    less the more of them carry it. None unless exactly one is best. web_ui.html's findSmp chooses the same way."""
+    want = sfz_words(name)
+    names = [sfz_words(c.name if hasattr(c, "name") else str(c).rsplit("/", 1)[-1]) for c in candidates]
+    count = {w: sum(1 for n in names if w in n) for w in want}
+    scores = [sum(1.0 / count[w] for w in want & n) for n in names]
+    best = max(scores, default=0.0)
+    if best <= 0 or scores.count(best) != 1:
+        return None
+    return candidates[scores.index(best)]
 
 
 LIBRARY_DIRS = ("Samples", "Multisamples")

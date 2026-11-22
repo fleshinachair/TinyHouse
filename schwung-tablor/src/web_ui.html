@@ -2521,8 +2521,29 @@ function findSmp(rel, loose, ir) {
       var score = segs.filter(function (d) { return ps.indexOf(d) >= 0; }).length * 1000 - ps.length;
       if (score > best) { best = score; hit = IMP.smps[i]; }
     }
+    if (!hit && segs.length) hit = renamedSfz(leaf, segs.join("/"));
   }
   return hit;
+}
+/* The words of an SFZ's file name, without a part in brackets ("ah both (xfade).sfz" -> ah, both). */
+function sfzWords(name) {
+  return (name.replace(/\.[^.]*$/, "").toLowerCase().replace(/\([^)]*\)/g, " ").match(/[a-z0-9]+/g) || []).filter(function (w, i, a) { return a.indexOf(w) === i; });
+}
+/* The SFZ a renamed one became (Serum 2 renamed some: Choir/Ah Both (Xfade).sfz is Choir/Ah Both.sfz): among the picked SFZs below the folder the preset names, the one
+ * whose name shares the most of its words, a word counting less the more of them carry it; none unless exactly one is best (sample_export.renamed_sfz). */
+function renamedSfz(leaf, folder) {
+  var want = sfzWords(leaf), cands = [], names = [], i;
+  for (i = 0; i < IMP.smps.length; i++) {
+    var p = IMP.smps[i].rel.toLowerCase();
+    if (IMP.smps[i].imp || !/\.sfz$/.test(p) || ("/" + p).indexOf("/" + folder + "/") < 0) continue;
+    cands.push(IMP.smps[i]); names.push(sfzWords(p.split("/").pop()));
+  }
+  var count = {};
+  want.forEach(function (w) { count[w] = names.filter(function (n) { return n.indexOf(w) >= 0; }).length; });
+  var scores = names.map(function (n) { return want.reduce(function (s, w) { return s + (n.indexOf(w) >= 0 ? 1 / count[w] : 0); }, 0); });
+  var best = Math.max.apply(null, scores.concat([0]));
+  if (best <= 0 || scores.filter(function (s) { return s === best; }).length !== 1) return null;
+  return cands[scores.indexOf(best)];
 }
 /* A picked file's path under its library folder ("Multisamples/Factory/Drums/Electronic/909.sfz" -> "Factory/Drums/Electronic/909.sfz"), or fallback when it is not under one. */
 function underLib(rel, lib, fallback) {

@@ -361,7 +361,7 @@ def physical(tree: dict, header: dict) -> dict:
         d = DEFAULTS["env"][n]
         envs.append({k: p.get(f"kParam{k.capitalize()}", d[k])
                      for k in ("attack", "decay", "sustain", "release")}
-                    | {f"curve{c}": p.get(f"kParamCurve{c}") for c in (1, 2, 3)})
+                    | {f"curve{c}": p.get(f"kParamCurve{c}") for c in (1, 2, 3)} | {"hold": float(p.get("kParamHold", 0.0))})
     mods = []
     for i in range(64):
         s = tree.get(f"ModSlot{i}", {})
@@ -872,6 +872,13 @@ def pot_time(t: float) -> int:        # Tablor potEnvTime inverse: 1 ms .. 10 s
 
 def pot_attack(t: float) -> int:      # Tablor potAttackTime inverse: 0.5 ms + 10 s * x^5
     return round(127 * min(1.0, max(0.0, (t - 0.0005) / 10.0) ** 0.2))
+
+
+def pot_hold(e: dict) -> int:
+    """An envelope's Hold as the engine's hidden hold pot (voice.h potEnvStage: 4 x (pot / 127)^4 s). Serum's Hold is in seconds at full level before the decay
+    (calibration/dev/probe_env_hold.py: hold 0.5 moved the whole decay 0.5 s later). It was not carried: DR - Kick Synth 1 / 2 hold their body 77 / 90 ms, and without
+    it the engine's kick decayed from the first sample."""
+    return round(_clamp(127.0 * (max(e.get("hold", 0.0), 0.0) / 4.0) ** 0.25, 0, 127))
 
 
 def interp(table: list, x: float) -> float:
@@ -2286,6 +2293,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         return depth - u, dict(env, sustain=max(0.0, (env["sustain"] - r) / (1 - r)))
 
     P["vca_a"], P["vca_d"], P["vca_s"], P["vca_r"] = pot_env(ph["envs"][0])
+    P["vca_hold"] = pot_hold(ph["envs"][0])
     flt_routes = [r for r in routes if r[1] == ("VoiceFilter", "kParamFreq", 0) and 0 not in flat_filters]
     if flt_routes and not bypassed:
         tot = Counter()
@@ -2294,6 +2302,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         feg = max(tot, key=lambda e: abs(tot[e]))
         depth, env_u = under_fold(0, tot[feg], ph["envs"][feg])
         P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(env_u, CAL.get("flt_decay_mult", 1.0))
+        P["flt_hold"] = pot_hold(env_u)
         P["flt_env"] = round(_clamp(64 + 63 * depth * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
         if len(tot) > 1:
             appr.append("only the strongest of several envelope->cutoff routes kept")
@@ -2310,6 +2319,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P["flt2_env"] = round(_clamp(64 + 63 * depth2 * CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"], 0, 127))
         if not flt_routes:
             P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(env2_u, CAL.get("flt_decay_mult", 1.0))     # the one filter envelope is Filter 2's
+            P["flt_hold"] = pot_hold(env2_u)
             feg = e2
         elif e2 != feg:
             # Filter 2 has its own envelope: a spare modulation envelope pointed at "Filter 2 Freq" (same units as flt2_env, its own ADSR); if it loses its place below,
@@ -2383,6 +2393,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         appr.append("Filter 2 follows the envelope Filter 1 uses, not its own (the spare envelopes are taken)")
     for n, (_, e, dest, a) in enumerate(mod_routes[:MOD_ENVS], 1):
         P[f"me{n}_a"], P[f"me{n}_d"], P[f"me{n}_s"], P[f"me{n}_r"] = pot_env(ph["envs"][e])
+        P[f"me{n}_hold"] = pot_hold(ph["envs"][e])
         if dest == "Noise Level":
             a *= 10 ** (noise_db / 40)           # the route moves the knob and the gain is its square (calibration/dev/probe_noise_route.py): the level offset is half in dB
         P[f"me{n}_dst"], P[f"me{n}_amt"] = ME_DST[dest], round(_clamp(64 + 63 * a, 0, 127))
@@ -2602,6 +2613,7 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
         out = [f"Filter FX carried as the effects block's filter: {model}, envelope {e + 1} x{dyn['envs'][e]:.2f}" + (", and LFO route(s)" if dyn["lfos"] else "")]
         if feg1 is None:
             P["flt_a"], P["flt_d"], P["flt_s"], P["flt_r"] = pot_env(ph["envs"][e], CAL.get("flt_decay_mult", 1.0))
+            P["flt_hold"] = pot_hold(ph["envs"][e])
         elif feg1 != e:
             out.append("the Filter FX follows the voice filter's envelope, not the one it uses in Serum")
         if len(dyn["envs"]) > 1:

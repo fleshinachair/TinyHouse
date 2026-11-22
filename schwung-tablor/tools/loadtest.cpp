@@ -65,6 +65,7 @@ static void settle(plugin_api_v2_t *api, void *inst)
 int main(int argc, char **argv)
 {
     setenv("TB_PRESET_SETTLE_MS", "0", 0);        /* a preset set here is applied at once, as these tools expect */
+    setvbuf(stdout, nullptr, _IOLBF, 0);          /* a crash keeps the lines before it */
     const char *so_path = (argc > 1) ? argv[1] : "./dsp.so";
 
     void *dl = dlopen(so_path, RTLD_NOW | RTLD_LOCAL);
@@ -1150,7 +1151,7 @@ int main(int argc, char **argv)
      * startup, so files this test wrote since are not in it: the count can be below the files on disk. */
     {
         char cb[32] = {}, nb[256] = {}, pb[32] = {};
-        static char s0[8192], s1[8192];
+        static char s0[65536], s1[65536];      /* the host's state buffer is 16 KB; a Factory state is ~9 KB */
         api->get_param(inst, "preset_count", cb, sizeof cb);
         const int count = atoi(cb);
         /* the files of one bank's folder ("User" is the loose files) */
@@ -1225,10 +1226,21 @@ int main(int argc, char **argv)
                 char l1[64] = {}, l2[64] = {};
                 api->get_param(iw, "flt_freq", l1, sizeof l1);
                 api->get_param(iw, "wt1_level", l2, sizeof l2);
-                std::string wcut(wj), lcut(lj);
+                /* The waiting state may echo the preset file as stored (a remote UI import keeps every key, "-24.0"); the landed one is the engine's
+                 * own short form. Compare what each restores to: the waiting state read back through a fresh instance. */
+                static char rj[65536];
+                rj[0] = 0;
+                if (void *ir = api->create_instance(".", nullptr)) {
+                    api->set_param(ir, "state", wj);
+                    for (int w = 0; w < 1500; w++) { char rb[8] = {}; api->get_param(ir, "ready", rb, sizeof rb); if (rb[0] == '1') break; struct timespec t10 = { 0, 10 * 1000000 }; nanosleep(&t10, nullptr); }
+                    api->get_param(ir, "state", rj, sizeof rj);
+                    api->destroy_instance(ir);
+                }
+                std::string wcut(rj), lcut(lj);
                 for (std::string *c : { &wcut, &lcut }) { const size_t q = c->find(",\"smp_shape\":"); if (q != std::string::npos) c->resize(q); }       /* the sample shapes come last and land later, on the worker */
                 const char *wa = strstr(wcut.c_str(), "\",\""), *la = strstr(lcut.c_str(), "\",\"");
-                CHECK(wj[0] == '{' && wa && la && !strcmp(wa, la), "a waiting preset's state holds the same values as the preset once it has landed (%d and %d bytes)", (int) strlen(wj), (int) strlen(lj));
+                if (getenv("TB_DUMP_WAIT")) { if (FILE *f = fopen("wait.json", "w")) { fputs(rj, f); fclose(f); } if (FILE *f = fopen("land.json", "w")) { fputs(lj, f); fclose(f); } }
+                CHECK(wj[0] == '{' && wa && la && !strcmp(wa, la),"a waiting preset's state holds the same values as the preset once it has landed (%d and %d bytes)", (int) strlen(wj), (int) strlen(lj));
                 CHECK(!strcmp(w1, l1) && !strcmp(w2, l2), "a read of a setting while it waits gives what it will hold (flt_freq %s / %s, wt1_level %s / %s)", w1, l1, w2, l2);
                 api->destroy_instance(iw);
             }
@@ -1247,7 +1259,7 @@ int main(int argc, char **argv)
             CHECK(atoi(pb) == count - 1, "an index past the end stops at the last preset (%s of %d)", pb, count);
         }
         if (atoi(bc) >= 2) {                        /* the Bank knob: another bank lists its own presets, and the sound changes */
-            static char sb[8192];
+            static char sb[65536];
             api->set_param(inst, "preset", "0");
             api->get_param(inst, "state", s0, sizeof s0);
             const int b0 = 0;

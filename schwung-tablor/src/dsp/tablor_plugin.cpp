@@ -1637,7 +1637,7 @@ static void apply_pending(tablor_instance *inst, const char *why = "?")
  * A preset that could not be converted is left as it is and not tried again until the module is loaded again. */
 static constexpr const char *kSourcesDir = "/data/UserData/UserLibrary/TinyHouse Sources";     /* import_web.MOVE_SRC_ROOT */
 struct ConvStamp { std::string hash, ver; std::atomic<bool> loaded { false }; };      /* hash and ver are written once, before loaded */
-static ConvStamp g_conv;
+static ConvStamp &g_conv = *new ConvStamp;     /* never destroyed: an exit-time destructor in an unloaded dsp.so crashed the process (loadtest, after dlclose) */
 static std::once_flag g_conv_once;
 
 /* WORKER THREAD (the first call reads a file). */

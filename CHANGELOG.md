@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.13
+
+**Presets upgrade themselves on the Move.** A preset imported through the Remote UI now keeps its original Serum or Vital file on the Move (in `UserLibrary/TinyHouse Sources/<bank>`), stamped with the converter that made it. After a module update, the Move converts those presets again with the new converter: in the background after start-up, and at once when you choose one that has not been done yet (the header reads "Upgrading to v0.9.13" for a moment). Fixes to the importer therefore reach your presets without importing them again. The conversion runs at low priority on the cores the audio does not use; a preset whose sound did not change is left untouched. The module now ships the converter (with numpy for the Move), so the download is about 40 MB larger.
+
+**Import once more.** Presets imported before this version have no original kept, so they cannot upgrade. The Remote UI shows how many there are per bank, and the Move's header says "Re-import: see web UI" once after an update when you choose one. Import them again through the Remote UI (same bank name, so the wavetables and samples already on the Move are reused); from then on updates reach them.
+
+**Remote UI import.**
+- Every preset is imported, including ones with something missing. The option to import only complete presets is gone: what was left out before now comes in and gets better with each update. The report still lists what each preset misses.
+- Choosing a folder with several banks (such as Serum's Presets folder, which holds Factory, User and any installed packs) and ticking more than one imports each into a bank of its own name. They all went into the one bank before.
+- Presets that could not be converted are kept on a waiting list and tried again after each update.
+
+**Serum import.**
+- Ratio and Harmonics pitch modes, a wavetable oscillator's Fine tune, and the global Transpose are carried.
+- Velocity and note routes folded into a fixed knob use the route's curve (multisample instruments crossfade their velocity layers correctly).
+- All four engine mod envelopes are used (was two): a kick's pitch drop on its loudest oscillator was dropped, for example.
+- The FX bus Volume knobs are carried.
+- Clip Player presets whose active clips do not span the keyboard play those clips on any key, untransposed, as Serum does.
+- A noise or sub oscillator lifted by a macro no longer counts as silent when deciding whether the voice filters are bypassed.
+- The EQ fitting runs about a third faster, with the same result.
+
+**Engine.** A multisample key that no region holds now plays nothing, as in Serum (drum kits played a cymbal or tom on every key above the kit).
+
+**Vital import.** The per-note random source is folded in at its mean, like Vital's random modulators.
+
 ## 0.9.12
 
 Serum 2 import: 62 more of Serum's own Factory presets are imported (453 to 515 of 626 on the development Move): 28 pass the importer's gate, 12 miss it by 0.5 to 2.6 dB of band error, 13 use the nearest available voice filter where Tablor lacks Serum's model, and 9 play a Spectral oscillator's sample without its scan. All 62 were auditioned and accepted. Heavy sets no longer glitch: each TinyHouse slot now renders on a CPU core of its own. Every new parameter defaults to the old behaviour, so saved presets load and sound the same.

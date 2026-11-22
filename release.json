@@ -1,6 +1,6 @@
 {
-  "version": "0.9.12",
-  "download_url": "https://github.com/fleshinachair/TinyHouse/releases/download/v0.9.12/tinyhouse-module.tar.gz",
+  "version": "0.9.13",
+  "download_url": "https://github.com/fleshinachair/TinyHouse/releases/download/v0.9.13/tinyhouse-module.tar.gz",
   "name": "TinyHouse",
   "description": "Serum 2 preset converter and 3-oscillator wavetable, sample and granular synth for the Ableton Move (Schwung module).",
   "repo_url": "https://github.com/fleshinachair/TinyHouse"

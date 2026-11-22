@@ -1916,6 +1916,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
         post_contract_job(inst, [inst] {
             if (inst->loader.stopping()) return;
             tb::PartJoin::joinAll("/data/UserData/UserLibrary/Samples");     /* big sample sets the Import sent in pieces */
+            tb::PartJoin::joinAll("/data/UserData/UserLibrary/TinyHouse Sources");     /* and big impulse / noise audio kept for convert on load */
             inst->scanner.scan();
             tb_publish_selection(inst);
             scan_store_presets(inst);

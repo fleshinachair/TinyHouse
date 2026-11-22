@@ -35,6 +35,15 @@ if [ -f "$SRC/build/import_bundle.zip" ]; then
 else
     echo "note: no build/import_bundle.zip (python tools/build_import_bundle.py): the Import button will say the converter is missing" >&2
 fi
+# Convert on load: the module's own converter (python tools/build_converter_dir.py makes it). Sent as a new folder and swapped in whole, so the engine
+# never sees half of one; a slot that loaded the old dsp.so keeps working with what it has (it reads the converter's stamp once, at load).
+if [ -d "$SRC/build/converter" ]; then
+    ssh "$HOST" "rm -rf $DEST/converter.new"
+    scp -q -r "$SRC/build/converter" "$HOST:$DEST/converter.new"
+    ssh "$HOST" "cd $DEST && rm -rf converter.old && { [ ! -d converter ] || mv converter converter.old; } && mv converter.new converter && rm -rf converter.old"
+else
+    echo "note: no build/converter (python tools/build_converter_dir.py): presets will not be converted again on load" >&2
+fi
 # No factory.tbl: the engine seeds a module's preset folder from it on first load, and TinyHouse
 # carries only the converted Deep House presets (installed by ../deploy_presets.sh), not stock Tablor's.
 ssh "$HOST" "rm -f $DEST/presets/factory.tbl"

@@ -19,3 +19,13 @@ with or supported by Matt Tytel or Vital Audio. This repository contains no Vita
 The engine's Warp Chain option (an oscillator that is a warp source keeps its own warps, and ring modulation at Vital's depth) is BSD-3-Clause code written from behaviour measured on the plugin; it contains no Vital source code. It is off in every Serum preset.
 
 **Engine code derived from Vital.** Seven parts of the engine are ports of Vital's own algorithms, written with Vital's source in front of us (Copyright 2013-2019 Matt Tytel, GPL-3.0-or-later): the comb filter law (`CombFilter::processVital` in `schwung-tablor/src/dsp/comb.h`, from `synthesis/filters/comb_filter.cpp`), the formant voice filter (`vitalFormantSet` and `FormantBank` in `schwung-tablor/src/dsp/formant.h`, from `synthesis/filters/formant_filter.cpp`, `formant_manager.cpp` and `digital_svf.cpp`), the compressor law (`Fx::processCompVital` and its helpers in `schwung-tablor/src/dsp/fx.h`, from `synthesis/effects/compressor.cpp` and the Linkwitz-Riley crossover) the chorus (`ModFx::processChorusVital` in `fx.h`, from `synthesis/modules/chorus_module.cpp` and the mono delay line of `synthesis/effects/delay.cpp`), the flanger (`processFlangerVital`, from `synthesis/modules/flanger_module.cpp` and `delay.cpp`) the phaser (`processPhaserVital`, from `synthesis/effects/phaser.cpp` and `synthesis/filters/phaser_filter.cpp`) and the reverb (`Fx::processReverbVital`, from `synthesis/effects/reverb.cpp`). All are off unless a preset sets them (Serum presets never do), but they are in the source, so a built engine (`dsp.so`) that includes them is **GPL-3.0-or-later** as a combined work. Release that build, or a pack containing it, under the GPL.
+
+## The module's converter folder (convert on load)
+
+The released module carries a `converter/` folder, so the Move can convert an imported preset again when an update brings a newer converter. Besides
+TinyHouse's own converter (and the Vital importer, above) it holds:
+
+- **NumPy** 2.2.6 (the manylinux aarch64 wheel for CPython 3.10), BSD-3-Clause, Copyright NumPy Developers, with the libraries the wheel bundles
+  (OpenBLAS and the GCC runtime, under their own permissive licences). The full texts are in `converter/lib/numpy-2.2.6.dist-info/LICENSE.txt`.
+- **serum2-preset-loader** (MIT, by its author), to read `.SerumPreset` files, with its licence in `converter/serum2_preset_loader/LICENSE`, as in the
+  remote page's import bundle.

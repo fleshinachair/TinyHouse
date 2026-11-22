@@ -2659,11 +2659,33 @@ async function runImport() {
         await uploadRetry(dir, name, new Blob([wb], { type: "audio/wav" }));
       }; })(path));
     }
-    var sent = {};
+    var sent = {}, kept = {};
+    /* Convert on load: each preset's original (and the noise / impulse audio its conversion read) is kept on the Move beside the presets, so the module
+     * converts it again when an update brings a newer converter (converter/reconvert.py). They go before the preset, which names its original ("src");
+     * a preset whose original could not be sent goes without that name: it imports as before, it is just not converted again later. */
+    async function keepOnMove(pair) {
+      var lib = "/data/UserData/UserLibrary", mp = pair[0];
+      if (kept[mp]) return;
+      var rel = mp.substring(lib.length + 1).split("/"), name = rel.pop();
+      var dir = await ensurePath(lib, rel.join("/"));
+      var kb = new Uint8Array(await impCall("packget", { path: pair[1] }));
+      if (!(await sameOnMove(mp, kb))) await uploadBig(dir, name, kb, function () {});
+      kept[mp] = 1;
+    }
     for (var s2 = 0; s2 < sendable.length; s2++) {
       var p = sendable[s2];
       await step(p.name, (function (p) { return async function () {
-        await uploadRetry(bankDir, p.name + ".json", new Blob([p.json], { type: "application/json" }));
+        var js = p.json;
+        if (p.source) {
+          try {
+            for (var a = 0; a < (p.aux || []).length; a++) await keepOnMove(p.aux[a]);
+            await keepOnMove(p.source);
+          } catch (e) {
+            var doc = JSON.parse(js); delete doc.src; js = JSON.stringify(doc) + "\n";
+            failed.push(p.name + ": its original could not be kept on the Move, so later updates will not convert it again (" + e.message + ")");
+          }
+        }
+        await uploadRetry(bankDir, p.name + ".json", new Blob([js], { type: "application/json" }));
         sent[p.file] = 1;
       }; })(p));
     }

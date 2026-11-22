@@ -41,6 +41,7 @@ cp src/web_ui.html        dist/tinyhouse/
 cp src/ui/canvas.js       dist/tinyhouse/
 cp src/ui/cards.js        dist/tinyhouse/
 cp build/import_bundle.zip dist/tinyhouse/ 2>/dev/null || true    # python tools/build_import_bundle.py, run beforehand
+cp -r build/converter dist/tinyhouse/ 2>/dev/null || true       # python tools/build_converter_dir.py, run beforehand (convert on load)
 cp -r src/wavetables/. dist/tinyhouse/wavetables/ 2>/dev/null || true
 (cd dist && tar -czf tinyhouse-module.tar.gz tinyhouse/)
 echo "Tarball: dist/tinyhouse-module.tar.gz"

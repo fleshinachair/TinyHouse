@@ -15,13 +15,14 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 [ -f "$SRC/build/dsp.so" ] || { echo "no build/dsp.so: run scripts/zig-build.sh arm first" >&2; exit 1; }
-python "$SRC/tools/build_import_bundle.py"
+python "$SRC/tools/build_converter_dir.py"      # build/import_bundle.zip (the remote UI's Import) and build/converter (the same converter for convert on load, with numpy for the Move)
 
 D="$STAGE/tinyhouse"
 mkdir -p "$D"
 cp "$SRC/build/dsp.so" "$D/dsp.so"
 cp "$SRC/src/module.json" "$SRC/src/ui_pages.json" "$SRC/src/help.json" "$SRC/src/web_ui.html" "$SRC/src/ui/canvas.js" "$SRC/src/ui/cards.js" "$D/"
 cp "$SRC/build/import_bundle.zip" "$D/import_bundle.zip"
+cp -r "$SRC/build/converter" "$D/converter"
 cp "$ROOT/LICENSE" "$D/LICENSE"
 cp "$SRC/LICENSE" "$D/LICENSE-engine"
 cp "$ROOT/LICENSE-GPL-3.0" "$ROOT/THIRD-PARTY.md" "$D/"

@@ -264,6 +264,16 @@ def ratio_semitones(p: dict) -> float:
     return 12.0 * math.log2(mult)
 
 
+def harmonics_semitones(p: dict) -> float:
+    """An oscillator in Serum 2's Harmonics pitch mode plays the note times the harmonic 1 + 4 x Pitch (the Pitch knob value as stored: 0.25 -> 2nd, 1 -> 5th,
+    2 -> 9th, 8 -> 33rd, held at the 48th), a negative Pitch the matching subharmonic (-1 -> a fifth of the note). The whole waveform moves, its own harmonics
+    keep their ratios. Octave, Fine and a legacy Coarse (kParamCoarsePit, in semitones) act as in the normal mode. Measured on a saw at notes 36 and 48,
+    Pitch -8 .. 30 (calibration probe, 2026-11-22)."""
+    h = float(p.get("kParamPitch", 0.0))
+    n = min(1.0 + 4.0 * abs(h), 48.0)
+    return (12.0 if h >= 0 else -12.0) * math.log2(n) + float(p.get("kParamCoarsePit", 0.0))
+
+
 def physical(tree: dict, header: dict) -> dict:
     """Decode a Serum tree into plain physical units."""
     g = _pp(tree.get("Global0", {}))
@@ -284,7 +294,9 @@ def physical(tree: dict, header: dict) -> dict:
             "level": p.get("kParamVolume", DEFAULTS["osc_level"]),
             "ratio": p.get("kParamPitchMode") == "Ratio",           # Serum 2's Ratio pitch mode: the Ratio sets the pitch, the Octave / Pitch / Fine knobs are ignored (ratio_semitones)
             "octave": 0.0 if p.get("kParamPitchMode") == "Ratio" else p.get("kParamOctave", 0.0),
-            "semitone": ratio_semitones(p) if p.get("kParamPitchMode") == "Ratio" else p.get("kParamPitch", p.get("kParamCoarsePit", 0.0)),
+            "harm": p.get("kParamPitchMode") == "Harmonics",        # Harmonics pitch mode: the Pitch knob picks a harmonic (harmonics_semitones)
+            "semitone": (ratio_semitones(p) if p.get("kParamPitchMode") == "Ratio" else harmonics_semitones(p) if p.get("kParamPitchMode") == "Harmonics"
+                         else p.get("kParamPitch", p.get("kParamCoarsePit", 0.0))),
             "fine_cents": 0.0 if p.get("kParamPitchMode") == "Ratio" else p.get("kParamFine", 0.0),
             "pan": p.get("kParamPan", 0.0),
             "track": p.get("kParamPitchTrack", 1.0),
@@ -381,6 +393,8 @@ def physical(tree: dict, header: dict) -> dict:
         o, par = oscs[oid], m["dest_param"]
         if o.get("ratio") and par in ("kParamCoarsePit", "kParamPitch", "kParamOctave", "kParamFine"):
             continue                                  # the knobs a Ratio-mode oscillator ignores
+        if o.get("harm") and par == "kParamPitch":
+            continue                                  # picks a harmonic in Harmonics mode, not semitones (not measured under modulation)
         if m["dest_type"] == "WTOsc" and par in ("kParamWarp", "kParamWarp2"):
             for w in o["warp"]:
                 if w.get("slot") == (1 if par == "kParamWarp2" else 0):

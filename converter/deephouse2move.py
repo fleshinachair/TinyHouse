@@ -536,7 +536,7 @@ def physical(tree: dict, header: dict) -> dict:
                    "reso_pct": flt.get("kParamReso", DEFAULTS["reso"]),
                    "drive_pct": flt.get("kParamDrive", 0.0),
                    "keytrack": flt.get("kParamKeyTrack", 0.0),
-                   "var": flt.get("kParamVar")},
+                   "var": flt.get("kParamVar"), "stereo": flt.get("kParamStereo", 50.0)},
         "filter2_enabled": bool(flt2.get("kParamEnable", 0)) and not off2,
         "filter2": {"enabled": bool(flt2.get("kParamEnable", 0)) and not off2, "wet": wet2,
                     "model": flt2.get("kParamType", DEFAULT_VOICE_FILTER),
@@ -544,7 +544,7 @@ def physical(tree: dict, header: dict) -> dict:
                     "reso_pct": flt2.get("kParamReso", DEFAULTS["reso"]),
                     "drive_pct": flt2.get("kParamDrive", 0.0),
                     "keytrack": flt2.get("kParamKeyTrack", 0.0),
-                    "var": flt2.get("kParamVar")},
+                    "var": flt2.get("kParamVar"), "stereo": flt2.get("kParamStereo", 50.0)},
         "balance": balance,
         "envs": envs, "mods": mods, "macros": macros, "macro_names": [str(tree.get(f"Macro{i}", {}).get("name", "") or "") for i in range(8)],
         "lfos": lfos, "fx": fx, "routed": routed,
@@ -709,7 +709,10 @@ FILTER_MAP = {
     "H24": (3, True), "H12": (2, True), "H6": (2, False), "B24": (5, True), "B12": (4, True),
     "LadderMg": (1, False), "LadderEMS": (1, False), "LN12": (0, False),     # ladders and a 12 dB low-pass: the nearest engine filter
     "FormantONE": (16, True), "FormantTWO": (17, True), "FormantTWB": (18, True),     # the engine's own formant types (formant.h: parallel band-pass resonators from the measured Freq x Var tables)
+    "Reverb1": (19, True),          # the engine's Reverb1 model (comb.h processReverb1: a delay network fitted to Serum's measured response, calibration/dev/probe_reverb1.py, fit_reverb1.py)
 }
+# Serum's Reverb1 Drive is a plain gain (the response's shape does not move; calibration/dev/probe_reverb1.py at Freq 0.4): carried by the gain stage after the filter, the saturating pot left at 0
+REVERB1_DRIVE_DB = [(0.0, 0.0), (25.0, 7.72), (50.0, 13.92), (75.0, 18.83), (100.0, 22.27)]
 # Voice filter laws, measured by probe_vfilter.py / probe_vreso.py: a held saw through each Serum filter model at several cutoffs and
 # resonances, and the engine's cutoff and resonance pots searched for the pair whose harmonic transfer matches. Cutoff: the pots to add
 # to the closed-form law (by the cutoff knob, linear between the points) - an 18 dB model needs an open 24 dB engine filter to match, a
@@ -2176,7 +2179,16 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         key = _clamp(abs(fl["keytrack"]), 0, 1) * CAL["key_scale"]
         pivot = (60 - CAL["key_pivot"]) * key
         reso_pct = _clamp(fl["reso_pct"] + 100.0 * fold[("VoiceFilter", "kParamReso", key_id)], 0, 100)
-        if idx >= 16:
+        if idx == 19:
+            # Serum's Reverb1: every delay in it is a multiple of 1 / fc, fc the knob's own cutoff law (no calibration offset), so the knob's note exactly like a comb, the rest to the cents pot;
+            # Reso is the loop gain, Var closes the loop's low-pass, Stereo stretches the sides apart (the engine's pots for each; see comb.h processReverb1)
+            note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
+            P[f"{prefix}_freq"] = int(round(note_pot))
+            P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - round(note_pot)) * 100), 0, 127))
+            P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
+            P[f"{prefix}_var"] = round(_clamp(float(fl.get("var") or 0.0) / 100.0 * 127.0, 0, 127))          # Serum's default Var is 0 (measured)
+            P[f"{prefix}_rvst"] = round(_clamp(float(fl.get("stereo", 50.0)) / 100.0 * 127.0, 0, 127))
+        elif idx >= 16:
             # Serum's Formant models (engine types 16..18, formant.h): the resonators sit where the measured Freq x Var tables put them and Reso narrows them (bandwidth / (1 + 2 Reso)); the knob's note exactly,
             # like a comb (no calibration offset; the pot is whole semitones, so the rest goes to the cents pot)
             note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
@@ -2200,8 +2212,8 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         if fl["keytrack"] < 0:
             note.append(f"negative {label} key tracking not representable")
         drive_pct = _clamp(fl["drive_pct"] + 100.0 * fold[("VoiceFilter", "kParamDrive", key_id)], 0, 100)      # macro, velocity and note routes at their nominal value
-        P[f"{prefix}_drive"] = round(_clamp(interp(FILTER_DRIVE_POT_USED, drive_pct), 0, 127))
-        P[f"{prefix}_gain"] = round(_clamp(interp(FILTER_DRIVE_MAKEUP_DB, drive_pct) / 24.0 * 127.0, 0, 127))
+        P[f"{prefix}_drive"] = 0 if idx == 19 else round(_clamp(interp(FILTER_DRIVE_POT_USED, drive_pct), 0, 127))
+        P[f"{prefix}_gain"] = round(_clamp(interp(REVERB1_DRIVE_DB if idx == 19 else FILTER_DRIVE_MAKEUP_DB, drive_pct) / 24.0 * 127.0, 0, 127))
 
     if f["enabled"] and not bypassed:
         voice_filter_pots(f, 0, "flt", "filter")
@@ -2506,7 +2518,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
         fx_p["wide_on"] = int(fx_p.get("fx_wide", 0) > 0)
         fx_p["dly_on"] = int(fx_p.get("dly_mix", 0) > 0 or fx_p.get("dly2_mix", 0) > 0)
         fx_p["rev_on"] = int(fx_p.get("rev_mix", 0) > 0)
-        for k in BUS_KEYS + ["eq_on", "wide_on", "dly_on", "rev_on", "mwidth"]:
+        for k in BUS_KEYS + ["eq_on", "wide_on", "dly_on", "rev_on", "mwidth", "mbal"]:
             if k in fx_p:
                 P[f"b{b}.{k}"] = fx_p[k]
         notes.append(f"FX bus {b} carried: {', '.join(k.split('_')[0] for k in live)} sent")

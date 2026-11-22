@@ -1295,12 +1295,24 @@ def utils_level_why(nodes: list[dict], ctx: dict | None) -> list[str]:
 UTILS_MIN_ROUTE_PCT = 1.0          # a modulator pointed at a Utils knob with under 1 % depth moves nothing audible (five granular presets carry a 0 to 0.4 % LFO route to Balance)
 
 
-def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | None, list[str]]:
+def utils_balance_pot(gl: float, gr: float) -> int:
+    """The engine's mbal pot for the left / right gains of Serum's Utils Balance (64 centre; under it the right side at pot / 64, over it the left at (127 - pot) / 63)."""
+    if gr < gl:
+        return int(round(min(max(64.0 * gr / gl, 0.0), 64.0)))
+    if gl < gr:
+        return int(round(min(max(127.0 - 63.0 * gl / gr, 64.0), 127.0)))
+    return 64
+
+
+def utils_stereo(nodes: list[dict], ctx: dict | None, bal: list | None = None) -> tuple[float, float | None, list[str]]:
     """Serum's Utils effect on the master signal as (width factor, mono-below Hz or None, why not). Width is the
     product of every Utils width (100 % = 1); Low Freq Mono is the highest crossover set. Anything moved by an
     envelope, LFO or velocity is dynamic and left out; a macro only moves a value to the saved position, and
-    Utils widths here are stored values."""
+    Utils widths here are stored values. bal, if given, gets the Balance's [left gain, right gain]: each Utils scales its
+    far side by 1 - |Balance| / 100 and keeps the near side (calibration/dev/probe_utils.py balance)."""
     width, mono, why = 1.0, None, []
+    gains = bal if bal is not None else [1.0, 1.0]
+    gains[:] = [1.0, 1.0]
     inside = branch_nodes(nodes)
     mods = [m for m in (ctx or {}).get("mods", []) if m.get("dest_type") == "FXUtils"]
     dynamic = any(not foldable_source(m, (ctx or {}).get("macros", [])) and m.get("dest_param") in UTILS_STEREO_KEYS and abs(m.get("amount_pct", 100.0)) >= UTILS_MIN_ROUTE_PCT for m in mods)       # a Level Out route is a gain: utils_level_why
@@ -1315,6 +1327,8 @@ def utils_stereo(nodes: list[dict], ctx: dict | None) -> tuple[float, float | No
             continue
         pp = plain(n)
         width *= float(pp.get("kParamWidth", 100.0)) / 100.0
+        b = min(max(float(pp.get("kParamBalance", 0.0)), -100.0), 100.0) / 100.0
+        gains[1 if b < 0.0 else 0] *= 1.0 - abs(b)
         if float(pp.get("kParamLFMono", 0.0)) >= 0.5:
             hz = float(pp.get("kParamLFXover", 150.0))
             mono = hz if mono is None else max(mono, hz)
@@ -2176,8 +2190,12 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     P.update(cp); notes += [x for x in cn if x.startswith("Comp carried")]
     if any(not x.startswith("Comp carried") for x in cn):
         notes.append("Comp not carried: " + "; ".join(x for x in cn if not x.startswith("Comp carried")))
-    width, mono, uwhy = utils_stereo(nodes, ctx)
+    bal = [1.0, 1.0]
+    width, mono, uwhy = utils_stereo(nodes, ctx, bal)
     P["mwidth"] = int(round(min(max(64.0 * width, 0.0), 127.0)))
+    if utils_balance_pot(*bal) != 64:
+        P["mbal"] = utils_balance_pot(*bal)
+        notes.append(f"Utils Balance carried (left {20 * math.log10(max(bal[0], 1e-4)):+.1f} dB, right {20 * math.log10(max(bal[1], 1e-4)):+.1f} dB)")
     P["monohz"] = 0 if mono is None else int(round(min(max(1.0 + 126.0 * math.log(max(mono, 40.0) / 40.0) / math.log(12.5), 1.0), 127.0)))
     if width != 1.0 or mono is not None:
         notes.append(f"Utils carried as master width {width * 100:.0f} %" + (f" and mono below {mono:.0f} Hz" if mono is not None else ""))
@@ -2204,9 +2222,8 @@ def map_fx(name: str, nodes: list[dict], cli: Path = CLI, ctx: dict | None = Non
     ms_idx = ms_branches(nodes)
     ms_plain = bool(ms_idx) and all(kind_of(nodes[j]) == "EQ" or not enabled(nodes[j]) or dry(nodes[j]) for j in ms_idx) and all(
         kind_of(nodes[j]) not in ("Split", "Split3") or not enabled(nodes[j]) for j in branch_nodes(nodes))
-    # A Utils is carried when its width / mono-below went to the master stage and its HPF / LPF to the EQ (utils_filter_bands); LevelOut is a uniform gain (the loudness fit),
-    # Balance (a pan, 6 factory presets) is not carried.
-    utils_ok = lambda i, x: i in info.get("filter_fx_handled", ()) and not uwhy and abs(float(plain(x).get("kParamBalance", 0.0))) < 1.0
+    # A Utils is carried when its width / mono-below / Balance went to the master stage and its HPF / LPF to the EQ (utils_filter_bands); LevelOut is a uniform gain (the loudness fit).
+    utils_ok = lambda i, x: i in info.get("filter_fx_handled", ()) and not uwhy
     # A Split / SplitMS whose branches hold nothing that does anything (every module off or dry) is transparent: a frequency split with dry modules in either branch, or with none, is
     # within 0.1 dB of no split (calibration/dev/probe_split_plain.py; probe_splitms.py found the same for the mid / side split).
     def split_clear(i, x):

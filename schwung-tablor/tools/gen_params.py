@@ -116,7 +116,7 @@ def osc(n):
 O1, O2, O3 = osc(1), osc(2), osc(3)
 
 # The voice filters' types: the eight biquads, then Serum's comb and flanger models (comb.h: a feedback comb tuned to the cutoff, Reso its feedback), then Serum's three Formant models (formant.h: parallel band-pass resonators from measured tables, Freq and the hidden Var move them).
-FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB"]
+FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB", "Reverb"]
 
 FILTER = dict(
     freq = pot("flt_freq", "FREQ", "Filter Freq", 127),
@@ -904,6 +904,12 @@ BANKS = [
         row(enum("dist2_pre", "D2PR", "Distortion 2 Pre-Filter", ["Off", "LP", "HP", "Morph"], 0), pot("dist2_pre_freq", "D2PF", "Distortion 2 Pre-Filter Freq", 64), pot("dist2_pre_q", "D2PQ", "Distortion 2 Pre-Filter Q", 40),
             pot("dist2_pre_morph", "D2PM", "Distortion 2 Pre-Filter Morph", 0))]),
     ("Mod FX Tempo Sync", False, [row(enum("chor_sync", "CHS", "Chorus Tempo Sync", ["Off", "On"], 0), enum("flan_sync", "FLS", "Flanger Tempo Sync", ["Off", "On"], 0), enum("phas_sync", "PHS", "Phaser Tempo Sync", ["Off", "On"], 0))]),
+    # Serum's Utils Balance, after Master Width (per rack, like it): 64 is centre; below 64 the right side is scaled by pot / 64, above it the left side by (127 - pot) / 63, the near side kept
+    # (calibration/dev/probe_utils.py balance: the far side falls as 1 - |Balance| / 100, -6 dB at 50, -12 at 75, -20 at 90, silent at 100; the near side stays at unity).
+    ("Master Balance", False, [row(num("mbal", "MBAL", "Master Balance", 0, 127, 64))]),
+    # Serum's Reverb1 voice-filter model (filter type "Reverb", comb.h processReverb1): its Stereo knob, 0..127 for Serum's 0..100 %, 64 = 50 % = both sides alike (Serum's default);
+    # away from it the two sides' delays stretch apart, +-2.62 d^3 octaves, d = (50 - Stereo %) / 50 (calibration/dev/probe_reverb1.py)
+    ("Serum Reverb Filter", False, [row(num("flt_rvst", "RST1", "Filter Stereo", 0, 127, 64), num("flt2_rvst", "RST2", "Filter 2 Stereo", 0, 127, 64))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.
@@ -1037,7 +1043,7 @@ def chain_param(p):
 # The sample slots' Kind and grain keys are NOT hidden: the remote UI draws its Sample tab from chain_params, and a key missing here is a knob that never appears.
 # The 0.9.8 additions that only the Vital converter sets (random modulators, attack curves, the formant filters' own knobs) stay out of it too: the contract was 800 bytes under the host's 64 KB
 # limit (it refuses to load the synth past it) and these put it over (loadtest, 2026-11-20).
-HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|eq\d_ffine$|flt2?_vsk$|fxf_vsk$|fxf_blend$|fxf_cstyle$|fxf_ctrans$|fxf_cfine$|flt2?_vsty$|fxf_vsty$|vca_rpow$|flt_rpow$|dly_vital$|dly_vstyle$|dly_vmix$|me\d_rpow$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
+HIDDEN_FROM_CHAIN = re.compile(r"^(lfo\d_|lr\d_|smp_set$|smp2_set$|smp3_set$|conv_set$|rn\d_|vca_apow$|flt_apow$|me\d_apow$|flt_dpow$|me\d_dpow$|eq\d_ffine$|flt2?_vsk$|fxf_vsk$|fxf_blend$|fxf_cstyle$|fxf_ctrans$|fxf_cfine$|flt2?_vsty$|fxf_vsty$|vca_rpow$|flt_rpow$|dly_vital$|dly_vstyle$|dly_vmix$|me\d_rpow$|mbal$|flt2?_rvst$|flt2?_(fx|fy|fsp|ftr|fres|fst|var)$)")
 # The Vital banks (comp, distortion LFO, unison, envelope, ...) have no control on any page or in the remote UI: only the Vital converter and a preset load set them, as for the LFOs above. The
 # one exception is Vital Reverb, which the remote UI names. Together with the keys above this takes the contract from 64.9 KB to about 55 KB, well inside the host's 64 KB.
 HIDDEN_BANK_KEYS = {s["key"] for name, _, rws in BANKS if name.startswith("Vital ") and name != "Vital Reverb" for r in rws for s in r if s}

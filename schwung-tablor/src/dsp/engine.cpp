@@ -1052,6 +1052,21 @@ void Engine::refreshTone()
     toneLoDb = lo; toneHiDb = hi; toneValid = true;
 }
 
+/* Serum's Utils Balance (calibration/dev/probe_utils.py balance): the far side scaled by 1 - |Balance| / 100, the near side kept. The mbal pot: 64 centre, below it the right side
+ * at pot / 64, above it the left side at (127 - pot) / 63. Centre with nothing left to ramp skips the stage, so a preset without a Balance is bit for bit what it was. */
+void Engine::balance(const float *p, float *cur, float *L, float *R, int n)
+{
+    const float b = p[TB_P_MBAL];
+    const float tl = b > 64.0f ? (127.0f - b) / 63.0f : 1.0f, tr = b < 64.0f ? b / 64.0f : 1.0f;
+    if (tl == 1.0f && tr == 1.0f && cur[0] == 1.0f && cur[1] == 1.0f) return;
+    for (int i = 0; i < n; i++) {
+        cur[0] += (tl - cur[0]) * 0.002f; cur[1] += (tr - cur[1]) * 0.002f;
+        if (std::fabs(tl - cur[0]) < 1e-5f) cur[0] = tl;
+        if (std::fabs(tr - cur[1]) < 1e-5f) cur[1] = tr;
+        L[i] *= cur[0]; R[i] *= cur[1];
+    }
+}
+
 void Engine::refreshStereo()
 {
     const float mono = pots[TB_P_MONOHZ];
@@ -1208,6 +1223,7 @@ void Engine::renderBlock(int16_t *out, int frames)
                     bl[i] = m + sd; br[i] = m - sd;
                 }
             }
+            balance(busPots[b], balCur[1 + b], busBuf[2 * b], busBuf[2 * b + 1], n);
             applyUtilOut(1 + b, busBuf[2 * b], busBuf[2 * b + 1], n);
             for (int i = 0; i < n; i++) { L[i] += busBuf[2 * b][i]; R[i] += busBuf[2 * b + 1][i]; }
         }
@@ -1243,6 +1259,7 @@ void Engine::renderBlock(int16_t *out, int frames)
                 L[i] = m + sd; R[i] = m - sd;
             }
         }
+        balance(pots, balCur[0], L, R, n);
 
         const float master = potSquared(pots[TB_P_VOLUME]) * kMasterMax;
         const float driveT = pot01(pots[TB_P_DRIVE]);

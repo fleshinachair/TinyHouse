@@ -22,7 +22,7 @@ class CombFilter {
 public:
     static constexpr int kLen = 16384;                       /* 2.7 Hz at 44.1 kHz */
     void setSampleRate(double sr) { sampleRate = (float) sr; reset(); }
-    void reset() { for (auto &a : vs) a[0] = a[1] = 0.0f; vPrev[0] = -1.0f; lpS[0] = lpS[1] = hpX[0] = hpX[1] = hpY[0] = hpY[1] = 0.0f; prevP = prevQ = -1.0f; if (used) { std::fill(bufL, bufL + kLen, 0.0f); std::fill(bufR, bufR + kLen, 0.0f); used = false; } pos = 0; prevD = -1.0f; }   /* (the 128 KB are cleared only if the filter ran) */
+    void reset() { for (auto &a : vs) a[0] = a[1] = 0.0f; vPrev[0] = -1.0f; lpS[0] = lpS[1] = hpX[0] = hpX[1] = hpY[0] = hpY[1] = 0.0f; prevP = prevQ = -1.0f; rvS[0] = rvS[1] = -1.0f; rvLp[0] = rvLp[1] = 0.0f; if (used) { std::fill(bufL, bufL + kLen, 0.0f); std::fill(bufR, bufR + kLen, 0.0f); used = false; } pos = 0; prevD = -1.0f; }   /* (the 128 KB are cleared only if the filter ran) */
 
     /* the loop filter's pole at x = Var % + 50 Freq, L6 (loop 1) and H6 (loop 2): one curve for both (fitted at Freq 0.3 / 0.4 / 0.5 / 0.7: p .998 at x 50, .94 at 75, .78 at 85, .29 at 95), linear between the measured points;
      * past x 100 the low-pass settles near .15 and the high-pass opens fully */
@@ -183,11 +183,76 @@ public:
         for (int k = 0; k < 7; k++) vPrev[k] = tgt[k];
     }
 
+    /* Serum's Reverb1 voice-filter model (measured: calibration/dev/probe_reverb1.py; constants fitted by calibration/dev/fit_reverb1.py, calibration/reverb1_model.json).
+     * Serum's is linear and its whole response stretches with 1 / fc (fc the voice filters' cutoff law, 8.18 x 2697^Freq): nothing for 0.8 / fc, then a dense burst peaking near 2 / fc,
+     * DC gain 2; Reso is a loop of ~1 / fc whose gain is Reso; Var closes a low-pass in that loop (Var 100 removes it); Stereo stretches the two sides apart, +-2.62 d^3 octaves, d = (50 - Stereo %) / 50.
+     * The model (band levels 2.6-3.4 dB rms from 0.1 to 60 fc at Freq 0.2..0.5, Reso 0..50; a low-pass at fc, the old stand-in, is 17 dB off), every delay a multiple of T = sr / fc:
+     *   s = 1/4 sum_m x(t - (P + m u + j_m) T)          eight taps
+     *   a = AP_1 AP_2 AP_3 (s)                          all-passes (-g + z^-D) / (1 - g z^-D) before the loop
+     *   v = a + Reso c(w(t - L T)),  w = AP_4 AP_5 (v)   the loop, c a one-pole low-pass at q fc (1 - Var)
+     * Runs on this filter's own delay lines (a slot runs either a comb or this): per side, a 4096-sample ring for the taps, five 2048-sample rings for the all-passes and one for the loop,
+     * which holds every delay down to fc = 13.5 Hz (where Serum's own longest delay stops growing). Linear interpolation; the delays ramp across the block. */
+    void processReverb1(float *l, float *r, int n, float hz, float reso, float var01, float stereo01)
+    {
+        static constexpr float kP = 0.76307f, kU = 0.050366f, kL = 0.39283f, kQ = 4.7289f, kGa = 0.39872f, kC1 = 0.99097f;
+        static constexpr float kJit[8] = { -0.0072769f, 0.0113816f, 0.0135390f, 0.0001707f, 0.0001363f, 0.0214099f, 0.0080974f, 0.0189702f };
+        static constexpr float kAp[5] = { 0.43439f, 0.37320f, 0.44440f, 0.25106f, 0.092726f };
+        static constexpr int kTapBase = 0, kTapMask = 4095, kApBase = 4096, kApMask = 2047, kLoopBase = 4096 + 5 * 2048;
+        used = true;
+        const float fcMin = std::max(13.5f, sampleRate * 1.14f / 4090.0f), fcMax = 0.45f * sampleRate;
+        const float d = (0.5f - std::clamp(stereo01, 0.0f, 1.0f)) * 2.0f, st = std::exp2(2.62f * d * d * d);
+        const float hzs[2] = { hz * st, hz / st };
+        float tS[2];
+        for (int c = 0; c < 2; c++) tS[c] = sampleRate / std::clamp(hzs[c], fcMin, fcMax);
+        const float g = std::min(kC1 * std::clamp(reso, 0.0f, 1.0f), 0.985f);
+        const float corner = kQ * (1.0f - std::clamp(var01, 0.0f, 1.0f));
+        float pole[2];
+        for (int c = 0; c < 2; c++) pole[c] = std::exp(-6.2831853f * std::min(corner * sampleRate / tS[c], sampleRate / 2.2f) / sampleRate);
+        if (rvS[0] < 0.0f) { rvS[0] = tS[0]; rvS[1] = tS[1]; rvG = g; }
+        float *buf[2] = { bufL, bufR };
+        float *io[2] = { l, r };
+        auto rd = [](const float *b, int base, int mask, int p, float D) {
+            const int ip = (int) D;
+            const float fr = D - (float) ip;
+            return (1.0f - fr) * b[base + ((p - ip) & mask)] + fr * b[base + ((p - ip - 1) & mask)];
+        };
+        for (int i = 0; i < n; i++) {
+            const float t = (float) (i + 1) / (float) n;
+            const float gg = rvG + (g - rvG) * t;
+            for (int c = 0; c < 2; c++) {
+                float *b = buf[c];
+                const float T = rvS[c] + (tS[c] - rvS[c]) * t;
+                b[kTapBase + (pos & kTapMask)] = io[c][i];
+                float s = 0.0f;
+                for (int m = 0; m < 8; m++) s += rd(b, kTapBase, kTapMask, pos, std::max((kP + kU * (float) m + kJit[m]) * T, 0.0f));
+                float v = 0.25f * s;
+                for (int k = 0; k < 5; k++) {
+                    if (k == 3) {                                                   /* the loop closes around the last two all-passes */
+                        const float fb = rd(b, kLoopBase, kApMask, pos, std::max(kL * T, 1.0f));
+                        rvLp[c] += (1.0f - pole[c]) * (fb - rvLp[c]);
+                        v += gg * rvLp[c];
+                    }
+                    const int base = kApBase + k * 2048;
+                    const float dl = rd(b, base, kApMask, pos, std::max(kAp[k] * T, 1.0f));
+                    const float w = v + kGa * dl;
+                    b[base + (pos & kApMask)] = w;
+                    v = dl - kGa * w;
+                }
+                b[kLoopBase + (pos & kApMask)] = v;
+                io[c][i] = v;
+            }
+            pos = (pos + 1) & (kLen - 1);
+        }
+        rvS[0] = tS[0]; rvS[1] = tS[1]; rvG = g;
+        for (int c = 0; c < 2; c++) if (std::fabs(rvLp[c]) < 1e-20f) rvLp[c] = 0.0f;
+    }
+
 private:
     float sampleRate = 44100.0f;
     float bufL[kLen] = {}, bufR[kLen] = {};
     int pos = 0;
     bool used = false;
+    float rvS[2] = { -1.0f, -1.0f }, rvG = 0.0f, rvLp[2] = {};          /* Reverb1: the previous block's delay scale per side and loop gain, the loop low-pass state */
     float prevD = -1.0f, prevP = -1.0f, prevQ = -1.0f;
     float lpS[2] = {}, hpX[2] = {}, hpY[2] = {};                 /* the L6 / H6 loop filter's state per channel */
     float vs[2][2] = {}, vPrev[7] = { -1.0f, 0, 0, 0, 0, 0, 0 };            /* Vital comb: the two one-pole states per channel, the previous block's coefficients */

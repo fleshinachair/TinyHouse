@@ -377,6 +377,41 @@ static void testWavNormPeak()
     remove(path);
 }
 
+/* Serum's Reverb1 model (comb.h processReverb1): the measured laws it was built on. DC gain 2 (2 / (1 - Reso) with the loop), nothing before ~0.76 / fc, the whole response stretching with 1 / fc,
+ * Stereo pulling the two sides apart (the left shorter below 50 %), Var 100 removing the loop, and a full Reso that stays finite. */
+static void testReverb1()
+{
+    printf("== Reverb1 filter ==\n");
+    const float sr = 44100.0f;
+    auto ir = [&](float hz, float reso, float var01, float st01, std::vector<float> &l, std::vector<float> &r) {
+        static CombFilter f; f.setSampleRate(sr);
+        l.assign(65536, 0.0f); r.assign(65536, 0.0f);
+        l[0] = r[0] = 1.0f;
+        for (int off = 0; off < 65536; off += 128) f.processReverb1(l.data() + off, r.data() + off, 128, hz, reso, var01, st01);
+    };
+    auto sum = [](const std::vector<float> &x) { double s = 0; for (float v : x) s += v; return s; };
+    auto onset = [](const std::vector<float> &x) { float pk = 0; for (float v : x) pk = std::max(pk, std::fabs(v)); for (size_t i = 0; i < x.size(); i++) if (std::fabs(x[i]) > 0.1f * pk) return (int) i; return -1; };
+    auto centroid = [](const std::vector<float> &x) { double e = 0, t = 0; for (size_t i = 0; i < x.size(); i++) { e += (double) x[i] * x[i]; t += (double) x[i] * x[i] * (double) i; } return t / e; };
+    std::vector<float> l, r, l2, r2;
+    const float hz = 193.0f, T = sr / hz;
+    ir(hz, 0.0f, 0.0f, 0.5f, l, r);
+    CHECK(std::fabs(sum(l) - 2.0) < 0.05, "Reso 0: DC gain %.3f (Serum 2.00)", sum(l));
+    CHECK(onset(l) > (int) (0.7f * T) && onset(l) < (int) (1.1f * T), "Reso 0: first sound at %.2f / fc (Serum ~0.8-1.0)", onset(l) / T);
+    CHECK(std::fabs(sum(l) - sum(r)) < 1e-6, "Stereo 50: both sides alike");
+    ir(hz / 2.0f, 0.0f, 0.0f, 0.5f, l2, r2);
+    CHECK(std::fabs(centroid(l2) / centroid(l) - 2.0) < 0.1, "half the cutoff, twice the length (centroid ratio %.2f)", centroid(l2) / centroid(l));
+    ir(hz, 0.5f, 0.0f, 0.5f, l, r);
+    CHECK(std::fabs(sum(l) - 2.0 / (1.0 - 0.5 * 0.99097)) < 0.1, "Reso 50: DC gain %.2f (Serum 3.96)", sum(l));
+    ir(hz, 0.5f, 1.0f, 0.5f, l, r);
+    CHECK(std::fabs(sum(l) - 2.0) < 0.05, "Var 100 removes the loop: DC gain %.3f", sum(l));
+    ir(hz, 0.0f, 0.0f, 0.0f, l, r);
+    const double ratio = std::log2(centroid(r) / centroid(l));
+    CHECK(ratio > 4.5 && ratio < 6.0, "Stereo 0: right side %.2f octaves longer than the left (2 x 2.62)", ratio);
+    ir(hz, 1.0f, 0.0f, 0.5f, l, r);
+    float pk = 0; for (int i = 60000; i < 65536; i++) pk = std::max(pk, std::fabs(l[(size_t) i]));
+    CHECK(std::isfinite(pk) && pk < 10.0f, "full Reso stays bounded (tail peak %.3f)", pk);
+}
+
 /* The comb / flanger voice filters (comb.h): the impulse response's spectrum is Serum's measured law a (1 + c z^-D) / (1 - g z^-D) */
 static void testCombFilter()
 {
@@ -1148,6 +1183,7 @@ int main()
     testWavFormats();
     testWavNormPeak();
     testCombFilter();
+    testReverb1();
     testMorphToEvenHarmonicsKeepsItsFrame();
     testAnalogTables();
     testUnisonKeepsTheBass();

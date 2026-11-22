@@ -315,6 +315,8 @@ private:
     StereoBiquad sideHp;
     float widthCur = 1.0f, monoSeen = -1.0f;
     float busWidthCur[2] = {1.0f, 1.0f};              /* a bus rack's own Utils width (the "bN.mwidth" key), smoothed */
+    float balCur[3][2] = {{1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 1.0f}};    /* the Utils Balance's left / right gains (main, bus 1, bus 2), smoothed; centre (64) is 1, 1 and skips the stage */
+    static void balance(const float *p, float *cur, float *L, float *R, int n);
     float utilOutCur[3] = {1.0f, 1.0f, 1.0f};        /* the gain a route on a rack's ending Utils Level Out has put on it (main, bus 1, bus 2), ramped across each block */
     float distVModNow[4] = {};                       /* the Vital distortion's drive / filter route offsets, read from the newest voice once per block */
     float eqModNow[8] = {};                          /* the master EQ's route offsets, read from the newest voice once per block (the last ones stay while no voice sounds) */

@@ -705,6 +705,7 @@ public:
             else if (dt2.on) dt2.process(pre2L, pre2R, n);
             else if (dg2.on) dg2.process(pre2L, pre2R, n);
             else if (do2.on) do2.process(pre2L, pre2R, n);
+            else if (rv2On) comb2.processReverb1(pre2L, pre2R, n, fltTarget2, combRes2, P[TB_P_FLT2_VAR] * (1.0f / 127.0f), P[TB_P_FLT2_RVST] * (1.0f / 127.0f));
             else if (fmOn2) fm2.process(pre2L, pre2R, n, fmSet2);
             else if (vph2.on) vph2.process(pre2L, pre2R, n, fltTarget2, combRes2, vph2Blend, vph2Inv, vphClean);
             else if (combType2 >= 5) phaser2.process(pre2L, pre2R, n, 2 * (combType2 - 4), combRes2, fltTarget2);
@@ -734,6 +735,7 @@ public:
         else if (dt1.on) dt1.process(preL, preR, n);
         else if (dg1.on) dg1.process(preL, preR, n);
         else if (do1.on) do1.process(preL, preR, n);
+        else if (rv1On) comb.processReverb1(preL, preR, n, fltTarget, combRes, P[TB_P_FLT_VAR] * (1.0f / 127.0f), P[TB_P_FLT_RVST] * (1.0f / 127.0f));
         else if (fmOn1) fm1.process(preL, preR, n, fmSet1);
         else if (vph1.on) vph1.process(preL, preR, n, fltTarget, combRes, vph1Blend, vph1Inv, vphClean);
         else if (combType >= 5) phaser.process(preL, preR, n, 2 * (combType - 4), combRes, fltTarget);
@@ -1101,7 +1103,7 @@ private:
             n += env * sens * potBipolar(P[TB_P_FLT_ENV]) * filterWidth;
             n += modOff[MD_FLT_FREQ] * filterWidth;
 
-            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 18);
+            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 19);
             combType = ft >= 8 && ft < 16 ? ft - 7 : 0;                                  /* 1 Comb +, 2 Comb -, 3 Flange +, 4 Flange - */
             combLoop = combType && combType <= 4 ? std::clamp((int) P[TB_P_FLT_LOOP], 0, 3) : 0;                     /* the L6 / H6 / HL6 loop filter of Serum's comb and flange models, its pole set by x = Var % + 50 x the Freq knob (HL6: by Var % alone, comb.h) */
             combLx = P[TB_P_FLT_VAR] * (100.0f / 127.0f) + (combLoop == 3 ? 0.0f : 50.0f * n / 136.766f);
@@ -1136,8 +1138,9 @@ private:
             if (dg1.on) dg1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
             do1.on = P[TB_P_FLT_VSK] >= 4.5f && !combType && ft < 8;
             if (do1.on) do1.set(f, res, driveGainTarget, blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0);
-            fmOn1 = P[TB_P_FLT_VB] >= 2.5f || ft >= 16;     /* Vital's Formant model (X / Y between the style's vowels, Spread and Transpose, Resonance) or one of Serum's (Freq and Var: the measured tables), formant.h */
-            if (ft >= 16) fmSet1 = serumFormantSet(ft - 16, n * kSerumFormantPerNote, P[TB_P_FLT_VAR] * (1.0f / 127.0f), res);
+            fmOn1 = P[TB_P_FLT_VB] >= 2.5f || (ft >= 16 && ft < 19);     /* Vital's Formant model (X / Y between the style's vowels, Spread and Transpose, Resonance) or one of Serum's (Freq and Var: the measured tables), formant.h */
+            rv1On = ft == 19;                               /* Serum's Reverb1 model (comb.h processReverb1) */
+            if (ft >= 16 && ft < 19) fmSet1 = serumFormantSet(ft - 16, n * kSerumFormantPerNote, P[TB_P_FLT_VAR] * (1.0f / 127.0f), res);
             else if (fmOn1) fmSet1 = vitalFormantSet((int) P[TB_P_FLT_FST], P[TB_P_FLT_FX] * (1.0f / 127.0f), P[TB_P_FLT_FY] * (1.0f / 127.0f), (P[TB_P_FLT_FSP] - 64.0f) * (1.0f / 64.0f),
                                                  (P[TB_P_FLT_FTR] - 64.0f) * (12.0f / 64.0f), P[TB_P_FLT_FRES] * (1.0f / 127.0f));
             fltTarget = f; fltQ = q;           /* applied in steps across the block (see runFilter) */
@@ -1148,7 +1151,7 @@ private:
             n2 += ((float) midiNote - 60.0f) * pot01(P[TB_P_FLT2_KEY]);
             n2 += env * sens * potBipolar(P[TB_P_FLT2_ENV]) * filterWidth;
             n2 += modOff[MD_FLT2_FREQ] * filterWidth;
-            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 18);
+            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 19);
             combType2 = ft2 >= 8 && ft2 < 16 ? ft2 - 7 : 0;
             combLoop2 = combType2 && combType2 <= 4 ? std::clamp((int) P[TB_P_FLT2_LOOP], 0, 3) : 0;
             combLx2 = P[TB_P_FLT2_VAR] * (100.0f / 127.0f) + (combLoop2 == 3 ? 0.0f : 50.0f * n2 / 136.766f);
@@ -1174,8 +1177,9 @@ private:
             if (dg2.on) dg2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
             do2.on = P[TB_P_FLT2_VSK] >= 4.5f && !combType2 && ft2 < 8;
             if (do2.on) do2.set(fltTarget2, combRes2, drive2GainTarget, blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0);
-            fmOn2 = P[TB_P_FLT2_VB] >= 2.5f || ft2 >= 16;
-            if (ft2 >= 16) fmSet2 = serumFormantSet(ft2 - 16, n2 * kSerumFormantPerNote, P[TB_P_FLT2_VAR] * (1.0f / 127.0f), combRes2);
+            fmOn2 = P[TB_P_FLT2_VB] >= 2.5f || (ft2 >= 16 && ft2 < 19);
+            rv2On = ft2 == 19;
+            if (ft2 >= 16 && ft2 < 19) fmSet2 = serumFormantSet(ft2 - 16, n2 * kSerumFormantPerNote, P[TB_P_FLT2_VAR] * (1.0f / 127.0f), combRes2);
             else if (fmOn2) fmSet2 = vitalFormantSet((int) P[TB_P_FLT2_FST], P[TB_P_FLT2_FX] * (1.0f / 127.0f), P[TB_P_FLT2_FY] * (1.0f / 127.0f), (P[TB_P_FLT2_FSP] - 64.0f) * (1.0f / 64.0f),
                                                  (P[TB_P_FLT2_FTR] - 64.0f) * (12.0f / 64.0f), P[TB_P_FLT2_FRES] * (1.0f / 127.0f));
         }
@@ -1318,6 +1322,7 @@ private:
     FormantBank fm1, fm2;                         /* Vital's Formant voice filter (formant.h); flt_vb = 3 */
     FormantSet fmSet1, fmSet2;
     bool fmOn1 = false, fmOn2 = false;
+    bool rv1On = false, rv2On = false;            /* filter type 19: Serum's Reverb1 model, run on comb / comb2's delay lines */
     float vph1Blend = 1.0f, vph2Blend = 1.0f; bool vph1Inv = false, vph2Inv = false, vphClean = false;
     int combType = 0, combType2 = 0, combLoop = 0, combLoop2 = 0;
     float combLx = 0.0f, combLx2 = 0.0f;                    /* x = Var % + 50 x the Freq knob: the L6 / H6 loop filter's coordinate (comb.h) */

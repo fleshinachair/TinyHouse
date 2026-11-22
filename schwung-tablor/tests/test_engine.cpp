@@ -1094,6 +1094,29 @@ static void testSamplePan()
     CHECK(hl.second < 0.01 * c.second && std::fabs(hl.first / c.first - 1.6557) < 0.04, "pan -50 is hard left (R %.0f, L %.3f x centre)", hl.second, hl.first / c.first);
 }
 
+static void testMasterBalance()
+{
+    printf("== master balance (Serum Utils Balance) ==\n");
+    auto chan = [](const std::vector<int16_t> &x, int ch) {
+        double acc = 0.0; const int frames = (int) x.size() / 2;
+        for (int i = frames / 2; i < frames; i++) acc += (double) x[(size_t) i * 2 + ch] * x[(size_t) i * 2 + ch];
+        return std::sqrt(acc / (frames - frames / 2));
+    };
+    auto hear = [&](int bal) {
+        auto e = std::make_unique<Engine>();
+        e->pots[TB_P_VCA_A] = 0; e->pots[TB_P_VCA_S] = 127; e->pots[TB_P_VCA_R] = 0;
+        e->pots[TB_P_MBAL] = (float) bal;
+        note(*e, 60); render(*e, 40);
+        auto x = render(*e, 60);
+        return std::make_pair(chan(x, 0), chan(x, 1));
+    };
+    const auto c = hear(64), l = hear(32), r = hear(127), q = hear(96);
+    CHECK(c.first > 0.0 && std::fabs(c.first - c.second) < 0.02 * c.first, "centre leaves both sides (L %.0f, R %.0f)", c.first, c.second);
+    CHECK(std::fabs(l.first / c.first - 1.0) < 0.01 && std::fabs(l.second / c.second - 0.5) < 0.01, "pot 32 (Balance -50): right at %.3f (0.5), left %.3f (1)", l.second / c.second, l.first / c.first);
+    CHECK(r.first < 0.001 * c.first && std::fabs(r.second / c.second - 1.0) < 0.01, "pot 127 (Balance +100): left silent (%.4f), right %.3f", r.first / c.first, r.second / c.second);
+    CHECK(std::fabs(q.first / c.first - 31.0 / 63.0) < 0.01 && std::fabs(q.second / c.second - 1.0) < 0.01, "pot 96: left at %.3f (%.3f)", q.first / c.first, 31.0 / 63.0);
+}
+
 static void testArp()
 {
     printf("== arpeggiator ==\n");
@@ -1902,6 +1925,7 @@ int main()
     testClipPlayer();
     testSample2();
     testSamplePan();
+    testMasterBalance();
     testArp();
     testWarpChain();
     printf("\n%s (%d failures)\n", g_fail ? "ENGINE TESTS FAILED" : "ENGINE TESTS PASSED", g_fail);

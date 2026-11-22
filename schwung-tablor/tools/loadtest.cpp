@@ -142,6 +142,112 @@ int main(int argc, char **argv)
         }
     }
 
+    /* Saved Sets follow updates: a slot's state names the converter of the store preset it holds ("pc=") only while the sound is unchanged, and a
+     * state restored with an older converter's sound takes the store's newer conversion. An edited sound is never replaced. */
+    {
+        auto waitReady = [&](void *in) {
+            char rb[8] = {};
+            struct timespec ts = { 0, 10 * 1000000 };
+            for (int i = 0; i < 1500; i++) { api->get_param(in, "ready", rb, sizeof rb); if (rb[0] == '1') break; nanosleep(&ts, nullptr); }
+        };
+        auto stateOf = [&](void *in) {                 /* the plain blob: a buffer under 16 KB gets it */
+            static char sb[16000];
+            sb[0] = 0;
+            int16_t o[MOVE_FRAMES_PER_BLOCK * 2];
+            for (int i = 0; i < 6; i++) api->render_block(in, o, MOVE_FRAMES_PER_BLOCK);
+            settle(api, in);
+            api->get_param(in, "state", sb, sizeof sb);
+            return std::string(sb);
+        };
+        auto val = [&](void *in, const char *k) { char b[64] = {}; api->get_param(in, k, b, sizeof b); return std::string(b); };
+        void *a = api->create_instance(".", nullptr);
+        api->set_param(a, "state", "TBLR2;");
+        waitReady(a);
+        std::string s;
+        for (int b = 0; b < 8 && s.find(";pc=") == std::string::npos; b++) {
+            if (b == 0) api->set_param(a, "preset", "0");
+            else api->set_param(a, "bank", std::to_string(b).c_str());
+            s = stateOf(a);
+        }
+        const size_t pcAt = s.find(";pc=");
+        if (pcAt == std::string::npos) {
+            printf("  skip (no converted presets in the store): saved Sets follow updates\n");
+        } else {
+            const size_t pcEnd = s.find(';', pcAt + 1);
+            const std::string conv = s.substr(pcAt + 4, pcEnd - pcAt - 4);
+            CHECK(conv.size() >= 6, "a fresh preset's state names its converter (pc=%s)", conv.c_str());
+            const std::string orig = val(a, "vca_r"), alt = orig == "77" ? "78" : "77";
+            api->set_param(a, "vca_r", alt.c_str());
+            CHECK(stateOf(a).find(";pc=") == std::string::npos, "an edited sound's state names no converter");
+            api->set_param(a, "vca_r", orig.c_str());
+            CHECK(stateOf(a).find(";pc=" + conv + ";") != std::string::npos, "the edit undone: the converter is named again");
+            auto restored = [&](const std::string &st) {
+                void *in = api->create_instance(".", nullptr);
+                api->set_param(in, "preset", "0");      /* the host asks for the first sound, then restores the slot's own, both before the scan */
+                api->set_param(in, "state", st.c_str());
+                waitReady(in);
+                std::string v;
+                for (int i = 0; i < 20; i++) { stateOf(in); v = val(in, "vca_r"); if (v == orig) break; }
+                const std::string st2 = stateOf(in);
+                api->destroy_instance(in);
+                return std::make_pair(v, st2);
+            };
+            std::string noPc = s; noPc.erase(pcAt, pcEnd - pcAt);
+            std::string old = s; old.replace(pcAt + 4, conv.size(), "000000000000");
+            auto r1 = restored(old + "vca_r=" + alt + ";");
+            CHECK(r1.first == orig && r1.second.find(";pc=" + conv + ";") != std::string::npos, "a Set holding an older conversion takes the new one (vca_r %s -> %s)", alt.c_str(), r1.first.c_str());
+            auto r2 = restored(s + "vca_r=" + alt + ";");
+            CHECK(r2.first == alt, "a Set already on this conversion is left as it is (vca_r=%s)", r2.first.c_str());
+            auto r3 = restored(noPc + "vca_r=" + alt + ";");
+            CHECK(r3.first == alt && r3.second.find(";pc=") == std::string::npos, "an edited sound in a Set is never replaced (vca_r=%s)", r3.first.c_str());
+            /* Its tables and samples load after the preset: that must not read as an edit. Every 25th preset of the bank (TB_PC_ALL=1: all of them). */
+            const int step = getenv("TB_PC_ALL") ? 1 : 25;
+            int n = 0, bad = 0;
+            std::string badNames;
+            char cnt[16] = {};
+            api->get_param(a, "preset_count", cnt, sizeof cnt);
+            for (int i = 0; i < atoi(cnt); i += step) {
+                api->set_param(a, "preset", std::to_string(i).c_str());
+                struct timespec ts = { 0, 30 * 1000000 };
+                nanosleep(&ts, nullptr);
+                const std::string st = stateOf(a);
+                n++;
+                if (st.find(";pc=") == std::string::npos) { bad++; if (bad <= 5) badNames += " " + std::to_string(i); }
+            }
+            CHECK(n > 0 && bad == 0, "after its tables and samples land, a preset still reads as unchanged (%d of %d;%s)", n - bad, n, badNames.c_str());
+
+            /* An import rescans the store: the slot stays on its preset by name when the list around it changes, and keeps naming it while it is missing. */
+            auto pkOf = [&](void *in) { const std::string st = stateOf(in); const size_t at = st.find(";pk="); return at == std::string::npos ? std::string() : st.substr(at + 4, st.find(';', at + 1) - at - 4); };
+            auto rescan = [&](void *in) { api->set_param(in, "rescan", "1"); settle(api, in); for (int i = 0; i < 400; i++) { char l[8] = {}; api->get_param(in, "is_loading", l, sizeof l); if (l[0] == '0') break; struct timespec ts = { 0, 5 * 1000000 }; nanosleep(&ts, nullptr); } };
+            const std::string dir = "/data/UserData/schwung/presets/tinyhouse/0 loadtest", one = dir + "/Loadtest One.json";
+            api->set_param(a, "preset", "5");
+            const std::string mine = pkOf(a);
+            mkdir(dir.c_str(), 0755);
+            {
+                const std::string from = "/data/UserData/schwung/presets/tinyhouse/" + mine + ".json";
+                FILE *fi = fopen(from.c_str(), "rb"), *fo = fopen(one.c_str(), "wb");
+                char cb[8192]; size_t got;
+                while (fi && fo && (got = fread(cb, 1, sizeof cb, fi)) > 0) fwrite(cb, 1, got, fo);
+                if (fi) fclose(fi);
+                if (fo) fclose(fo);
+            }
+            rescan(a);
+            CHECK(pkOf(a) == mine, "a bank added before it: the slot is still on its preset (\"%s\", was \"%s\")", pkOf(a).c_str(), mine.c_str());
+            api->set_param(a, "bank", "0");
+            const std::string theirs = pkOf(a);
+            unlink(one.c_str()); rmdir(dir.c_str());
+            rescan(a);
+            CHECK(pkOf(a) == theirs, "its preset gone for a moment: the slot keeps naming it (\"%s\")", pkOf(a).c_str());
+            mkdir(dir.c_str(), 0755);
+            { FILE *fo = fopen(one.c_str(), "wb"), *fi = fopen(("/data/UserData/schwung/presets/tinyhouse/" + mine + ".json").c_str(), "rb"); char cb[8192]; size_t got; while (fi && fo && (got = fread(cb, 1, sizeof cb, fi)) > 0) fwrite(cb, 1, got, fo); if (fi) fclose(fi); if (fo) fclose(fo); }
+            rescan(a);
+            CHECK(pkOf(a) == theirs && val(a, "bank") == "0", "and back on it when it returns (\"%s\", bank %s)", pkOf(a).c_str(), val(a, "bank").c_str());
+            unlink(one.c_str()); rmdir(dir.c_str());
+            rescan(a);
+        }
+        api->destroy_instance(a);
+    }
+
     static char big[64 * 1024];
     static char saved[64 * 1024];   /* a state blob held across a round-trip */
 

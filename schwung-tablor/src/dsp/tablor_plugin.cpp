@@ -102,6 +102,14 @@ struct tablor_instance {
     std::atomic<unsigned> cp_hash { 0 };  /* of the last chain_params served, to see whether the contract moves while the host is browsing */
     /* The "pk" a restored state named (see preset_key), held until the worker has scanned the store and can find it. */
     std::shared_ptr<const std::string> want_pk;
+    /* Saved Sets follow updates (upgrade_restored): the converter that made the store preset the slot last took and the sound it had then (sound_hash). A saved
+     * state names that converter ("pc=") only while the sound is still exactly that preset, so a Set reopened after the preset was converted again takes the
+     * new conversion, and a sound the player changed is never replaced. want_up: the "pc" a restored state named, held until the store is scanned. */
+    struct Base { std::string conv; unsigned hash = 0; };
+    std::shared_ptr<const Base> base;
+    std::shared_ptr<const std::string> want_up;
+    /* The key of the preset the slot is on while the store, scanned again, does not list it (an import rewriting its bank): see scan_store_presets. */
+    std::shared_ptr<const std::string> pk_hold;
 
     std::shared_ptr<const PresetList> storeList() const
     { return std::atomic_load(&store); }
@@ -645,6 +653,8 @@ static std::vector<std::string> store_bank_dirs()
     return dirs;
 }
 
+static std::string preset_key(const tablor_instance::preset &p);
+
 static void scan_store_presets(tablor_instance *inst)
 {
     auto next = std::make_shared<tablor_instance::PresetList>();
@@ -674,12 +684,35 @@ static void scan_store_presets(tablor_instance *inst)
             }
         next->digest = tb::presetDigest(next->banks, names, &old);
     }
-    int b = inst->bank_index.load();
-    if (b < 0 || b >= (int) next->banks.size()) b = 0;
-    inst->bank_index = b;
-    const int first = next->bank_first[(size_t) b], n = next->bank_n[(size_t) b];
-    const int si = inst->store_index.load();
-    if (si < first || si >= first + n) inst->store_index = first;
+    /* The slot stays on its preset BY NAME: an import adds, removes and rewrites presets, so the same index can be another sound in the new list (the saved state
+     * then named that one, and a reboot put the page there), and while the bank is being rewritten the preset may be missing for a moment. Then its name is held
+     * (pk_hold): the saved state keeps naming it, and a later scan that lists it again puts the page back on it. */
+    std::string key;
+    if (auto h = std::atomic_load(&inst->pk_hold)) key = *h;
+    else {
+        auto was = inst->storeList();
+        const int si = inst->store_index.load();
+        if (si >= 0 && si < (int) was->items.size()) key = preset_key(was->items[(size_t) si]);
+        else if (auto w = std::atomic_load(&inst->want_pk)) key = *w;
+    }
+    bool found = false;
+    for (size_t k = 0; k < next->banks.size() && !found && !key.empty(); k++)
+        for (int i = next->bank_first[k]; i < next->bank_first[k] + next->bank_n[k]; i++)
+            if (preset_key(next->items[(size_t) i]) == key) {
+                inst->bank_index = (int) k;
+                inst->store_index = i;
+                found = true;
+                break;
+            }
+    std::atomic_store(&inst->pk_hold, found || key.empty() ? std::shared_ptr<const std::string>() : std::make_shared<const std::string>(key));
+    if (!found) {
+        int b = inst->bank_index.load();
+        if (b < 0 || b >= (int) next->banks.size()) b = 0;
+        inst->bank_index = b;
+        const int first = next->bank_first[(size_t) b], n = next->bank_n[(size_t) b];
+        const int si = inst->store_index.load();
+        if (si < first || si >= first + n) inst->store_index = first;
+    }
     std::atomic_store(&inst->store, std::shared_ptr<const tablor_instance::PresetList>(next));
 }
 
@@ -802,6 +835,7 @@ static bool select_preset_by_key(tablor_instance *inst, const std::string &key)
             if (preset_key(ps->items[(size_t) i]) == key) {
                 inst->bank_index = (int) b;
                 inst->store_index = i;
+                std::atomic_store(&inst->pk_hold, std::shared_ptr<const std::string>());
                 return true;
             }
     return false;
@@ -1384,6 +1418,25 @@ static int append_kv(char *out, size_t cap, const char *key, float v)
     return (int) (w - out);
 }
 
+/* What the sound is, as one number: everything a saved state carries of it (not the slot's preset key, its demo or Unison Cap, the player's live limit).
+ * Equal right after a preset was applied and now: the player has not changed the sound. */
+static unsigned sound_hash(tablor_instance *inst)
+{
+    unsigned h = 2166136261u;
+    auto mix = [&h](const void *d, size_t n) { const unsigned char *b = (const unsigned char *) d; for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u; };
+    auto str = [&mix](const char *s) { mix(s, strlen(s) + 1); };
+    str(inst->clip_str); str(inst->arp_str); str(inst->mac_str); str(inst->macn_str);
+    static const int capIdx = param_index("uni_cap");
+    for (int i = 0; i < TB_PARAM_COUNT; i++) {
+        if (tb_params[i].type == TB_PATH) { str(inst->wt_path[tb_path_slot(i)]); continue; }
+        if (i == capIdx) continue;
+        const float v = inst->params()[i];
+        mix(&v, sizeof v);
+    }
+    for (int b = 0; b < 2; b++) mix(inst->engine.busPots[b], sizeof(float) * TB_PARAM_COUNT);
+    return h;
+}
+
 static void build_state_blob(tablor_instance *inst)
 {
     /* TBLR2, not TBLR1: v1.0.5 reordered the LFO shape options (the host
@@ -1394,8 +1447,13 @@ static void build_state_blob(tablor_instance *inst)
     {
         auto ps = inst->storeList();
         const int si = inst->store_index.load();
-        if (si >= 0 && si < (int) ps->items.size())
+        if (auto h = std::atomic_load(&inst->pk_hold))
+            o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "pk=%s;", h->c_str());
+        else if (si >= 0 && si < (int) ps->items.size())
             o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "pk=%s;", preset_key(ps->items[(size_t) si]).c_str());
+        auto bs = std::atomic_load(&inst->base);
+        if (bs && !bs->conv.empty() && bs->hash == sound_hash(inst))
+            o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "pc=%s;", bs->conv.c_str());
     }
     if (inst->clip_str[0])
         o += snprintf(inst->state_buf + o, sizeof inst->state_buf - (size_t) o, "clip=%s;", inst->clip_str);
@@ -1479,6 +1537,8 @@ static void reset_to_defaults(tablor_instance *inst)
     republish_macro_names(inst);
 }
 
+static void upgrade_restored(tablor_instance *inst);
+
 /* Version-tagged blob: "TBLR1;…" or "TBLR2;…". Anything without a known
  * tag is from another life — ignore it entirely rather than half-apply
  * it (the ER-99 total-silence lesson). */
@@ -1514,6 +1574,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
     char kbuf[64], vbuf[4096];
     std::string dm_pack, dm_part;                     /* the demo the state names (only a host restore applies it: a preset taken from the store keeps the slot's demo) */
     bool dm_on = false, dm_seen = false;
+    std::string restored_pc;                          /* the converter of the unchanged preset a saved state holds (upgrade_restored) */
     while (*p) {
         const char *eq = strchr(p, '=');
         if (!eq) break;
@@ -1530,6 +1591,7 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
                 std::atomic_store(&inst->want_pk, std::make_shared<const std::string>(vbuf));
                 select_preset_by_key(inst, vbuf);
             }
+            if (host_restore && !strcmp(kbuf, "pc")) restored_pc = vbuf;
             if (!strcmp(kbuf, "arp")) {
                 snprintf(inst->arp_str, sizeof inst->arp_str, "%s", vbuf);
                 inst->engine.setArp(tb::parseArp(vbuf));
@@ -1591,6 +1653,31 @@ static void apply_state_blob(tablor_instance *inst, const char *val, bool host_r
         std::atomic_store(&inst->want_demo, std::shared_ptr<const tablor_instance::WantDemo>(w));
         post_contract_job(inst, [inst] { if (inst->loader.stopping()) return; if (apply_want_demo(inst)) tb_publish_selection(inst); });
     }
+    if (host_restore) {                               /* the restored sound is the baseline now; one that is still a preset may have a newer conversion */
+        auto bs = std::make_shared<tablor_instance::Base>();
+        bs->conv = restored_pc;
+        bs->hash = sound_hash(inst);
+        std::atomic_store(&inst->base, std::shared_ptr<const tablor_instance::Base>(bs));
+        std::atomic_store(&inst->want_up, restored_pc.empty() ? std::shared_ptr<const std::string>() : std::make_shared<const std::string>(restored_pc));
+        if (!restored_pc.empty() && inst->ready.load()) post_contract_job(inst, [inst] { if (!inst->loader.stopping()) upgrade_restored(inst); });
+    }
+}
+
+/* A store preset just applied (from_store): it is the baseline a saved state compares with. */
+static void set_store_base(tablor_instance *inst, const tablor_instance::preset &p)
+{
+    auto bs = std::make_shared<tablor_instance::Base>();
+    bs->conv = p.conv;
+    bs->hash = sound_hash(inst);
+    std::atomic_store(&inst->base, std::shared_ptr<const tablor_instance::Base>(bs));
+}
+
+static void apply_store_item(tablor_instance *inst, int i)
+{
+    auto ps = inst->storeList();
+    if (i < 0 || i >= (int) ps->items.size()) return;
+    apply_state_blob(inst, ps->items[(size_t) i].blob.c_str());
+    set_store_base(inst, ps->items[(size_t) i]);
 }
 
 /* The browser chose store item `i`: the name shows at once, the sound follows when the knob has rested (see pend_idx). */
@@ -1624,9 +1711,8 @@ static void apply_pending(tablor_instance *inst, const char *why = "?")
 {
     const int pi = inst->pend_idx.exchange(-1);
     if (pi < 0) return;
-    auto ps = inst->storeList();
     const long long t0 = inst->diag ? steady_us() : 0;
-    if (pi < (int) ps->items.size()) apply_state_blob(inst, ps->items[(size_t) pi].blob.c_str());
+    apply_store_item(inst, pi);
     if (inst->diag) diag_log(inst, "applied preset %d in %lld us (%lld ms after it was due) by %s", pi, steady_us() - t0, steady_ms() - inst->pend_due.load(), why);
 }
 
@@ -1774,15 +1860,36 @@ static void upgrade_if_stale(tablor_instance *inst, int i)
     rc->request(path, true, inst->reconv_token, [inst](const tb::Reconverter::Result &r) { on_reconverted(inst, r); });
 }
 
+/* A saved Set reopened: its slot holds a store preset unchanged ("pc", the converter that made it, see Base). If that preset has been converted again since,
+ * or is due to be, the slot takes the new conversion (the render applies it, as for a chosen preset). WORKER THREAD, once the store is scanned. */
+static void upgrade_restored(tablor_instance *inst)
+{
+    auto pc = std::atomic_exchange(&inst->want_up, std::shared_ptr<const std::string>());
+    if (!pc) return;
+    auto pk = std::atomic_load(&inst->want_pk);
+    if (!pk || !select_preset_by_key(inst, *pk)) return;
+    auto ps = inst->storeList();
+    const int i = inst->store_index.load();
+    if (i < 0 || i >= (int) ps->items.size()) return;
+    const auto &it = ps->items[(size_t) i];
+    const bool newer = !it.conv.empty() && it.conv != *pc;
+    if (inst->diag) diag_log(inst, "saved set: %s made by %s, preset now %s%s", pk->c_str(), pc->c_str(), it.conv.c_str(), preset_stale(it) ? " (stale)" : "");
+    upgrade_if_stale(inst, i);                         /* converted again first when due: the new sound lands when it is done */
+    if (newer) {
+        inst->pend_due = steady_ms();
+        inst->pend_idx = i;
+    }
+}
+
 static void choose_store_preset(tablor_instance *inst, int i)
 {
+    std::atomic_store(&inst->pk_hold, std::shared_ptr<const std::string>());     /* another preset chosen: the one held is let go */
     upgrade_if_stale(inst, i);
     reimport_hint(inst, i);
     inst->store_index = i;
     if (inst->settle_ms <= 0) {
         inst->pend_idx = -1;
-        auto ps = inst->storeList();
-        if (i >= 0 && i < (int) ps->items.size()) apply_state_blob(inst, ps->items[(size_t) i].blob.c_str());
+        apply_store_item(inst, i);
         return;
     }
     inst->pend_due = steady_ms() + inst->settle_ms;
@@ -2127,7 +2234,8 @@ static bool waiting_state(tablor_instance *inst, std::string &st)
     auto ps = inst->storeList();
     if (pi >= (int) ps->items.size()) return false;
     const std::string &bl = ps->items[(size_t) pi].blob;
-    st = "TBLR2;pk=" + preset_key(ps->items[(size_t) pi]) + ";" + bl.substr(bl.compare(0, 6, "TBLR2;") == 0 ? 6 : 0);
+    const std::string &cv = ps->items[(size_t) pi].conv;
+    st = "TBLR2;pk=" + preset_key(ps->items[(size_t) pi]) + ";" + (cv.empty() ? std::string() : "pc=" + cv + ";") + bl.substr(bl.compare(0, 6, "TBLR2;") == 0 ? 6 : 0);
     return true;
 }
 
@@ -2623,7 +2731,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
                 if (n > 0) {
                     const int i = ps->bank_first[(size_t) b] + std::min(std::max(want, 0), n - 1);
                     inst->store_index = i;
-                    apply_state_blob(inst, ps->items[(size_t) i].blob.c_str());
+                    apply_store_item(inst, i);
                 }
             }
         }
@@ -2640,6 +2748,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
         if (!load_conv_stamp(inst).hash.empty())
             std::atomic_store(&inst->reconv, tb::Reconverter::shared(std::string(inst->module_dir) + "/converter"));
         load_reimport_hint(inst);
+        upgrade_restored(inst);                        /* a saved state restored before the list was here */
         queue_stale(inst);
         if (g_host && g_host->log) {
             char msg[200];

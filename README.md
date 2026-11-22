@@ -10,9 +10,8 @@ TinyHouse is its own engine on a small ARM box, not a copy of Serum or Vital: **
 or Vital original, but not the same.** Some come out very close, some less so, and a bank will always have a few that miss. Some features are not built yet (see
 [What is supported](#what-is-supported)), and a preset that leans on one of them loses that part of its sound; the import report says which. The same goes for Vital presets: the engine emulates Vital's oscillators, envelopes, filters and effects loosely, not exactly, and a Vital preset is not level-matched, so set its volume by ear.
 
-**This is experimental.** Importing in the browser is the easy route; it sets loudness, reverb and width from general rules. If you have Serum 2 on Windows and
-want presets to land closer to what you hear in the plugin, use the [Python scripts](#more-accurate-conversion-with-the-python-scripts), which can compare
-each preset against your own copy of it.
+**This is experimental.** Everything happens in the remote UI in your browser. Loudness, reverb and width are set from general rules, not matched to the plugin,
+so set them by ear. Presets you import get better on their own as TinyHouse is updated (see [Updates improve your presets](#updates-improve-your-presets)).
 
 ![The TinyHouse remote UI: tabs along the top, three wavetable oscillators on the Osc tab](docs/img/remote-ui.png)
 
@@ -22,8 +21,7 @@ each preset against your own copy of it.
 - Serum 2 presets (`.SerumPreset` files or a `.SerumPack`). Or Vital presets (`.vital` files, loose or zipped, or a `.vitalbank`; they carry their own wavetables and samples, so they need no other install). Nothing from Xfer or Vital Audio is included.
 - Serum 2 installed on your computer, for any preset that uses Serum's own wavetables or samples (most factory presets do). Serum's installer puts those files in your
   `Documents\Xfer\Serum 2 Presets` folder, and TinyHouse reads them from there; the plugin itself does not have to run. Without that folder those oscillators are silent.
-  Wavetables and samples stored inside the preset file itself are imported with it and need nothing from Serum 2. Serum 2 on Windows is also needed for the more accurate
-  [Python route](#more-accurate-conversion-with-the-python-scripts) (with Python 3.13).
+  Wavetables and samples stored inside the preset file itself are imported with it and need nothing from Serum 2.
 
 The browser import runs the converter inside the page, so it needs no Python on your computer, but the browser needs internet access (it loads the Python runtime from a CDN).
 
@@ -48,13 +46,25 @@ The browser import runs the converter inside the page, so it needs no Python on 
 - **Chrome's "Upload N files to this site?" prompt** appears when you choose a folder. Nothing is uploaded: the page reads the folder in your browser and sends only
   the files your presets use to the Move. Dropping the folder on the dialog avoids the prompt. For a folder picker that remembers your Serum folder (Chrome and
   Edge), add the Move's address (e.g. `http://move.local:7700`) to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, enable it and relaunch.
-- For a whole bank at once (Factory, a pack), use **Import whole banks from this folder** and tick the banks.
-- Press **Import**. Loose presets go into a bank called *Imports*, a pack or folder into a bank of its own name. A report lists each preset as *imported*,
-  *imported with parts missing* (and which) or *not imported* (and why).
+- For a whole bank at once, choose the folder that holds it. Choosing your whole Serum 2 Presets folder lists Factory, User and each pack you installed; tick the
+  ones you want and each goes into a bank of its own name.
+- Press **Import**. Loose presets go into a bank called *Imports*, a pack or folder into a bank of its own name. Every preset that converts is imported, including
+  ones with something missing, and the report lists what each one misses. Roughly one in four of Serum's factory presets miss an effect or a feature TinyHouse does
+  not have yet (see [What is supported](#what-is-supported)), so expect those to sound off; they improve as later versions add what is missing.
 
 4. **Play.** The new bank is in the preset browser. Pick a sound and it loads on the Move.
 
 Your presets go nowhere but your Move: the converter runs inside the browser page (which downloads the Python runtime it uses from a public CDN the first time).
+
+### Updates improve your presets
+
+Each preset you import keeps its original Serum or Vital file on the Move (in `UserLibrary/TinyHouse Sources/<bank>`), with a note of which parts of the converter
+it went through. When an update brings a better converter, the Move converts again the presets that update can change, in the background at low priority, and leaves
+the rest as they are. A preset that has not been done yet when you choose it is converted at once (the header reads "Upgrading to v..." for a moment). Nothing needs
+your computer or the remote UI, and you can play meanwhile.
+
+Presets imported before version 0.9.13 kept no original, so they cannot be upgraded: import them once more through the remote UI, with the same bank name (the
+wavetables and samples already on the Move are reused). The remote UI shows how many there are, and the Move's header reminds you once after an update.
 
 ## Tweaking and playing
 
@@ -138,11 +148,11 @@ There are also **two FX buses**, each a full copy of the rack, with their own os
 **Not carried yet**
 - FM, ring-mod and phase-distortion warps driven by the noise or by Filter 1; DLM, spectral tables, Sync Var.
 - Reverb filter models, and the rarer comb variants (Comb2, Combs).
-- A second distortion, compressor or delay; a filter placed before the distortion; sends moved by an LFO or envelope (the Distortion's Wet follows one).
+- A second compressor or delay; a filter placed before the distortion; sends moved by an LFO or envelope (the Distortion's Wet follows one).
 - The Bode frequency shifter: a preset whose only unsupported effect is a Bode imports without it and the report says so.
 - In Split and SplitMS branches, only the Distortion, Chorus / Flanger / Phaser (Distortion only for SplitMS), EQ and band reverbs are carried; a HyperD, Delay,
   Comp or Bode in a branch, and an EQ ahead of the distortion, are not.
-- Serum 1 presets (Serum 2 only). A Vital chorus, flanger or phaser that is tempo-synced still runs at its 120 BPM rate.
+- Serum 1 presets (Serum 2 only).
 
 A preset using something in the second list still imports, with that part left out, and the report says which.
 
@@ -151,38 +161,11 @@ A preset using something in the second list still imports, with that part left o
 Read these before you rely on it for a gig. TinyHouse is an early release (0.9).
 
 - **It sounds similar to the Serum 2 or Vital original, not identical.** Levels, filters, effects and the stereo image are matched against Serum (and, for Vital presets, measured against Vital), but some presets land closer than others. Reverb tails run 1 to 3 dB quieter than Serum's and the wet signal builds up a little faster.
-- **Not every preset comes across.** Of Serum 2's 626 factory presets, 363 import well enough to install. The rest use something listed under "Not carried yet" (Bode and some Filter FX models are the biggest groups) and are skipped, or import with that part left out. The import report says which.
-- **Tempo-synced chorus, flanger and phaser (Vital) do not follow the Move's tempo.** They run at their rate at 120 BPM. Synced LFOs do follow it.
+- **Every preset imports, but not every one sounds right yet.** Roughly one in four of Serum 2's factory presets use something listed under "Not carried yet" (a Filter FX that moves, Split bands, some Utils settings are the biggest groups) and import with that part left out. The import report says which, and an update that adds the feature fixes them on the Move.
 - **Heavy presets use a lot of CPU.** Measured on a Move over 720 installed presets, each held steady: the typical preset uses about a tenth of the Move's 2.9 ms audio block, the heaviest (Crescendo Bells) about 40 %, and about 40 presets have a block over half of it. One slot is fine; a set with several heavy slots can crackle, so use fewer of them or lighter presets. A dense granular preset is the most demanding thing it plays.
 - **The Move's wavetable list stops at 128 tables.** The WT1 to WT3 Table knobs list the first 128 tables of the library, or of the pack you pick with the WT Pack knob. A pack with more than 128 tables shows only its first 128 there.
 - **Macros: eight per slot, and the mapping is yours to keep tidy.** Assigning a macro never changes the sound, but if you move a control by hand afterwards the knob and the control drift apart until you press **Match knob**.
 - **You need your own Serum 2 files.** Nothing from Xfer or the preset authors is in this repository, and Serum 1 presets are not supported.
-
-## More accurate conversion with the Python scripts
-
-The Python importer does the same conversion but can also **play each preset through your own installed copy of Serum 2** and compare. That lets it:
-
-- **Set the loudness** of every preset from a measurement, instead of using one general offset.
-- **Set the reverb and width** from a measurement.
-- **Check the result**: it compares octave-band levels with that render and leaves out a preset that ends up too far from it, with the reason in a
-  `skipped_<bank>.md` report. It is stricter than the browser: a preset that uses something unsupported is dropped, not imported with a part missing.
-
-You need Serum 2 (the VST3 plugin) installed on Windows, Python 3.13 and a bash shell for the deploy scripts (Git Bash is fine). The files the importer needs are in
-`calibration/` (see [calibration/README.md](calibration/README.md)); the measurement probes it was built from are not in the repository.
-
-```
-pip install -r requirements.txt
-python converter/import_pack.py "C:\path\to\folder of .SerumPreset" --bank "My Pack"      # converts, renders in Serum, fits levels; writes out_import/My Pack/
-BANK="My Pack" sh ./deploy_wavetables.sh                                         # copy to the Move over SSH (each step keeps a rollback copy)
-sh ./deploy_samples.sh
-SRC="out_import/My Pack" BANK="My Pack" sh ./deploy_presets.sh
-```
-
-For Serum's own Factory presets, point it at `Presets\Factory` in your Serum 2 folder with `--bank Factory`; it keeps only presets that match Serum's render
-(about 360 of the 626) and takes hours, because every preset is rendered. If it stops, run the same command again with `--resume`. Reload the slot afterwards and
-the bank is in the preset browser. `converter/deephouse2move.py` converts a `.SerumPack` directly, and `converter/serum_paths.py` explains how Serum's folders are
-found (set `SERUM_ROOT` and `SERUM_VST` if yours are elsewhere). Renders are cached, so a second run is fast. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the
-options and rules.
 
 ## Installing
 
@@ -194,13 +177,13 @@ TinyHouse is not in Schwung's module catalogue yet. You need a Move running Schw
 3. Reload the slot, or restart the Shadow UI, so the module loads. Then follow [The workflow](#the-workflow) from step 2.
 
 **To upgrade** a module that is already loaded, do not copy over its `dsp.so`: the Move is running it. Upload the new `dsp.so` under another name and rename it into place on the Move
-(`mv dsp.so.new dsp.so`), copy the other files, then reload the slot.
+(`mv dsp.so.new dsp.so`), copy the other files (the `converter` folder too), then restart the Move so the new `dsp.so` loads.
 
 **Building it yourself** (you want to change the code): you also need [zig](https://ziglang.org) to build the ARM module.
 
 ```
 bash schwung-tablor/scripts/zig-build.sh arm           # builds schwung-tablor/build/dsp.so
-python schwung-tablor/tools/build_import_bundle.py     # the converter the remote UI's Import runs
+python schwung-tablor/tools/build_converter_dir.py     # the converter: the remote UI's Import and the Move's preset upgrades run it
 bash schwung-tablor/scripts/deploy.sh ableton@move.local
 ```
 
@@ -220,6 +203,7 @@ Everything goes to the Move's `/data` partition, visible in Schwung's file manag
 | Wavetables (`.wav`) | `/data/UserData/UserLibrary/Wavetables/<bank>/` (tables stored inside a Serum preset: `<bank>/embedded/`) |
 | Sample sets (`.tbs`: Sample and Multisample oscillators, convolution impulses `conv_<id>.tbs`) | `/data/UserData/UserLibrary/Samples/<bank>/` |
 | Demo parts | `/data/UserData/schwung/midi/tinyhouse/` |
+| Originals kept for updates (each imported preset's Serum or Vital file, with `_deps/` notes and the noise / impulse audio it read) | `/data/UserData/UserLibrary/TinyHouse Sources/<bank>/` |
 | The module (`dsp.so`, the remote UI page, the converter) | `/data/UserData/schwung/modules/sound_generators/tinyhouse/` |
 
 Importing only *reads* your Serum files; nothing in your Serum folders changes. For each preset, the wavetables and samples it uses are converted and sent to the
@@ -236,8 +220,8 @@ and `UserLibrary/Wavetables` (leave other modules' folders alone); and the marke
 
 ## For developers
 
-The converter, the importer that matches loudness, reverb and width against Serum, the calibration harness, the translation rules and the roadmap are in
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+The converter, the calibration harness that measures it against Serum (and a Python importer that matches loudness, reverb and width against a Serum 2 render,
+used to develop it), the translation rules and the roadmap are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licences and what is not here
 

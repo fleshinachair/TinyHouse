@@ -650,6 +650,7 @@ CAL = {
     "sub_scale": 0.8,
     "key_scale": 1.0,
     "key_pivot": 31.5,
+MOD_ENVS = 4               # routable envelopes in the engine (kModEnvs in voice.h: 1 and 2 on the pages, 3 and 4 hidden; 2 used to be the limit here, which dropped a kick's pitch drop)
     "smp_scale": 1.0,
     "attack_curve": [[30.0, 1.4733], [40.0, 1.4146], [50.0, 1.3125], [62.0, 0.7551], [75.0, 0.367]],
     "decay_curve": [[30.0, 2.1034], [40.0, 2.1034], [50.0, 1.9576], [60.0, 1.5731], [67.0, 1.2642], [75.0, 1.0191], [85.0, 0.57], [96.0, 0.3188]],
@@ -2300,19 +2301,19 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     if f2_me:
         mod_routes.append((abs(f2_me[1]), f2_me[0], "Filter 2 Freq", f2_me[1]))
     mod_routes.sort(key=lambda r: (needed(r), r[0]), reverse=True)
-    if f2_me and any(r[2] == "Filter 2 Freq" for r in mod_routes[:2]):
+    if f2_me and any(r[2] == "Filter 2 Freq" for r in mod_routes[:MOD_ENVS]):
         P["flt2_env"] = 64                                    # its own envelope carries the sweep
     elif f2_me:
         P["flt2_env"] = round(_clamp(64 + 63 * f2_me[1], 0, 127))
-        appr.append("Filter 2 follows the envelope Filter 1 uses, not its own (both spare envelopes are taken)")
-    for n, (_, e, dest, a) in enumerate(mod_routes[:2], 1):
+        appr.append("Filter 2 follows the envelope Filter 1 uses, not its own (the spare envelopes are taken)")
+    for n, (_, e, dest, a) in enumerate(mod_routes[:MOD_ENVS], 1):
         P[f"me{n}_a"], P[f"me{n}_d"], P[f"me{n}_s"], P[f"me{n}_r"] = pot_env(ph["envs"][e])
         if dest == "Noise Level":
             a *= 10 ** (noise_db / 40)           # the route moves the knob and the gain is its square (calibration/dev/probe_noise_route.py): the level offset is half in dB
         P[f"me{n}_dst"], P[f"me{n}_amt"] = ME_DST[dest], round(_clamp(64 + 63 * a, 0, 127))
-    if len(mod_routes) > 2:
-        appr.append(f"{len(mod_routes) - 2} extra envelope route(s) dropped (Tablor has 2)")
-        for _, _, dest, a in mod_routes[2:]:
+    if len(mod_routes) > MOD_ENVS:
+        appr.append(f"{len(mod_routes) - MOD_ENVS} extra envelope route(s) dropped (the engine has {MOD_ENVS})")
+        for _, _, dest, a in mod_routes[MOD_ENVS:]:
             if a > 0 and level_pot(dest) and P[level_pot(dest)] == 0:
                 P[level_pot(dest)] = round(127 * _clamp(a * MOD_LEVEL_HOLD, 0, 1))
 

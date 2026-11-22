@@ -350,8 +350,8 @@ def export_info(info: dict, out_dir: Path) -> tuple[Path, dict] | None:
         stale = True
     if stale:
         made = (export_multisample(info["file"], dest) if info["multi"] else export_sample(info["file"], dest, info["base_note"], info["loop"], info.get("ping_pong", False), info.get("xfade", 0.0)))
-        if made is None:
-            return None
+        if made is None:                                              # the audio is not here: a set made from it earlier is used as it is (the Move converting a preset again
+            return (dest, info) if dest.exists() and _magic(dest) == b"TBS3" else None      # from its original has the sets its first import wrote, and no Serum folder)
         stamp.write_text(str(EXPORT_VERSION))
     return dest, info
 

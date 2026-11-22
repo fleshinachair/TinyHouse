@@ -41,6 +41,29 @@ SMP = Path("/smp")
 if SE.sf is None:
     SE.BROWSER_DIR = SMP
 
+def _conv_version() -> dict:
+    """The converter's stamp (build_import_bundle.py writes conv_version.json beside this file): {"version": release, "hash": of the converter}. A run from the repo is "dev"."""
+    try:
+        return json.loads((Path(__file__).resolve().parent / "conv_version.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": "dev", "hash": "dev"}
+
+
+CONV = _conv_version()
+# Each converted preset keeps its original here on the Move, so it can be converted again when a newer converter arrives (convert on load):
+# <MOVE_SRC_ROOT>/<bank folder>/<original file name>. Samples are not kept: the converted sample sets beside the presets are used again.
+MOVE_SRC_ROOT = "/data/UserData/UserLibrary/TinyHouse Sources"
+
+
+def preset_doc(name: str, state: str, src: str | None) -> str:
+    """A preset file for Schwung's store, stamped with the converter that made it and where its original is ("src", relative to MOVE_SRC_ROOT; none: never converted again)."""
+    doc = {"name": name, "module": "tinyhouse", "version": 1, "conv": CONV["hash"], "conv_ver": CONV["version"]}
+    if src:
+        doc["src"] = src
+    doc["state"] = state                     # last: the engine reads the stamp from the start of the file
+    return json.dumps(doc) + "\n"
+
+
 d2m.APPLY_FILTER_FITS = d2m.APPLY_WIDTH_FITS = d2m.APPLY_CHAIN_FITS = d2m.APPLY_TUNE_FITS = d2m.APPLY_STEREO_FITS = d2m.APPLY_LEVEL_FITS = False
 
 _root: Path | None = None
@@ -270,9 +293,48 @@ def _convert_vital(p: Path, name: str, r: dict, wt_out: Path, subdir: str) -> No
     notes = list(m["notes"])
     silent = [x for x in notes if x.startswith("SILENT")]
     left = [x for x in notes if "not carried" in x and x not in silent]
-    r.update(json=json.dumps({"name": name, "module": "tinyhouse", "version": 1, "state": VI.blob(m)}) + "\n",
+    r.update(json=preset_doc(name, VI.blob(m), r.get("src")),
              tier="vital", gaps=silent, approx=[x for x in notes if x not in silent and x not in left] + [VITAL_LEVEL_NOTE], not_carried=left,
              fx=sorted({x for x in m["carried_fx"] if not x.startswith("osc")}))
+
+
+AUX_KINDS = {"noise": "Samples", "ir": "Impulses"}       # the audio a conversion reads itself (a noise slot's spectrum, a reverb's impulse): kept beside the original
+
+
+def convert_one(p: Path, name: str, subdir: str, tables_dir: Path | None, pack: dict, wt_out: Path) -> dict:
+    """One preset file -> its report entry with the preset file's text in "json". The page's import and the Move's convert-on-load (reconvert.py) both run this.
+    Besides the preset it lists what to keep on the Move to convert it again later: "source" (the original) and "aux" (the noise and impulse audio it read),
+    each [path on the Move, path here]. Samples and wavetables are not kept a second time: the sets and tables written for the preset are read again."""
+    r = {"file": p.stem, "name": name, "json": None, "tier": "", "gaps": [], "approx": [], "not_carried": [], "missing_tables": [], "fx": [], "samples": [], "missing_samples": [], "error": "",
+         "src": f"{subdir}/{p.name}", "source": [f"{MOVE_SRC_ROOT}/{subdir}/{p.name}", p.as_posix()], "aux": []}
+    try:
+        if p.suffix == ".vital":
+            _convert_vital(p, name, r, wt_out, subdir)
+            return r
+        header, tree = decode_preset_file(p)
+        needs = sample_needs(tree)
+        r["samples"] = [n for n in needs]
+        r["missing_samples"] = [n["rel"] for n in needs if not _have_sample(n)]
+        for n in needs:
+            root = AUX_KINDS.get(n["kind"])
+            f = SE.find_sample(n["rel"]) if n["kind"] == "noise" else SE._real(SE._root(root) / n["rel"]) if root else None
+            if f is not None and f.suffix == ".dec" and f.is_relative_to(SE._root(root)):     # the page's decoded copy (the Move has no decoder either); audio held in the preset is not
+                r["aux"].append([f"{MOVE_SRC_ROOT}/{subdir}/audio/{root}/{f.relative_to(SE._root(root)).as_posix()}", f.as_posix()])
+        v = d2m.wrap_preset(d2m.physical(tree, header))
+        v["preset_name"] = name
+        v["serum2move"]["name"] = name
+        v = json.loads(json.dumps(v))
+        m = d2m.map_to_tablor(v, pack, tables_dir, wt_out, subdir)
+        m["notes"] += _level_law(m)
+        gaps, miss = _plain(m["critical"], m["notes"], m["fx"])
+        rule = [("Reverb" if x.startswith("Reverb") else "Width") + " set from Serum's settings by a general rule (not matched by ear)" for x in m["notes"] if x.startswith(("Reverb carried by rule", "Width carried by rule"))]
+        rule += ["Volume set by a general rule, not matched to Serum: adjust by ear" for x in m["notes"] if x.startswith("Volume set by a general rule")]
+        r.update(json=preset_doc(name, d2m.blob(m), r["src"]),
+                 tier=m["tier"], gaps=gaps, approx=_list(m["approx"]) + rule, not_carried=miss,
+                 missing_tables=_list(m["missing_tables"]), fx=sorted(set(m["fx"])))
+    except Exception as e:                       # one bad file must not stop a bank
+        r["error"] = f"{type(e).__name__}: {e}"[:200]
+    return r
 
 
 def convert(bank: str = "Imports", only=None) -> dict:
@@ -290,31 +352,7 @@ def convert(bank: str = "Imports", only=None) -> dict:
         while name.lower() in used:
             name, n = f"{base[:MAX_NAME - 3]} {n}", n + 1
         used.add(name.lower())
-        r = {"file": p.stem, "name": name, "json": None, "tier": "", "gaps": [], "approx": [], "not_carried": [], "missing_tables": [], "fx": [], "samples": [], "missing_samples": [], "error": ""}
-        try:
-            if p.suffix == ".vital":
-                _convert_vital(p, name, r, wt_out, subdir)
-                out.append(r)
-                continue
-            header, tree = decode_preset_file(p)
-            needs = sample_needs(tree)
-            r["samples"] = [n for n in needs]
-            r["missing_samples"] = [n["rel"] for n in needs if not _have_sample(n)]
-            v = d2m.wrap_preset(d2m.physical(tree, header))
-            v["preset_name"] = name
-            v["serum2move"]["name"] = name
-            v = json.loads(json.dumps(v))
-            m = d2m.map_to_tablor(v, pack, tables_dir if any(tables_dir.iterdir()) else None, wt_out, subdir)
-            m["notes"] += _level_law(m)
-            gaps, miss = _plain(m["critical"], m["notes"], m["fx"])
-            rule = [("Reverb" if x.startswith("Reverb") else "Width") + " set from Serum's settings by a general rule (not matched by ear)" for x in m["notes"] if x.startswith(("Reverb carried by rule", "Width carried by rule"))]
-            rule += ["Volume set by a general rule, not matched to Serum: adjust by ear" for x in m["notes"] if x.startswith("Volume set by a general rule")]
-            r.update(json=json.dumps({"name": name, "module": "tinyhouse", "version": 1, "state": d2m.blob(m)}) + "\n",
-                     tier=m["tier"], gaps=gaps, approx=_list(m["approx"]) + rule, not_carried=miss,
-                     missing_tables=_list(m["missing_tables"]), fx=sorted(set(m["fx"])))
-        except Exception as e:                       # one bad file must not stop a bank
-            r["error"] = f"{type(e).__name__}: {e}"[:200]
-        out.append(r)
+        out.append(convert_one(p, name, subdir, tables_dir if any(tables_dir.iterdir()) else None, pack, wt_out))
     files = {}
     for f in sorted(wt_out.rglob("*")):
         if f.is_file():

@@ -619,6 +619,7 @@ ME_DST = {"WT1 Pos": 1, "WT2 Pos": 2, "WT1 Level": 3, "WT2 Level": 4, "WT1 Tune"
           "EQ1 Freq": 49, "EQ1 Gain": 50, "EQ2 Freq": 51, "EQ2 Gain": 52, "EQ3 Freq": 53, "EQ3 Gain": 54, "EQ4 Freq": 55, "EQ4 Gain": 56,
           **{f"Smp{n} {k}": 86 + 3 * (n - 1) + i for n in (1, 2, 3) for i, k in enumerate(("Start", "Position", "RandPitch"))}}      # a granular slot's Start / Position / Random Pitch knobs
 PITCH_ROUTE_ST = {"kParamCoarsePit": 128.0, "kParamPitch": 25.0, "kParamOctave": 120.0}      # semitones per unit of a route's depth (calibration/dev/probe_macro_osc.py, probe_lfo_pitch.py)
+MOD_ENVS = 4               # routable envelopes in the engine (kModEnvs in voice.h: 1 and 2 on the pages, 3 and 4 hidden; 2 used to be the limit here, which dropped a kick's pitch drop)
 STREAM_BUDGET = 64         # kStreamBudget in voice.h
 MIN_POLY_VOICES = 4        # a poly preset still has to play a chord
 SILENT_LEVEL = 0.02        # a stored level below this is off
@@ -650,7 +651,6 @@ CAL = {
     "sub_scale": 0.8,
     "key_scale": 1.0,
     "key_pivot": 31.5,
-MOD_ENVS = 4               # routable envelopes in the engine (kModEnvs in voice.h: 1 and 2 on the pages, 3 and 4 hidden; 2 used to be the limit here, which dropped a kick's pitch drop)
     "smp_scale": 1.0,
     "attack_curve": [[30.0, 1.4733], [40.0, 1.4146], [50.0, 1.3125], [62.0, 0.7551], [75.0, 0.367]],
     "decay_curve": [[30.0, 2.1034], [40.0, 2.1034], [50.0, 1.9576], [60.0, 1.5731], [67.0, 1.2642], [75.0, 1.0191], [85.0, 0.57], [96.0, 0.3188]],

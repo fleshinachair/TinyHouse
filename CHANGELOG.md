@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.14
+
+**An update only converts the presets it changes.** Each preset imported through the Remote UI now keeps a small record (about 20 KB, beside its original) of which parts of the converter its conversion went through. After an update, the Move checks that record against the new converter: a preset whose path is unchanged would come out the same, so it is kept as it is (about a tenth of a second) instead of being converted again. Only the presets a fix can change are converted. How many that is depends on the fix: replaying the last eleven converter fixes over Serum's 626 factory presets, a fix to one feature reached between 0 and 420 of them, while a fix to how every preset's parameters are read still reaches all 626. In that replay no preset was kept whose sound would have changed.
+
+- Presets imported through the Remote UI in 0.9.13 have no record yet: the Move converts each of them once more after this update (in the background, at low priority) and records it; from the next update on they are checked instead. Presets imported before 0.9.13 are still left alone until they are imported again.
+- Importing through the Remote UI takes about 40 % longer, while the record is made.
+
+**Serum 2's factory drum kits come in from the Remote UI.** Serum 2 moved its factory multisamples into sub-folders and its kits play files from the Samples folder; the Remote UI looked for neither, so 8 kits and loops (808 Basic Kit, IDM Beat, GrittyKitCommittee, Machine Basic Kit, Breakwave, BSOD Big Convolver, New Dawn, On The Couch) were silent, and LOOP - Funk Practice missed a string sample. Import them again to get the sound: their audio has to come from your Serum folder. Three factory presets whose sample files Serum 2 renamed still miss them.
+
+**A Sample or Granular oscillator with no file loaded is not reported as a gap** (Serum plays nothing there either; BA - Bubba).
+
 ## 0.9.13
 
 **Presets upgrade themselves on the Move.** A preset imported through the Remote UI now keeps its original Serum or Vital file on the Move (in `UserLibrary/TinyHouse Sources/<bank>`), stamped with the converter that made it. After a module update, the Move converts those presets again with the new converter: in the background after start-up, and at once when you choose one that has not been done yet (the header reads "Upgrading to v0.9.13" for a moment). Fixes to the importer therefore reach your presets without importing them again. The conversion runs at low priority on the cores the audio does not use; a preset whose sound did not change is left untouched. The module now ships the converter (with numpy for the Move), so the download is about 40 MB larger.

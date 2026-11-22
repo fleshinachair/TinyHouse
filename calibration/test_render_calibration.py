@@ -92,6 +92,21 @@ def serum_openable(tree):
     return tree if out is None else out
 
 
+# Serum reads a Sample / Multisample / Granular / Spectral oscillator's files on a thread of its own after the preset loads; rendered straight away the oscillator is silent or
+# partly loaded (PN - Piano Concert Hall: silent with no wait, two of four keys at 0.25 s, complete from 0.5 s; KIT - Pitched Up Layer Kit's osc B never sounded, so the gate
+# judged the engine against Serum with one of its two kits missing). The render waits this long for them.
+SAMPLE_LOAD_WAIT_S = 1.0
+SAMPLE_OSC_KINDS = ("kOsc_MultiSample", "kOsc_Sample", "kOsc_Granular", "kOsc_Spectral")
+
+
+def uses_sample_files(tree) -> bool:
+    for i in range(3):
+        pp = (tree.get(f"Oscillator{i}") or {}).get("plainParams")
+        if isinstance(pp, dict) and pp.get("kParamType") in SAMPLE_OSC_KINDS:
+            return True
+    return False
+
+
 class Serum:
     def __init__(self):
         self.engine = daw.RenderEngine(SR, 128)
@@ -105,6 +120,8 @@ class Serum:
             f.write(convert_preset_tree(tree))
         self.synth.load_state(path)
         os.unlink(path)
+        if uses_sample_files(tree):
+            time.sleep(SAMPLE_LOAD_WAIT_S)
         self.synth.clear_midi()
         for n in notes:
             self.synth.add_midi_note(n, vel, 0.0, hold)

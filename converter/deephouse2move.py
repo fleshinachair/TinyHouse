@@ -753,8 +753,27 @@ def filter_cutoff_delta(model: str, cut: float, reso: float | None = None) -> fl
     Acid ladder), so the offset follows the resonance too."""
     if model in FILTER_MODELS:
         extra = interp([tuple(x) for x in FILTER_MODELS[model]["res_delta"]], reso) if (reso is not None and FILTER_MODELS[model].get("res_delta")) else 0.0
-        return interp([tuple(x) for x in FILTER_MODELS[model]["delta"]], cut) + extra
+        return interp(_measured_delta(model), cut) + extra
     return interp(FILTER_CUTOFF_DELTA.get(model, [(0.0, 0.0)]), cut)
+
+
+_DELTA_CACHE: dict = {}
+
+
+def _measured_delta(model: str) -> list:
+    """A model's fitted cutoff offsets without the points the fit could not measure. fit_filter_model.py searches the engine's pot from 0; where its best pot is 0 the
+    engine's filter could not close further, so the point says only "pot 0 or lower", not where Serum's corner is (LadderMg / DirtyMg at cutoff 0.2: -15.4 pots, then
+    +1.0 / -2.0 at 0.3). Such a point takes the offset of the nearest measured cutoff instead. BA - Club - Muted (LadderMg, cutoff 0.2 from velocity and macros):
+    pot 1 scored 19.3 dB off Serum's voice, pot 16 (the 0.3 offset held) 2.2 dB. A model with no measured point keeps its table as it is."""
+    if model not in _DELTA_CACHE:
+        pts = [tuple(x) for x in FILTER_MODELS[model]["delta"]]
+        closed = lambda c: max(c * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8, 0)      # the fit's own closed form (fit_filter_model.py)
+        floor = [closed(c) + d < 0.5 for c, d in pts]
+        meas = [i for i, f in enumerate(floor) if not f]
+        if meas and len(meas) < len(pts):
+            pts = [(c, d if not floor[i] else pts[min(meas, key=lambda j: abs(j - i))][1]) for i, (c, d) in enumerate(pts)]
+        _DELTA_CACHE[model] = pts
+    return _DELTA_CACHE[model]
 
 
 FILTER_RES_FILE = REPO / "calibration/filter_res.json"

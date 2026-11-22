@@ -1996,9 +1996,9 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         if not s_[0].get("noise"):
             sources.append((s_[0]["id"], levels.get(s_[0]["id"], 0.0)))
     if sub["enabled"]:
-        sources.append((4, sub["level"]))
+        sources.append((4, level_of(4, sub["level"])))       # the level after the macro / velocity folds: SY - Whispers stores its noise at 0 and a macro lifts it,
     if nz["enabled"]:
-        sources.append((3, nz["level"]))
+        sources.append((3, level_of(3, nz["level"])))        # and the noise is the only source through the filters (at the stored 0 both filters were dropped as bypassed)
     none = {int(k): v for k, v in ph.get("route_none", {}).items()}
     out = {int(k): v for k, v in ph.get("route_out", {}).items()} if CARRY_BUSES else {}
     bus_of = {int(k): v for k, v in ph.get("bus", {}).items()}                  # (the preset has been through JSON: keys are strings)

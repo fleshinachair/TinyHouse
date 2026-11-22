@@ -513,6 +513,7 @@ def physical(tree: dict, header: dict) -> dict:
         "serum_version": header.get("productVersion"),
         "mono": bool(g.get("kParamMonoToggle", 0)) or g.get("kParamPolyCount") == 1.0, "legato": bool(g.get("kParamLegato", 0)),
         "master": g.get("kParamMasterVolume"),
+        "bus_vol": [g.get("kParamFXBus1Vol"), g.get("kParamFXBus2Vol")],
         "porta_s": g.get("kParamPortamentoTime") if (g.get("kParamPortaAlways") or g.get("kParamMonoToggle")) else None,
         "oscs": oscs,
         "sub": {"enabled": bool(_pp(sub_node).get("kParamEnable", 0)),
@@ -2446,6 +2447,21 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
     delay and width under the name '<preset>#busN'), its compressor thresholds taken to the engine's level the same way. A send into an empty rack is a plain copy of the source."""
     notes = []
     sends = [k for k in P if k.endswith(("_bus1", "_bus2")) and P[k] > 0]
+
+    def bus_volume(b):
+        # Serum's bus Volume (Global kParamFXBus1Vol / 2Vol, 0..2, unwritten = 0.5) is a linear gain on what the bus returns, after its rack: 2 x the knob against the default
+        # (an oscillator sent only to bus 1 measured -13.8 / -19.8 / -33.8 / -55.0 dB at 1.0 / 0.5 / 0.1 / 0.0087). The engine's rack output gain (util_out: 4 x (pot / 127)^2,
+        # 0 = unity) is that gain; KIT - Pitched Up Layer Kit returns its bus at 0.0087 (-35 dB), which played at full level.
+        bv = (ph.get("bus_vol") or [None, None])[b - 1]
+        if bv is None or abs(bv - 0.5) < 1e-3:
+            return
+        if P.get(f"b{b}.util_out", 0) > 0:
+            notes.append(f"FX bus {b}: Volume {bv:.2f} not carried (the rack's output gain carries a moving Utils Level Out)")
+            return
+        bv = _clamp(bv, 0.0, 2.0)
+        P[f"b{b}.util_out"] = max(1, int(round(127 * math.sqrt(bv / 2.0))))
+        notes.append(f"FX bus {b}: Volume {bv:.2f} carried as {20 * math.log10(max(2 * bv, 1e-4)):+.1f} dB on what the bus returns")
+
     for b in (1, 2):
         nodes = ph.get("bus_nodes", [[], []])[b - 1]
         live = [k for k in sends if k.endswith(f"_bus{b}")]
@@ -2461,6 +2477,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
             continue
         if not nodes:
             notes.append(f"FX bus {b}: sent {', '.join(k.split('_')[0] for k in live)}, rack empty (a parallel copy)")
+            bus_volume(b)
             continue
         fx_p, fx_notes, _ = fxmap.map_fx(f"{ph['name']}#bus{b}", nodes, ctx={"mods": ph["mods"], "macros": ph["macros"], "rack": b, "rack_nodes": nodes})
         t_out = fx_p.pop("comp_thresh_out_db", None)
@@ -2496,6 +2513,7 @@ def map_bus_racks(ph: dict, P: dict, voice_env=None) -> list[str]:
             notes.append(f"FX bus {b}: Utils carried as the rack's own width {fx_p['mwidth'] / 64 * 100:.0f} %")
         if fx_p.get("monohz", 0):
             notes.append(f"FX bus {b}: Utils mono-below in a bus rack not carried (the engine's mono filter is for the whole mix)")
+        bus_volume(b)
     return notes
 
 

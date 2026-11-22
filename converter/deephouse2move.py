@@ -175,8 +175,10 @@ def clip_from_tree(tree: dict):
     None: the player is off, or no clip spans the keyboard (measured: only a clip set to "span keyboard", kParamSpanKeyboardClip = its index, plays on every key;
     the others sit on their own trigger keys)."""
     cp = _pp(tree.get("ClipPlayer0", {}))
-    if not cp.get("kParamEnabled", 0) or "kParamSpanKeyboardClip" not in cp:
-        return None                           # without "span keyboard" a clip is bound to its own trigger key and every other key plays its note as usual
+    if not cp.get("kParamEnabled", 0):
+        return None
+    if "kParamSpanKeyboardClip" not in cp:
+        return active_clips(tree)
     node = tree.get(f"MidiClip{int(cp['kParamSpanKeyboardClip'])}", {})
     if not (isinstance(node.get("clip"), dict) and node["clip"].get("notes")):
         return None
@@ -193,6 +195,38 @@ def clip_from_tree(tree: dict):
     for n in sorted(notes, key=lambda n: (n["timeStamp"], n["noteNum"])):
         out.append("%d,%d,%d,%d" % (round(n["timeStamp"] * 96), max(1, round(n["length"] * 96)), n["noteNum"], max(1, round((n.get("attributes") or [0.787])[0] * 127))))
     return "|".join(out)
+
+
+def active_clips(tree: dict):
+    """The Clip Player's active clips (ClipPlayer0 "activeClips") when none spans the keyboard, as one fixed engine clip ("len:f|..."), or None. Measured in Serum
+    (KIT - Machine Basic Kit, BA - 303 Dirty Macros, LOOP - Ancient Breakdown): any key starts them, the notes play as written (keys 48 and 60 give the same
+    pattern), a chord plays them once, the held key itself does not sound, and several active clips play together, each looping over its own length. Merged
+    over the common loop length; None if that needs more notes than the engine's pattern holds (the keys then play as usual)."""
+    ids = (tree.get("ClipPlayer0") or {}).get("activeClips") or []
+    if any(_pp(tree.get(f"Oscillator{i}", {})).get("kParamSlicingEnabled", "Off") != "Off" for i in range(3)):
+        return None                           # the clip's notes pick slices of a sliced sample, which the engine does not have: each would restart the whole sample
+                                              # (LOOP - Auto Scratch: 5.9 dB with the key playing as usual, 18.9 with the clip)
+    clips = []
+    for i in ids:
+        c = (tree.get(f"MidiClip{int(i)}") or {}).get("clip")
+        if isinstance(c, dict) and c.get("notes"):
+            end = max(n["timeStamp"] + n["length"] for n in c["notes"])
+            region = c.get("regionEndBeats")
+            clips.append((max(1, round((float(region) if region else max(math.ceil(end - 1e-6), 1)) * 96)), c["notes"]))
+    if not clips:
+        return None
+    total = 1
+    for ln, _ in clips:
+        total = total * ln // math.gcd(total, ln)
+    notes = []
+    for ln, ns in clips:
+        for k in range(total // ln):
+            for n in ns:
+                if n["timeStamp"] * 96 < ln:
+                    notes.append((k * ln + round(n["timeStamp"] * 96), max(1, round(n["length"] * 96)), int(n["noteNum"]), max(1, round((n.get("attributes") or [0.787])[0] * 127))))
+    if not notes or len(notes) > 128:
+        return None
+    return "|".join([f"{total}:f"] + ["%d,%d,%d,%d" % n for n in sorted(notes)])
 
 # Serum's arpeggiator step by its Rate value (swept in steps of 0.005 with a sine patch, 2026-11-09): the value is quantised into bands 0.115 wide, each half the length
 # of the one below, with 1/16 at 0.4425..0.5575 (1/16 when unset). A Pattern clip has its own, narrower bands (0.07 wide) and its 1/16 cells are stretched to the step.

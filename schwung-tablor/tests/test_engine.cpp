@@ -1005,6 +1005,15 @@ static void testClipPlayer()
         CHECK(hz > 730.0 && hz < 750.0, "the key transposes the pattern from C3 (%.1f Hz, F#5 is 740)", hz);
     }
     {
+        auto e = make();
+        e->setClip(parseClip("192:f|96,48,69,100"));            /* a fixed clip (Serum's active clips): the notes as written, whatever the key */
+        note(*e, 69);
+        render(*e, 172);
+        auto b = render(*e, 40);
+        const double hz = heardHz(b);
+        CHECK(hz > 430.0 && hz < 450.0, "a fixed clip is not transposed by the key (%.1f Hz, A4 is 440)", hz);
+    }
+    {
         Engine e;
         e.setTable(0, sineTable());
         e.pots[TB_P_VCA_A] = 0; e.pots[TB_P_VCA_S] = 127;

@@ -354,7 +354,7 @@ void Engine::clipFire()
                 const ClipNote &cn = c->notes[j];
                 const double s = (double) k * c->len + cn.tick;
                 if (s < p.firedTo || s >= to) continue;
-                const int note = std::clamp((int) cn.note + p.key - 60, 0, 127);
+                const int note = std::clamp((int) cn.note + (c->fixed ? 0 : p.key - 60), 0, 127);
                 noteOn(note, (float) cn.vel / 127.0f);
                 if (p.nAct < 16) { p.actNote[p.nAct] = note; p.actEnd[p.nAct] = s + std::max(cn.dur, 1); p.nAct++; }
             }

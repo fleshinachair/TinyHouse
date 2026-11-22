@@ -21,19 +21,25 @@ inline constexpr int kClipMax = 128;
 struct ClipNote { int tick, dur; uint8_t note, vel; };
 struct Clip {
     bool mono = false;              /* Serum's Mono clip mode: one pattern at a time, played from the last key held */
+    bool fixed = false;             /* the notes as written, whatever key starts them (Serum's active clips without "span keyboard": measured, a held key 48 or 60
+                                     * plays the same pattern, a chord plays it once, and the key itself does not sound); implies mono */
     int len = 0;                    /* the loop, ticks */
     int n = 0;
     ClipNote notes[kClipMax];
 };
 
-/* The state's "clip" value: "len[:m]|tick,dur,note,vel|tick,dur,note,vel|..." (ticks of 1/96 beat; ":m" for the Mono clip mode). Null if it holds no note. */
+/* The state's "clip" value: "len[:flags]|tick,dur,note,vel|tick,dur,note,vel|..." (ticks of 1/96 beat; flags "m" for the Mono clip mode, "f" for a fixed clip). Null if it holds no note. */
 inline std::shared_ptr<Clip> parseClip(const char *s)
 {
     if (!s || !*s) return nullptr;
     auto c = std::make_shared<Clip>();
     char *e = nullptr;
     c->len = (int) strtol(s, &e, 10);
-    if (e && *e == ':') { c->mono = e[1] == 'm'; e += 2; }
+    if (e && *e == ':')
+        for (++e; *e && *e != '|'; ++e) {                  /* flags: m = Mono, f = fixed (not transposed, one pattern) */
+            if (*e == 'm') c->mono = true;
+            if (*e == 'f') c->fixed = c->mono = true;
+        }
     while (e && *e == '|' && c->n < kClipMax) {
         ++e;
         long v[4];

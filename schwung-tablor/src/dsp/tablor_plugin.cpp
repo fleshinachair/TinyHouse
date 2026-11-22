@@ -32,6 +32,8 @@
 #include "partjoin.h"
 #include "async_render.h"
 #include "preset_digest.h"
+#include "reconvert.h"
+#include <set>
 
 static const host_api_v1_t *g_host = nullptr;
 
@@ -54,7 +56,18 @@ struct tablor_instance {
      * The worker rebuilds this list whenever the folder changes while the
      * audio thread reads it in get_param, so it is published as an IMMUTABLE
      * snapshot and swapped atomically — never mutated in place. */
-    struct preset { std::string name, blob, path, bank; };   /* path "" = factory */
+    struct preset {
+        std::string name, blob, path, bank;   /* path "" = factory */
+        std::string conv;                     /* the converter that made it ("conv" in the file; "" for a preset saved from a slot or imported before stamps) */
+        bool src = false;                     /* its original is kept on the Move ("src"), so it can be converted again (convert on load, reconvert.h) */
+    };
+    /* Convert on load: the module's converter, the answers due to this slot, the preset being upgraded now (its file) and the ones that could not be. */
+    std::shared_ptr<tb::Reconverter> reconv;
+    std::shared_ptr<tb::Reconverter::Token> reconv_token { std::make_shared<tb::Reconverter::Token>() };
+    std::mutex up_mu;
+    std::set<std::string> up_bg, up_failed;
+    std::string up_path;
+    bool up_any = false;
     /* `banks`: the store's presets are grouped in folders (one per pack: Deep House, ...) and the loose files are the
      * "User" bank. items are ordered by bank then name, so each bank is the contiguous run [bank_first, bank_first + bank_n). */
     struct PresetList {
@@ -539,7 +552,23 @@ static std::string state_blob(const char *s)
 
 /* The state blob out of one of Schwung's preset files: {"name":..,"module":..,"version":1,"state":".."}.
  * Our blobs hold no quotes, so the value ends at the first unescaped quote; \ and \" are undone. */
-static bool read_store_state(const char *path, std::string &blob)
+/* A top-level string field of a preset file ("conv": "..."): the state blob holds no quotes, so a quoted key can only be the file's own. */
+static std::string store_field(const std::string &raw, const char *key)
+{
+    const std::string k = std::string("\"") + key + "\"";
+    size_t i = raw.find(k);
+    if (i == std::string::npos) return "";
+    i += k.size();
+    while (i < raw.size() && raw[i] == ' ') i++;
+    if (i >= raw.size() || raw[i] != ':') return "";
+    i++;
+    while (i < raw.size() && raw[i] == ' ') i++;
+    if (i >= raw.size() || raw[i] != '"') return "";
+    const size_t e = raw.find('"', i + 1);
+    return e == std::string::npos ? "" : raw.substr(i + 1, e - i - 1);
+}
+
+static bool read_store_state(const char *path, std::string &blob, std::string *conv = nullptr, bool *has_src = nullptr)
 {
     FILE *f = fopen(path, "r");
     if (!f) return false;
@@ -548,6 +577,8 @@ static bool read_store_state(const char *path, std::string &blob)
     size_t got;
     while ((got = fread(chunk, 1, sizeof chunk, f)) > 0 && raw.size() < 64 * 1024) raw.append(chunk, got);
     fclose(f);
+    if (conv) *conv = store_field(raw, "conv");
+    if (has_src) *has_src = !store_field(raw, "src").empty();
     /* "state" then optional spaces, a colon, optional spaces, and the opening quote: Schwung writes it
      * without spaces, Python's json.dumps (the converter) with them. */
     size_t k = raw.find("\"state\"");
@@ -577,9 +608,13 @@ static void scan_store_dir(const std::string &dir, const std::string &bank, std:
             const char *dot = strrchr(e->d_name, '.');
             if (!dot || e->d_name[0] == '.' || strcasecmp(dot, ".json") != 0) continue;
             const std::string path = dir + "/" + e->d_name;
-            std::string blob;
-            if (!read_store_state(path.c_str(), blob)) continue;
-            out.push_back({ std::string(e->d_name, (size_t) (dot - e->d_name)), blob, path, bank });
+            std::string blob, conv;
+            bool src = false;
+            if (!read_store_state(path.c_str(), blob, &conv, &src)) continue;
+            tablor_instance::preset p{ std::string(e->d_name, (size_t) (dot - e->d_name)), blob, path, bank };
+            p.conv = conv;
+            p.src = src;
+            out.push_back(std::move(p));
         }
         ::closedir(d);
     }
@@ -1588,8 +1623,109 @@ static void apply_pending(tablor_instance *inst, const char *why = "?")
     if (inst->diag) diag_log(inst, "applied preset %d in %lld us (%lld ms after it was due) by %s", pi, steady_us() - t0, steady_ms() - inst->pend_due.load(), why);
 }
 
+/* ---- convert on load (reconvert.h) ----------------------------------------------------------
+ * The module's converter (<module>/converter, the same code as the remote UI's import bundle) is stamped in conv_version.json: the release and a hash of
+ * the converter. A store preset whose file names its original ("src") and another converter ("conv") is converted again from that original: at once when it
+ * is chosen (the header reads "Upgrading to v..." meanwhile and the new sound replaces the old when it lands), and in the background after the store is scanned.
+ * A preset that could not be converted is left as it is and not tried again until the module is loaded again. */
+struct ConvStamp { std::string hash, ver; std::atomic<bool> loaded { false }; };      /* hash and ver are written once, before loaded */
+static ConvStamp g_conv;
+static std::once_flag g_conv_once;
+
+/* WORKER THREAD (the first call reads a file). */
+static const ConvStamp &load_conv_stamp(const tablor_instance *inst)
+{
+    std::call_once(g_conv_once, [inst] {
+        const std::string p = std::string(inst->module_dir) + "/converter/conv_version.json";
+        if (FILE *f = fopen(p.c_str(), "r")) {
+            char buf[512];
+            const size_t n = fread(buf, 1, sizeof buf - 1, f);
+            fclose(f);
+            const std::string raw(buf, n);
+            g_conv.hash = store_field(raw, "hash");
+            g_conv.ver = store_field(raw, "version");
+        }
+        g_conv.loaded.store(true, std::memory_order_release);
+    });
+    return g_conv;
+}
+
+static bool preset_stale(const tablor_instance::preset &p)
+{
+    return g_conv.loaded.load(std::memory_order_acquire) && !g_conv.hash.empty() && p.src && !p.path.empty() && p.conv != g_conv.hash;
+}
+
+/* An answer from the converter, on its thread (under this slot's token: keep it short). The list is read again on the worker once the background run this slot
+ * asked for is over, or at once for the chosen preset, which the render then applies from the new list (apply_pending) if it is still the chosen one. */
+static void on_reconverted(tablor_instance *inst, const tb::Reconverter::Result &r)
+{
+    const bool ok = r.status == "updated" || r.status == "same" || r.status == "current";
+    const bool changed = r.status == "updated" || r.status == "current";        /* current: another slot converted it first; this slot's list has the old one */
+    bool rescan = false, reapply = false;
+    {
+        std::lock_guard<std::mutex> lk(inst->up_mu);
+        if (!ok) inst->up_failed.insert(r.path);
+        if (changed) inst->up_any = true;
+        if (r.path == inst->up_path) {
+            inst->up_path.clear();
+            rescan = ok;                                    /* the list's copy is stale (or only its stamp is) */
+            reapply = changed;
+        }
+        if (inst->up_bg.erase(r.path) && inst->up_bg.empty() && inst->up_any) rescan = true;
+        if (rescan) inst->up_any = false;
+    }
+    if (!rescan) return;
+    const std::string path = r.path;
+    post_contract_job(inst, [inst, path, reapply] {
+        if (inst->loader.stopping()) return;
+        scan_store_presets(inst);
+        tb_publish_selection(inst);
+        if (!reapply) return;
+        auto ps = inst->storeList();
+        const int si = inst->store_index.load();
+        if (si >= 0 && si < (int) ps->items.size() && ps->items[(size_t) si].path == path) {
+            inst->pend_due = steady_ms();
+            inst->pend_idx = si;
+        }
+    });
+}
+
+/* Every stale preset of the store, queued behind anything chosen. WORKER THREAD, after a scan. */
+static void queue_stale(tablor_instance *inst)
+{
+    auto rc = std::atomic_load(&inst->reconv);
+    if (!rc) return;
+    auto ps = inst->storeList();
+    std::vector<std::string> todo;
+    {
+        std::lock_guard<std::mutex> lk(inst->up_mu);
+        for (const auto &p : ps->items)
+            if (preset_stale(p) && !inst->up_failed.count(p.path) && inst->up_bg.insert(p.path).second) todo.push_back(p.path);
+    }
+    for (const auto &path : todo)
+        rc->request(path, false, inst->reconv_token, [inst](const tb::Reconverter::Result &r) { on_reconverted(inst, r); });
+    if (inst->diag && !todo.empty()) diag_log(inst, "convert on load: %d presets queued for converter %s", (int) todo.size(), g_conv.hash.c_str());
+}
+
+/* The chosen store item, converted again first if it is stale. Its current sound is applied meanwhile (choose_store_preset). */
+static void upgrade_if_stale(tablor_instance *inst, int i)
+{
+    auto rc = std::atomic_load(&inst->reconv);
+    if (!rc) return;
+    auto ps = inst->storeList();
+    if (i < 0 || i >= (int) ps->items.size() || !preset_stale(ps->items[(size_t) i])) return;
+    const std::string path = ps->items[(size_t) i].path;
+    {
+        std::lock_guard<std::mutex> lk(inst->up_mu);
+        if (inst->up_failed.count(path)) return;
+        inst->up_path = path;
+    }
+    rc->request(path, true, inst->reconv_token, [inst](const tb::Reconverter::Result &r) { on_reconverted(inst, r); });
+}
+
 static void choose_store_preset(tablor_instance *inst, int i)
 {
+    upgrade_if_stale(inst, i);
     inst->store_index = i;
     if (inst->settle_ms <= 0) {
         inst->pend_idx = -1;
@@ -1785,6 +1921,7 @@ static void tb_set_param(void *instance, const char *key, const char *val)
             scan_store_presets(inst);
             scan_demos(inst);
             tb_publish_selection(inst);
+            queue_stale(inst);
         });
         return;
     }
@@ -2210,6 +2347,11 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (!strcmp(key, "preset_name")) {
         auto ps = inst->storeList();
         const int i = inst->store_index.load();
+        if (i >= 0 && i < (int) ps->items.size()) {           /* the chosen preset is being converted again (convert on load): the header says so until it lands */
+            std::lock_guard<std::mutex> lk(inst->up_mu);
+            if (!inst->up_path.empty() && inst->up_path == ps->items[(size_t) i].path)
+                return write_str(buf, buf_len, ("Upgrading to v" + g_conv.ver).c_str());
+        }
         return write_str(buf, buf_len, i >= 0 && i < (int) ps->items.size() ? ps->items[(size_t) i].name.c_str() : "");
     }
     /* "1" while the worker still owes us file work (used by tests and by
@@ -2439,6 +2581,10 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
                 set_table_path(inst, osc, keep);
             }
         inst->ready = true;
+        /* Convert on load: the module's converter and its stamp, then every stale preset of the store in the background (after the sound is up). */
+        if (!load_conv_stamp(inst).hash.empty())
+            std::atomic_store(&inst->reconv, tb::Reconverter::shared(std::string(inst->module_dir) + "/converter"));
+        queue_stale(inst);
         if (g_host && g_host->log) {
             char msg[200];
             snprintf(msg, sizeof msg,
@@ -2460,6 +2606,7 @@ static void tb_destroy_instance(void *instance)
     /* Join the worker FIRST: member destruction runs in reverse declaration
      * order, which would free presets/sel/wt_shape while a job still writes
      * them. */
+    inst->reconv_token->end();                              /* no converter answer reaches this slot from here on (reconvert.h) */
     inst->async.stop();                                     /* the render thread uses the engine */
     inst->loader.stop();
     delete inst;

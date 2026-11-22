@@ -1096,6 +1096,10 @@ static void testPresetDigest()
                              "{\"n\":\"User\",\"p\":[]}]}";
     CHECK(d == want, "digest is the expected JSON (quotes and backslashes escaped, control characters dropped): %s", d.c_str());
     CHECK(tb::presetDigest({}, {}) == "{\"b\":[]}", "an empty store is an empty list");
+    const std::vector<int> old{ 2, 0 };
+    const std::string o = tb::presetDigest({ "Factory", "User" }, { { "A", "B" }, { "C" } }, &old);
+    CHECK(o == "{\"b\":[{\"n\":\"Factory\",\"p\":[\"A\",\"B\"],\"o\":2},{\"n\":\"User\",\"p\":[\"C\"]}]}",
+          "a bank with presets imported before originals were kept gets \"o\" (the remote UI's reminder), one without none: %s", o.c_str());
 }
 
 /* Vital's unison stack styles, measured on the plugin (calibration/vital_stack_probe.py): a voice's offset by its distance group c from the middle of the stack. */

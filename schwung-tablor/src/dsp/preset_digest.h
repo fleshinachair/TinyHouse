@@ -23,8 +23,11 @@ inline void jsonEscape(std::string &out, const std::string &in)
     }
 }
 
+/* old (optional): per bank, how many of its presets were imported before originals were kept; a bank with any gets "o":N, which the
+ * remote UI shows as a reminder to import them again once (after that, updates reach them on the Move). */
 inline std::string presetDigest(const std::vector<std::string> &banks,
-                                const std::vector<std::vector<std::string>> &names)
+                                const std::vector<std::vector<std::string>> &names,
+                                const std::vector<int> *old = nullptr)
 {
     std::string d = "{\"b\":[";
     for (size_t b = 0; b < banks.size(); b++) {
@@ -39,7 +42,9 @@ inline std::string presetDigest(const std::vector<std::string> &banks,
                 jsonEscape(d, names[b][i]);
                 d += '"';
             }
-        d += "]}";
+        d += ']';
+        if (old && b < old->size() && (*old)[b] > 0) d += ",\"o\":" + std::to_string((*old)[b]);
+        d += '}';
     }
     d += "]}";
     return d;

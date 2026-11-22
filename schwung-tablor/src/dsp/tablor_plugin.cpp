@@ -60,6 +60,7 @@ struct tablor_instance {
         std::string name, blob, path, bank;   /* path "" = factory */
         std::string conv;                     /* the converter that made it ("conv" in the file; "" for a preset saved from a slot or imported before stamps) */
         bool src = false;                     /* its original is kept on the Move ("src"), so it can be converted again (convert on load, reconvert.h) */
+        bool old = false;                     /* imported before originals were kept (no "src", a converter's state, not a slot's): only importing it again lets updates reach it */
     };
     /* Convert on load: the module's converter, the answers due to this slot, the preset being upgraded now (its file) and the ones that could not be. */
     std::shared_ptr<tb::Reconverter> reconv;
@@ -568,7 +569,7 @@ static std::string store_field(const std::string &raw, const char *key)
     return e == std::string::npos ? "" : raw.substr(i + 1, e - i - 1);
 }
 
-static bool read_store_state(const char *path, std::string &blob, std::string *conv = nullptr, bool *has_src = nullptr)
+static bool read_store_state(const char *path, std::string &blob, std::string *conv = nullptr, bool *has_src = nullptr, bool *from_slot = nullptr)
 {
     FILE *f = fopen(path, "r");
     if (!f) return false;
@@ -595,6 +596,7 @@ static bool read_store_state(const char *path, std::string &blob, std::string *c
         if (raw[i] == '"') break;
         blob += raw[i];
     }
+    if (from_slot) *from_slot = !blob.empty() && blob[0] == '{';
     if (!blob.empty() && blob[0] == '{') blob = state_blob(blob.c_str());       /* a preset saved from the slot holds the JSON state: keep the blob */
     return !strncmp(blob.c_str(), "TBLR1;", 6) || !strncmp(blob.c_str(), "TBLR2;", 6);
 }
@@ -609,11 +611,12 @@ static void scan_store_dir(const std::string &dir, const std::string &bank, std:
             if (!dot || e->d_name[0] == '.' || strcasecmp(dot, ".json") != 0) continue;
             const std::string path = dir + "/" + e->d_name;
             std::string blob, conv;
-            bool src = false;
-            if (!read_store_state(path.c_str(), blob, &conv, &src)) continue;
+            bool src = false, from_slot = false;
+            if (!read_store_state(path.c_str(), blob, &conv, &src, &from_slot)) continue;
             tablor_instance::preset p{ std::string(e->d_name, (size_t) (dot - e->d_name)), blob, path, bank };
             p.conv = conv;
             p.src = src;
+            p.old = !src && !from_slot;
             out.push_back(std::move(p));
         }
         ::closedir(d);
@@ -662,10 +665,13 @@ static void scan_store_presets(tablor_instance *inst)
     }
     {
         std::vector<std::vector<std::string>> names(next->banks.size());
+        std::vector<int> old(next->banks.size(), 0);          /* the remote UI asks for these to be imported again, once */
         for (size_t k = 0; k < next->banks.size(); k++)
-            for (int i = next->bank_first[k]; i < next->bank_first[k] + next->bank_n[k]; i++)
+            for (int i = next->bank_first[k]; i < next->bank_first[k] + next->bank_n[k]; i++) {
                 names[k].push_back(next->items[(size_t) i].name);
-        next->digest = tb::presetDigest(next->banks, names);
+                old[k] += next->items[(size_t) i].old ? 1 : 0;
+            }
+        next->digest = tb::presetDigest(next->banks, names, &old);
     }
     int b = inst->bank_index.load();
     if (b < 0 || b >= (int) next->banks.size()) b = 0;

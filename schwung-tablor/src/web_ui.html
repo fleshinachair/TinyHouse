@@ -277,6 +277,14 @@ canvas.gr.drag{cursor:crosshair}
 .demo-drop{border:1px dashed var(--line2); border-radius:6px; padding:16px; text-align:center; color:var(--faint); margin:8px 0}
 .demo-drop.over{border-color:var(--g); color:var(--g)}
 
+/* ---- the reminder to import pre-upgrade presets again ---- */
+#oldnote{display:none; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 10px; padding:9px 12px; border:1px solid var(--g2); border-radius:6px; background:var(--g3); color:var(--txt); font-size:12px}
+#oldnote.on{display:flex}
+#oldnote .t{flex:1 1 320px; min-width:0}
+#oldnote .t b{color:var(--hi); font-weight:normal}
+#oldnote .t small{display:block; color:var(--dim); font-size:11px; margin-top:3px}
+#oldnote button{background:#0c0e0f; border:1px solid var(--line2); color:var(--txt); font:inherit; font-size:11px; cursor:pointer; padding:6px 12px; border-radius:4px; white-space:nowrap}
+#oldnote button:hover{color:var(--g); border-color:var(--g2)}
 /* ---- import dialog ---- */
 #browser .bhead .imp{background:#0c0e0f; border:1px solid var(--line2); color:var(--dim); font:inherit; font-size:11px; letter-spacing:.06em; cursor:pointer; height:28px; padding:0 12px; border-radius:4px; white-space:nowrap}
 #browser .bhead .imp:hover{color:var(--g); border-color:var(--g2)}
@@ -325,6 +333,7 @@ canvas.gr.drag{cursor:crosshair}
 <body>
 <div class="wrap">
   <div id="top"><div class="brand">TINY<i>HOUSE</i></div><div id="pbar"></div><div class="hint" id="hint">connecting…</div></div>
+  <div id="oldnote"></div>
   <div id="browser"></div>
   <div id="imp"></div>
   <div id="tabs"></div>
@@ -1831,6 +1840,30 @@ function renderPbar() {
   cntEl.textContent = (psFlat() + 1) + " / " + psTotal();
 }
 
+/* Presets imported before originals were kept on the Move ("o" per bank in preset_list: no "src", not saved from a slot) never get the converter's
+ * later fixes: only importing them again, once, does (into the same bank, which replaces them by name; after that the Move converts them again itself
+ * after each update). Hidden for this browser by its button until the count changes. */
+var OLD_HIDE_KEY = "tinyhouse.oldnote.hidden";
+function renderOldNote() {
+  var box = document.getElementById("oldnote");
+  if (!box) return;
+  var banks = PS.banks.filter(function (b) { return b.o > 0; });
+  var n = banks.reduce(function (a, b) { return a + b.o; }, 0), sig = String(n) + ":" + banks.map(function (b) { return b.n; }).join("|"), hidden = "";
+  try { hidden = localStorage.getItem(OLD_HIDE_KEY) || ""; } catch (e) {}
+  box.textContent = "";
+  box.classList.toggle("on", n > 0 && hidden !== sig);
+  if (!n || hidden === sig) return;
+  var t = el("div", "t", box);
+  t.appendChild(document.createElement("b")).textContent = "Import your presets again, once, to keep them improving.";
+  el("small", null, t, n + " preset" + (n === 1 ? " was" : "s were") + " imported before presets could update themselves (" +
+    banks.map(function (b) { return b.n + " " + b.o; }).join(", ") + "). Import the same Serum / Vital files into the same bank names: they are replaced, " +
+    "and from then on every update's sound fixes reach them on the Move automatically.");
+  var go = el("button", null, box, "Import…");
+  go.addEventListener("click", function () { openImport(true); });
+  var hide = el("button", null, box, "Hide");
+  hide.addEventListener("click", function () { try { localStorage.setItem(OLD_HIDE_KEY, sig); } catch (e) {} box.classList.remove("on"); });
+}
+
 function renderBrowser() {
   if (!brEl || !brEl.classList.contains("on")) return;
   var q = PS.q.trim().toLowerCase();
@@ -3281,7 +3314,7 @@ var EXTRA = {
   wt2_shape: function (v) { ingestShape(2, v); },
   wt3_shape: function (v) { ingestShape(3, v); },
   preset_list: function (v) {
-    try { var d = JSON.parse(v); if (d && d.b) { PS.banks = d.b; renderPbar(); renderBrowser(); } } catch (e) {}
+    try { var d = JSON.parse(v); if (d && d.b) { PS.banks = d.b; renderPbar(); renderBrowser(); renderOldNote(); } } catch (e) {}
   },
   demo_list: function (v) {
     try { var d = JSON.parse(v); if (d && d.b) { DM.packs = d.b; demoRender(); } } catch (e) {}

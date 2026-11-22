@@ -1822,6 +1822,8 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             continue
         if eff_level(o) <= 0.02:
             continue                                   # an oscillator that is on but silent adds nothing
+        if o["kind"] in ("kOsc_Sample", "kOsc_MultiSample", "kOsc_Granular") and o.get("sample") and not o["sample"].get("file") and not o["sample"].get("embedded"):
+            continue                                   # no file loaded (an empty samplePath, BA - Bubba's Granular): Serum has no audio to play there either
         crit.append(f"osc {'ABC'[o['id']]} is a {o['kind'][5:]} oscillator (Tablor has three sample oscillators and no other kind)")
     def bent(o):
         return any((w["mode"] in BEND_WARPS and w["amount"] >= WARP_NOISE_FLOOR) or (w["mode"] in BIPOLAR_WARPS and abs(1.0 - 2.0 * w["amount"]) >= WARP_NOISE_FLOOR) for w in o["warp"])

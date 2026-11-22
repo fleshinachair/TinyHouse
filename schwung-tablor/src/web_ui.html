@@ -2658,8 +2658,7 @@ async function runImport() {
     var smpFiles = await impCall("getsamples", {});
 
     var list = Object.keys(results).map(function (n) { return results[n]; });
-    list.forEach(function (p) { p.skipped = !!(IMP.onlyComplete && p.json && (p.tier === "vital" ? impVitalSilent(p) : impLines(p).length)); });
-    var sendable = list.filter(function (p) { return p.json && !p.skipped; });
+    var sendable = list.filter(function (p) { return p.json; });       /* every preset that converts: what it misses now, later updates improve on the Move */
     var wtPaths = Object.keys(files), smPaths = Object.keys(smpFiles);
     var total = sendable.length + wtPaths.length + smPaths.length, done = 0;
     IMP.same = 0;
@@ -2722,11 +2721,11 @@ async function runImport() {
         sent[p.file] = 1;
       }; })(p));
     }
-    /* The presets this import left out ("only presets with nothing missing", or a conversion that failed) are kept on the Move too, listed in the bank's
+    /* The presets this import left out (a conversion that failed) are kept on the Move too, listed in the bank's
      * waiting.json: when an update brings a newer converter the module tries them again and adds the ones that now pass (converter/reconvert.py). A preset
      * imported now comes off the list. Each new entry is marked as tried by this converter, which has just tried it. */
     IMP.waiting = 0;
-    var leftOut = list.filter(function (p) { return p.source && (p.skipped || !p.json); });
+    var leftOut = list.filter(function (p) { return p.source && !p.json; });
     var sentSrc = sendable.filter(function (p) { return p.source && sent[p.file]; });
     if (leftOut.length || sentSrc.length) {
       try {
@@ -2744,7 +2743,7 @@ async function runImport() {
           try {
             for (var a2 = 0; a2 < (q.aux || []).length; a2++) await keepOnMove(q.aux[a2]);
             await keepOnMove(q.source);
-            waiting.presets[q.source[0].split("/").pop()] = { name: q.name, dir: bankDir, rule: (q.skipped || IMP.onlyComplete) ? "complete" : "any", tried: conv };
+            waiting.presets[q.source[0].split("/").pop()] = { name: q.name, dir: bankDir, rule: "any", tried: conv };
             nWait++;
           } catch (e) { failed.push(q.name + ": could not be kept on the Move to try again after updates (" + e.message + ")"); }
         }
@@ -2803,14 +2802,11 @@ function impIsMinor(l) {
 }
 /* A gap in the sound itself (an oscillator that is silent or plays the wrong table) as against an effect left out. */
 function impIsSound(l) { return /^SILENT|^Oscillator|^Sample not found|^Wavetable not found|oscillators are not imported|sample was not carried/.test(l); }
-/* A Vital preset almost always has some small detail the engine does not carry (portamento, a modulation route ...), so the "nothing missing" option leaves one out only when it would not sound at all. */
-function impVitalSilent(p) { return impLines(p).some(function (l) { return /^SILENT|^Sample not found|^Wavetable not found/.test(l); }); }
 function impSound(p) { return impLines(p).filter(impIsSound).length; }
 function impReport(bank, list, sent, failed, landed, existed) {
   var body = IMP.bodyEl; body.textContent = "";
   var ok = list.filter(function (p) { return p.json && sent[p.file]; });
-  var skipped = list.filter(function (p) { return p.json && p.skipped; });
-  var bad = list.filter(function (p) { return !p.skipped && (!p.json || !sent[p.file]); });
+  var bad = list.filter(function (p) { return !p.json || !sent[p.file]; });
   var lines = impLines;
   var whole = ok.filter(function (p) { return !lines(p).length; });
   var part = ok.filter(function (p) { return lines(p).length; });
@@ -2827,8 +2823,7 @@ function impReport(bank, list, sent, failed, landed, existed) {
   if (whole.length) el("div", "rep-line", body, whole.length + (ok.length && ok.every(function (p) { return p.tier === "vital"; }) ? " imported with no notable gaps (their small details are listed in a closed group below)." : " imported with nothing left out."));
   var nVital = ok.filter(function (p) { return p.tier === "vital"; }).length;
   if (part.length) el("div", "rep-line", body, nSound + " will sound different, an oscillator is silent or plays another wavetable (listed first, in amber). " + (part.length - nSound) + (nVital ? " only miss a detail, an effect or a modulation route: the sound should be close, not identical." : " only miss an effect: the sound is the same, with less of that effect."));
-  if (skipped.length) el("div", "rep-line", body, skipped.length + " not imported because “only presets with nothing missing” was chosen. Import again without that choice to get them.");
-  if (IMP.waiting) el("div", "rep-line", body, IMP.waiting + (IMP.waiting === 1 ? " preset that was" : " presets that were") + " left out " + (IMP.waiting === 1 ? "is" : "are") + " kept on the Move: after an update the module tries " + (IMP.waiting === 1 ? "it" : "them") + " again and adds any that now come across complete to this bank.");
+  if (IMP.waiting) el("div", "rep-line", body, IMP.waiting + (IMP.waiting === 1 ? " preset that was" : " presets that were") + " left out " + (IMP.waiting === 1 ? "is" : "are") + " kept on the Move: after an update the module tries " + (IMP.waiting === 1 ? "it" : "them") + " again and adds any that now convert to this bank.");
   if (IMP.same) el("div", "rep-sub", body, IMP.same + " wavetable or sample file" + (IMP.same === 1 ? " was" : "s were") + " already on the Move, the same, and not sent again.");
   function group(title, arr, cls, fn) {
     if (!arr.length) return;
@@ -2842,7 +2837,6 @@ function impReport(bank, list, sent, failed, landed, existed) {
   }
   group("Imported, with parts missing", part, "part", lines);
   group("Imported complete", whole, "ok", function () { return []; });
-  group("Left out (not complete)", skipped, "bad", lines);
   var minor = ok.filter(function (p) { return impMinorLines(p).length; });
   if (minor.length) {                                          /* Vital's small details: closed, after the rest */
     group("Small details not carried (a Vital detail, or a Serum Bode)", minor, "minor", impMinorLines);
@@ -2904,9 +2898,6 @@ function impBuildForm() {
   IMP.bankEl = el("input", "imp-name", body); IMP.bankEl.type = "text"; IMP.bankEl.maxLength = 40; IMP.bankEl.value = "Imports";
   IMP.bankEl.addEventListener("input", function () { IMP.bankTouched = true; });
   el("div", "imp-note", body, "Loose presets go to “Imports”; a folder or pack gets a bank of its own name. A preset with the same name already in the bank is replaced.");
-  var oc = el("label", "imp-opt", body), ocb = el("input", null, oc); ocb.type = "checkbox"; ocb.checked = !!IMP.onlyComplete;
-  ocb.addEventListener("change", function () { IMP.onlyComplete = ocb.checked; });
-  oc.appendChild(document.createTextNode("Only import presets with nothing missing (leave out any preset with a silent oscillator, a missing wavetable or sample, or an effect that is not carried; a Vital preset is left out only if nothing in it would sound)"));
   IMP.goEl = el("button", "imp-go", body, "Import");
   IMP.goEl.addEventListener("click", runImport);
   IMP.barWrap = el("div", "imp-bar", body); IMP.barEl = el("i", null, IMP.barWrap); IMP.barWrap.style.display = "none";

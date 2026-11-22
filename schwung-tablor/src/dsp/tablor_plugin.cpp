@@ -69,6 +69,7 @@ struct tablor_instance {
     std::set<std::string> up_bg, up_failed;
     std::string up_path;
     bool up_any = false;
+    std::atomic<long long> hint_until { 0 };   /* steady_ms() until which the header asks for the chosen preset to be imported again (reimport_hint) */
     /* `banks`: the store's presets are grouped in folders (one per pack: Deep House, ...) and the loose files are the
      * "User" bank. items are ordered by bank then name, so each bank is the contiguous run [bank_first, bank_first + bank_n). */
     struct PresetList {
@@ -1726,6 +1727,37 @@ static void queue_stale(tablor_instance *inst)
     if (inst->diag && !todo.empty()) diag_log(inst, "convert on load: %d presets queued for converter %s", (int) todo.size(), g_conv.hash.c_str());
 }
 
+/* The reminder on the Move: the first preset chosen after an update that was imported before originals were kept (preset.old) makes the header read
+ * "Re-import: see web UI" for a few seconds; the remote UI's banner says the rest. Once per update for the whole Move: shown, a marker file is written in
+ * the converter folder, which every update replaces (scripts/deploy.sh, the package), so the next update shows it once again. No converter, no reminder.
+ * g_hint: 0 not known yet, 1 due, 2 shown or not wanted. */
+static constexpr const char *kHintText = "Re-import: see web UI";
+static constexpr long long kHintMs = 4000;
+static std::atomic<int> g_hint { 0 };
+
+/* WORKER THREAD, at startup after the converter's stamp is read. */
+static void load_reimport_hint(const tablor_instance *inst)
+{
+    if (g_hint.load() != 0) return;
+    struct stat st;
+    const bool due = !g_conv.hash.empty() && ::stat((std::string(inst->module_dir) + "/converter/.reimport_hint").c_str(), &st) != 0;
+    int unknown = 0;
+    g_hint.compare_exchange_strong(unknown, due ? 1 : 2);
+}
+
+static void reimport_hint(tablor_instance *inst, int i)
+{
+    auto ps = inst->storeList();
+    if (i < 0 || i >= (int) ps->items.size() || !ps->items[(size_t) i].old) return;
+    int due = 1;
+    if (!g_hint.compare_exchange_strong(due, 2)) return;
+    inst->hint_until = steady_ms() + kHintMs;
+    const std::string marker = std::string(inst->module_dir) + "/converter/.reimport_hint";
+    post_contract_job(inst, [marker] {
+        if (FILE *f = fopen(marker.c_str(), "w")) { fputs(g_conv.hash.c_str(), f); fclose(f); }
+    });
+}
+
 /* The chosen store item, converted again first if it is stale. Its current sound is applied meanwhile (choose_store_preset). */
 static void upgrade_if_stale(tablor_instance *inst, int i)
 {
@@ -1745,6 +1777,7 @@ static void upgrade_if_stale(tablor_instance *inst, int i)
 static void choose_store_preset(tablor_instance *inst, int i)
 {
     upgrade_if_stale(inst, i);
+    reimport_hint(inst, i);
     inst->store_index = i;
     if (inst->settle_ms <= 0) {
         inst->pend_idx = -1;
@@ -2372,6 +2405,8 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
             if (!inst->up_path.empty() && inst->up_path == ps->items[(size_t) i].path)
                 return write_str(buf, buf_len, ("Upgrading to v" + g_conv.ver).c_str());
         }
+        if (inst->hint_until.load() > 0 && steady_ms() < inst->hint_until.load())     /* the once-per-update reminder (reimport_hint) */
+            return write_str(buf, buf_len, kHintText);
         return write_str(buf, buf_len, i >= 0 && i < (int) ps->items.size() ? ps->items[(size_t) i].name.c_str() : "");
     }
     /* "1" while the worker still owes us file work (used by tests and by
@@ -2604,6 +2639,7 @@ static void *tb_create_instance(const char *module_dir, const char *json_default
         /* Convert on load: the module's converter and its stamp, then every stale preset of the store in the background (after the sound is up). */
         if (!load_conv_stamp(inst).hash.empty())
             std::atomic_store(&inst->reconv, tb::Reconverter::shared(std::string(inst->module_dir) + "/converter"));
+        load_reimport_hint(inst);
         queue_stale(inst);
         if (g_host && g_host->log) {
             char msg[200];

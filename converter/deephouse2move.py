@@ -289,13 +289,20 @@ def arp_from_tree(tree: dict):
 def ratio_semitones(p: dict) -> float:
     """An oscillator in Serum 2's Ratio pitch mode plays the note times its Ratio: Ratio r >= 1 multiplies by r, under 1 by 2^(r - 1), held at a quarter
     (r <= -1); an unwritten Ratio is 1. Octave, Coarse (Pitch) and Fine do nothing in this mode. Measured on a saw at notes 48 and 60 (r = -4 .. 24), the same with the
-    RM-from-Sub and Sync warps on. With Pitch Track off the Ratio does nothing (the oscillator keeps its fixed pitch). Not carried: Hz Offset, which acts only in this mode
-    (a fixed shift in Hz: ratio 2, -26.3 Hz played 235.3 Hz at note 48) and has no engine control."""
-    if float(p.get("kParamPitchTrack", 1.0)) == 0.0:
-        return 0.0
+    RM-from-Sub and Sync warps on. Hz Offset acts only in this mode and adds Hz after the Ratio: the oscillator plays f x mult + offset (calibration/dev/probe_hz_offset.py:
+    track on, offset 50: 115.41 Hz at note 36, 311.63 at 60; ratio 2, -26.3 Hz played 235.3 Hz at note 48). With Pitch Track off f is MIDI note 0 (8.18 Hz) at every key, the Ratio
+    still multiplies it and the offset still adds (ratio -1, offset 50: 52.04 Hz; ratio 4: 82.70; ratio 1, offset 100: 108.18), so a fixed oscillator's pitch is exact as
+    semitones over note 0, the engine's fixed pitch (DR - Kick Synth 2's body: 50 Hz offset, ratio -1, played at 8.18 Hz before). With Pitch Track on an offset in Hz is a
+    different interval at every note and is not carried."""
     r = float(p.get("kParamPitchRatio", 1.0))
     mult = r if r >= 1.0 else 2.0 ** (max(r, -1.0) - 1.0)
+    if float(p.get("kParamPitchTrack", 1.0)) == 0.0:
+        f = NOTE0_HZ * mult + float(p.get("kParamHzOffset", 0.0))
+        return 12.0 * math.log2(max(f, 0.1) / NOTE0_HZ)
     return 12.0 * math.log2(mult)
+
+
+NOTE0_HZ = 440.0 * 2.0 ** (-69 / 12.0)      # MIDI note 0, where Serum's and the engine's fixed-pitch oscillators sit
 
 
 def harmonics_semitones(p: dict) -> float:

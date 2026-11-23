@@ -1655,6 +1655,9 @@ MACRO_POT = re.compile(
 MACRO_FX_GROUPS = {"rev_on": ("rev_",), "dly_on": ("dly_", "dly2_"), "chor_on": ("chor_",), "flan_on": ("flan_",), "phas_on": ("phas_",), "comp_on": ("comp_",),
                    "wide_on": ("fx_wide", "fx_wrate", "fx_wdepth"), "eq_on": ("eq1_", "eq2_", "eq3_", "eq4_")}
 MACRO_WET = re.compile(r"(_mix|_wet)$|^fx_wide$")
+# Groups with no wet knob: turned on all along with the far end's settings, they played at the saved position (MDL - Slimy Swaying: a macro at 2 % that opens a high-pass
+# Filter FX stored the far end's 24 dB high-pass in the EQ, 20 dB off the preset; BA - Super 8, PN - Piano and Strings and three more). Left off instead.
+MACRO_NO_WET = {"eq_on"}
 MAX_MACRO_ROUTES = 96
 
 
@@ -1674,6 +1677,9 @@ def macro_travel(P0: dict, P1: dict, paths0: dict, paths1: dict, span: float):
         if a == b or key == "volume":
             continue
         flag = next((f for f, gs in flips.items() for g in gs if key.startswith(g)), None)
+        grp = key if key in flips else flag
+        if grp in MACRO_NO_WET and P1[grp] > P0[grp]:
+            continue                                     # an EQ the macro turns on stays off: its bands have no wet to keep them silent at the saved position
         if key in flips:
             if P1[key] > a:                              # the macro turns the effect on: it is on all along, its wet at the saved position is what the preset has
                 store[key] = P1[key]

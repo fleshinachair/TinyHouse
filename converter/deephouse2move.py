@@ -1337,6 +1337,8 @@ def evenodd_table(move_path: str, amount: float, wt_out: Path) -> str | None:
 
 LFO_RATE_MAX_HZ = 100.0    # Serum's LFO Rate knob: Hz = 100 x knob ** 4 (calibration/dev/probe_lfo_rate_route.py)
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/dev/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
+AFTERTOUCH_SOURCES = (18, 19)      # Serum's modulation sources 18 (channel aftertouch) and 19 (poly aftertouch); the Move's pads send either, the engine reads both (calibration/dev/probe_aftertouch.py)
+AFTERTOUCH_ROUTE_SRC = 10          # the engine's route source number for Aftertouch (voice.h: 9 velocity, 10 aftertouch)
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 # A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/dev/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at
 # half a beat, 4 Hz at 120 BPM, where the converter had it at 14.69 Hz). A synced LFO's stored Rate is not a frequency: it picks a note division, one per band of the Rate
@@ -1593,11 +1595,12 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         if key[0] == "Oscillator" and slot and not o.get("ratio") and ((key[1] == "kParamPitch" and not o.get("harm")) or (slot == 3 and key[1] in ("kParamCoarsePit", "kParamOctave"))):
             return f"WT{slot} Pitch", PITCH_ROUTE_ST[key[1]] / 48.0      # the Pitch knob (25 st per unit) and osc C's coarse knobs: the linear Pitch destination, 48 st per unit, as a pitch envelope's
         return None, 1.0
-    routes, left = [], []
+    routes, left, at_routes = [], [], []
     for item in other:
         src, key, a = item[:3]
         bip = item[3] if len(item) > 3 else False
-        if not isinstance(src, int) or not 6 <= src <= 15:        # envelopes that did not get a slot are in here as "envN"
+        at = isinstance(src, int) and src in AFTERTOUCH_SOURCES      # the pads' pressure: a live route source of its own (the engine's Aftertouch), not an LFO
+        if not isinstance(src, int) or not (6 <= src <= 15 or at):        # envelopes that did not get a slot are in here as "envN"
             left.append(item)
             continue
         if abs(a) < LFO_MIN_ROUTE:
@@ -1620,6 +1623,9 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
                 amt = math.copysign(math.sqrt(min(abs(v) / 4.0, 1.0)), v)
             else:
                 amt = _clamp(v, -1, 1)
+            if at:
+                at_routes.append((abs(amt), d, amt, bip, item))
+                continue
             fine_b = float(ph["oscs"][key[2]]["fine_cents"]) if (key[0] == "Oscillator" and key[1] == "kParamFine" and not bip) else None
             routes.append((abs(amt), src - 6, d, amt, bip, fine_b, a))
         else:
@@ -1677,9 +1683,19 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         P[f"lr{r}_bip"] = 1 if bip else 0
     if taken:
         note.append(f"{len(taken)} LFO route(s) carried from {len(chosen)} LFO(s), each with Serum's own polarity")
+    # Pad pressure (aftertouch) routes: Serum's source reads 0 at rest and the pad's pressure while it is held (calibration/dev/probe_aftertouch.py: channel pressure is source 18,
+    # poly pressure source 19, closed at rest, linear in the value), the same 0..1 range as an LFO, so the route is an LFO route whose source is the engine's Aftertouch (lr source 10).
+    # A bipolar one adds depth x (pressure - 1/2), which the engine's bipolar route gives as well (the rest offset of minus half included).
+    at_routes.sort(key=lambda r: -r[0])
+    at_taken = at_routes[:max(8 - len(taken), 0)]
+    left += [r[4] for r in at_routes[len(at_taken):]]
+    for r, (_, d, amt, bip, _item) in enumerate(at_taken, len(taken) + 1):
+        P[f"lr{r}_src"], P[f"lr{r}_dst"], P[f"lr{r}_amt"], P[f"lr{r}_bip"] = AFTERTOUCH_ROUTE_SRC, ME_DST[d], round(_clamp(64 + 63 * amt, 0, 127)), 1 if bip else 0
+    if at_taken:
+        note.append(f"{len(at_taken)} pad-pressure (aftertouch) route(s) carried live")
     # A note-number route into an oscillator's volume (BA - Goa Pepper fades oscillator B out above middle C through a curved route): the base already holds its value at middle C,
     # so a spare LFO in Key mode (the engine reads point note / 2 of its Hi-Res table) adds the rest, value(note) - value(60), through a bipolar route (2u - 1 times the amount).
-    nl, nr = len(chosen), len(taken)
+    nl, nr = len(chosen), len(taken) + len(at_taken)
     for key, a, bip, m in (note_routes or []):
         if nl >= 4 or nr >= 8:
             break
@@ -1919,7 +1935,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     held = Counter()
     for item in other:
         src, key, a = item[:3]
-        if isinstance(src, int) and (6 <= src <= 15 or src in (16, 17)):       # an LFO route is carried (map_lfos), velocity and note are folded in at their nominal value
+        if isinstance(src, int) and (6 <= src <= 15 or src in (16, 17) or src in AFTERTOUCH_SOURCES):       # an LFO route is carried (map_lfos), velocity and note are folded in at their nominal value, pressure is live (and 0 at rest)
             continue
         if key[0] == "Oscillator" and key[1] == "kParamVolume" and a > 0:
             held[key[2]] += a * MOD_LEVEL_HOLD
@@ -1943,7 +1959,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     # An oscillator whose level is stored near 0 and comes from an LFO or an envelope (a tremolo or a swell on a sample) still sounds: the slot is carried and the route moves its level knob.
     mod_vol = Counter()
     for item in other:
-        if isinstance(item[0], int) and 6 <= item[0] <= 15 and item[1][:2] == ("Oscillator", "kParamVolume") and item[2] > 0:
+        if isinstance(item[0], int) and (6 <= item[0] <= 15 or item[0] in AFTERTOUCH_SOURCES) and item[1][:2] == ("Oscillator", "kParamVolume") and item[2] > 0:
             mod_vol[item[1][2]] += item[2]
     for e_, k_, a_ in routes:
         if k_[:2] == ("Oscillator", "kParamVolume") and a_ > 0:

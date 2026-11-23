@@ -456,6 +456,19 @@ def physical(tree: dict, header: dict) -> dict:
         pp, cv = _pp(node), (node.get("curveData") or {})
         lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "smooth": pp.get("kParamSmooth"), "mode": pp.get("kParamDefaultMode"), "env": pp.get("kParamMode") == "Envelope", "type": pp.get("kParamType"),
                      "x": cv.get("xVals"), "y": cv.get("yVals"), "c": cv.get("curveVals"), "name": node.get("curveDisplayName")})
+    # A macro, velocity, note or mod-wheel route into an LFO's Rate is folded in at the saved macro position / nominal velocity and note. The stored Rate is the knob's value in Hz,
+    # 100 x knob ** 4, and a route adds depth x source to the knob (calibration/dev/probe_lfo_rate_route.py: from Rate 0 a route of 30 / 50 / 70 / 100 % ran the LFO at 0.81 / 6.24 /
+    # 23.96 / 99.8 Hz; Rate 2 + 25 % at 15.3 Hz, 0.5 - 10 % at 0.17). A synced LFO reads the same knob through its note bands (Rate 2 synced + 25 %: 4.0 Hz at 120 BPM, the 15.4 band).
+    # A Rate left unwritten (the default knob) is left as it is.
+    for m in mods:
+        lid, src = m.get("dest_id"), m["source"]
+        if m["dest_type"] != "LFO" or m["dest_param"] != "kParamRate" or not isinstance(lid, int) or not 0 <= lid < len(lfos) or not isinstance(src, int):
+            continue
+        if not (25 <= src <= 32 or src in (1, 16, 17)) or lfos[lid]["rate"] is None:
+            continue
+        x = fxmap.macro_value(m, macros)
+        knob = (max(float(lfos[lid]["rate"]), 0.0) / LFO_RATE_MAX_HZ) ** 0.25 + m["amount_pct"] / 100.0 * ((x - 0.5) if m["bipolar"] else x)
+        lfos[lid]["rate"] = LFO_RATE_MAX_HZ * _clamp(knob, 0.0, 1.0) ** 4
     # Serum's routing slots 0..4 are osc A, B, C, noise, sub. Measured with a closed filter:
     # only A reaches the filter by default, the others bypass it unless routed there.
     routed, balance, none, out, bus = {}, {}, {}, {}, {}
@@ -1282,6 +1295,7 @@ def evenodd_table(move_path: str, amount: float, wt_out: Path) -> str | None:
     return move_path[:len(move_path) - len(src.name)] + dest.name
 
 
+LFO_RATE_MAX_HZ = 100.0    # Serum's LFO Rate knob: Hz = 100 x knob ** 4 (calibration/dev/probe_lfo_rate_route.py)
 LFO_DEFAULT_HZ = 2.0       # measured on Serum (calibration/dev/probe_lfo2.py): a default LFO runs at 1.85-2 Hz and is a sine
 LFO_MIN_ROUTE = 0.003      # a route weaker than this (a fraction of the destination's range) is not worth a slot
 # A Serum LFO whose kParamBeatSync is not written is SYNCED to the host tempo (measured, calibration/dev/probe_lfo_sync.py: Lead - Loop's LFO 1, Rate 14.69, no BeatSync, ran at

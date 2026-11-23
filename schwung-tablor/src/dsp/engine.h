@@ -347,6 +347,7 @@ private:
     float convSeen = -1.0f;
     uint32_t ditherState = 2463534242u;                                /* the output dither's generator */
     float modSeen[TB_P_PHAS_POLES - TB_P_CHOR_ON + 1] = {};           /* the chorus, flanger and phaser pots are contiguous */
+    float fxTailSeen[TB_P_DIST2_TAMT - TB_P_COMP_XLO + 1] = {};         /* the effect pots added after 0.9.16 (comp crossovers and band scales, distortion filter place, distortion tables) are contiguous at the end */
     float splitSeen[TB_P_SPLIT_STAGES - TB_P_SPLIT_BAND + 1] = {};               /* the Split pots are contiguous */
     float distPreSeen[TB_P_DIST_PRE_Q - TB_P_DIST_PRE + 1] = {};                /* the distortion's pre-filter pots are contiguous */
     float dist2Seen[TB_P_DIST2_PRE_MORPH - TB_P_DIST_PRE_MORPH + 1] = {};                /* the morph and second-distortion pots are contiguous */

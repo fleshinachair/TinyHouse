@@ -23,6 +23,7 @@
 #include "vital_sk.h"
 #include "comb.h"
 #include "conv.h"
+#include "dist_tables.h"
 #include "../ported/filter.h"
 
 namespace tb {
@@ -269,6 +270,11 @@ struct FxSettings {
     float distAudioAmt[4] = { 0, 0, 0, 0 }; /* its route amounts to Drive, filter Cutoff, Res, Blend (a fraction of each control's range) */
     float distAudioTrans = 0;               /* semitones added to the newest note for its frequency */
     float distAudioShape[16] = {};          /* one cycle, 0..1 */
+    bool  distPost = false, dist2Post = false;   /* Distortion (2) Filter Place = After: the filter runs on the curve's output (still the distorted part only) */
+    /* Distortion (2) Table: Serum's own curve for the mode, measured (dist_tables.h, calibration/dev/probe_dist_fxtable.py) in place of the Soft / Asym / Hard / Sine fit;
+     * 0 off, else the table's mode + 1. TabAmt is Serum's Drive 0..100. The calibrated law's gain and output are then the table's own scale (engine.cpp). */
+    int   distTab = 0, dist2Tab = 0;
+    float distTabAmt = 0, dist2TabAmt = 0;
     int   distPre = 0;                      /* a filter before the curve, on the distorted part: 0 off, 1 low-pass, 2 high-pass (the calibrated law only) */
     float distPreHz = 1000, distPreQ = 1;
     float distPreMorph = 0;                 /* distPre 3: Serum's LPHP 0..1 between the ends, the state-variable filter's low-pass -> band-pass -> high-pass outputs */
@@ -283,6 +289,8 @@ struct FxSettings {
     int   fxOrder = 0;                      /* FX Order: the rank of the main chain's stage order among the 7! permutations (0 = the default order) */
     bool  compMulti = false;                /* three bands, each with its own threshold and gain, and upward compression below */
     float compThreshBandDb[3] = { 0, 0, 0 }, compBandGainDb[3] = { 0, 0, 0 }, compBelow = 0;
+    float compXloHz = 120.0f, compXhiHz = 2400.0f;   /* the multiband crossovers (Comp X-over Low / High; Serum's XoverLow / XoverHi) */
+    float compRatioScale[3] = { 1, 1, 1 }, compBelowScale[3] = { 1, 1, 1 };   /* per band: the downward slope and the upward one (Comp Below) scaled (Serum's Ratio0..2 / RatioBelow0..2) */
     /* Vital's compressor (processCompVital, derived from Vital's effects/compressor.cpp): per band an upper threshold and ratio (downward) and a lower threshold and ratio (upward when positive,
      * downward expansion when negative), a gain, the shared attack / release knobs, and which of the bands are split off. Levels are the engine's, converted by the Vital converter. */
     bool  compVital = false;
@@ -932,6 +940,8 @@ public:
         if (s.dist2Pre == 3) dist2PreSvf.set(s.dist2PreHz, s.dist2PreQ, s.dist2PreMorph, sr);
         else if (s.dist2Pre) dist2PreBq.c.set(s.dist2Pre == 1 ? EQ_LOPASS : EQ_HIPASS, s.dist2PreHz, 0.0f, s.dist2PreQ, sr);
         dist2Target = s.dist2Mix > 0.0f ? 1.0f : 0.0f;
+        if (s.distTab) { buildDistCurve(s.distTab, s.distTabAmt, distCurve[0]); tabSt[0].setHp(kDistTabPreHp[std::min(s.distTab, kDistTabModes) - 1], sr); }
+        if (s.dist2Tab) { buildDistCurve(s.dist2Tab, s.dist2TabAmt, distCurve[1]); tabSt[1].setHp(kDistTabPreHp[std::min(s.dist2Tab, kDistTabModes) - 1], sr); }
         mod.set(s);
         hyper.set(s);
         if (s.splitBand == 1 || s.splitBand == 2) {
@@ -950,11 +960,12 @@ public:
             vcSplitA.set(120.0f, sr); vcSplitB[0].set(2500.0f, sr); vcSplitB[1].set(2500.0f, sr);
             for (int b = 0; b < 3; b++) vcBand[b].setup(s, b, sr);
         }
-        if (s.compMulti) {                                   /* Linkwitz-Riley 4th order crossovers at 120 Hz and 2.4 kHz */
+        if (s.compMulti) {                                   /* Linkwitz-Riley 4th order crossovers, 120 Hz and 2.4 kHz unless Comp X-over Low / High set them */
+            const float xlo = s.compXloHz, xhi = s.compXhiHz;
             for (int i = 0; i < 2; i++) {
-                mbLp2[i].set(false, 2400.0f, sr); mbHp2[i].set(true, 2400.0f, sr);
-                mbLp1[i].set(false, 120.0f, sr);  mbHp1[i].set(true, 120.0f, sr);
-                mbApLp[i].set(false, 120.0f, sr); mbApHp[i].set(true, 120.0f, sr);   /* the low crossover's phase on the high band, so the bands sum flat */
+                mbLp2[i].set(false, xhi, sr); mbHp2[i].set(true, xhi, sr);
+                mbLp1[i].set(false, xlo, sr);  mbHp1[i].set(true, xlo, sr);
+                mbApLp[i].set(false, xlo, sr); mbApHp[i].set(true, xlo, sr);   /* the low crossover's phase on the high band, so the bands sum flat */
             }
         }
         bool eqAny = false;
@@ -1134,8 +1145,8 @@ public:
                 Filter::lowpass, Filter::lowpass, Filter::highpass, Filter::highpass,
                 Filter::bandpass, Filter::bandpass, Filter::notch, Filter::notch };
             xf.setSampleRate(sr);
-            xf.setType(kTypes[type & 7]);
-            xf.setSlope((type & 1) ? Filter::db24 : Filter::db12);
+            xf.setType(type == 8 ? Filter::lowpass : type == 9 ? Filter::highpass : kTypes[type & 7]);          /* 8 / 9: LP 6 / HP 6, one pole */
+            xf.setSlope(type >= 8 ? Filter::db6 : (type & 1) ? Filter::db24 : Filter::db12);
             xf.setParams(hz, q);
         } else if (xfOn) {
             xf.reset();
@@ -1319,8 +1330,8 @@ private:
                 const float xdb = 3.0102999566f * fxdetail::fastLog2(mbMs[b] + 1e-18f), T = st.compThreshBandDb[b];
                 /* The upward part has no end in a silent tail: a band at -180 dB asked for +135 dB, and the next note arrived into that gain
                  * (Serum's own stays level across repeated notes). It is capped, so the boost a quiet tail earns stays one a note can recover from. */
-                const float up = std::min(sb * kneeCurve((T - 11.0f) - xdb, 1.0f, knee), st.compBoostDb);
-                const float target = up - kneeCurve(xdb - T, slope, knee);   /* dB: + boosts, - reduces */
+                const float up = std::min(sb * st.compBelowScale[b] * kneeCurve((T - 11.0f) - xdb, 1.0f, knee), st.compBoostDb);
+                const float target = up - kneeCurve(xdb - T, slope * st.compRatioScale[b], knee);   /* dB: + boosts, - reduces */
                 mbGain[b] = target + (target < mbGain[b] ? compAtt : compRel) * (mbGain[b] - target);
                 const float g = fxdetail::fastExp2((mbGain[b] + st.compBandGainDb[b]) * 0.16609640474f);          /* 10^(dB / 20) */
                 out[0] += band[b][0] * g;
@@ -1743,8 +1754,109 @@ private:
     /* The calibrated law (calibration/dev/probe_dist_transfer.py, probe_dist_wet.py, calibrate_dist2.py): Serum's Wet is a smoothstep s with the dry part
      * (1 - s^2), and its LevelOut a gain on the sum. The curve is out * f(gain x): tanh, the biased tanh (a bias of 0.004 at the input, its DC taken
      * out), a hard clip, or a sine. distTarget is 1 whenever the stage runs, so the ramp is only the switching. */
+    /* A table curve for one Serum mode at one Drive (0..100): the measured rows either side blended (dist_tables.h kDistTabBlend), or the nearest row for the modes
+     * whose folds move with Drive (blending two of those makes a curve neither has). Built when the settings change; the stage reads one curve per sample. */
+    float distCurve[2][kDistTabPts] = {};
+    static void buildDistCurve(int tab, float amt, float *out)
+    {
+        const int m = std::min(std::max(tab - 1, 0), kDistTabModes - 1);
+        const float r = std::min(std::max(amt, 0.0f), 100.0f) / kDistTabStep;
+        int r0 = std::min((int) r, kDistTabRows - 1);
+        float fr = r - (float) r0;
+        if (!kDistTabBlend[m]) { r0 = std::min((int) (r + 0.5f), kDistTabRows - 1); fr = 0.0f; }
+        const int r1 = std::min(r0 + 1, kDistTabRows - 1);
+        for (int i = 0; i < kDistTabPts; i++) out[i] = kDistTabData[m][r0][i] + fr * (kDistTabData[m][r1][i] - kDistTabData[m][r0][i]);
+    }
+    static inline float distTabEval(const float *c, float u)
+    {
+        const float p = (std::min(std::max(u, -kDistTabRange), kDistTabRange) + kDistTabRange) * ((kDistTabPts - 1) / (2.0f * kDistTabRange));
+        const int i = std::min((int) p, kDistTabPts - 2);
+        return c[i] + (p - (float) i) * (c[i + 1] - c[i]);
+    }
+
+    /* A table stage at 2x (the half-band pair of DistOs2): Serum runs its curves oversampled (probe_dist_fxtable.py measured ~6 samples of latency through the stage), and
+     * the measured curves have corners (Tube clips flat at its table edge) whose harmonics fold back at 1x as a hiss in the top octaves (808 - Texture +13 dB at 2-8 kHz).
+     * The dry part is delayed by the pair's latency (H samples) so the mix lines up. */
+    struct TabStage {
+        DistOs2 os;
+        std::vector<float> in[2], up[2], out[2], wet[2];
+        float dry[2][64] = {};
+        int dryPos = 0;
+        /* the mode's own high-pass ahead of the curve (kDistTabPreHp: Overdrive's 3rd-order Butterworth, a one-pole and a Q 1 two-pole at one corner, bilinear) */
+        float hpHz = 0.0f, g1 = 0.0f, a1 = 0.0f, b0 = 0.0f, b1 = 0.0f, a21 = 0.0f, a22 = 0.0f;
+        float p1x[2] = {}, p1y[2] = {}, x1[2] = {}, x2[2] = {}, y1[2] = {}, y2[2] = {};
+        void setHp(float hz, float rate)
+        {
+            if (hz == hpHz) return;
+            hpHz = hz;
+            if (hz <= 0.0f) return;
+            const float k = std::tan(3.14159265f * hz / rate);
+            g1 = 1.0f / (1.0f + k); a1 = (1.0f - k) / (1.0f + k);
+            const float nn = 1.0f / (1.0f + k + k * k);
+            b0 = nn; b1 = -2.0f * nn; a21 = 2.0f * (k * k - 1.0f) * nn; a22 = (1.0f - k + k * k) * nn;
+        }
+        float hp(int c, float v)
+        {
+            const float o1 = g1 * (v - p1x[c]) + a1 * p1y[c];
+            p1x[c] = v; p1y[c] = o1;
+            const float o = b0 * o1 + b1 * x1[c] + b0 * x2[c] - a21 * y1[c] - a22 * y2[c];
+            x2[c] = x1[c]; x1[c] = o1; y2[c] = y1[c]; y1[c] = o;
+            return o;
+        }
+    } tabSt[2];
+
+    void processDistTab(int which, float *L, float *R, int n)
+    {
+        const bool two = which == 1;
+        const float s = std::min(std::max(two ? st.dist2Mix : st.distMix, 0.0f), 1.0f), dryK = 1.0f - s * s;
+        const float g = two ? st.dist2Gain : st.distGain, k = two ? st.dist2Out : st.distOut, lv = two ? st.dist2Level : st.distLevel;
+        const bool post = two ? st.dist2Post : st.distPost;
+        const int pre = two ? st.dist2Pre : st.distPre;
+        StereoSVF &svf = two ? dist2PreSvf : distPreSvf;
+        StereoBiquad &bq = two ? dist2PreBq : distPreBq;
+        float &cur = two ? dist2Cur : distCur;
+        const float target = two ? dist2Target : distTarget;
+        float *dc = two ? dist2Dc : distDc;
+        TabStage &T = tabSt[which];
+        const float *curve = distCurve[which];
+        float *io[2] = { L, R };
+        for (int c = 0; c < 2; c++) {
+            T.in[c].resize((size_t) n); T.wet[c].resize((size_t) n); T.up[c].resize((size_t) (2 * n)); T.out[c].resize((size_t) (2 * n));
+            for (int i = 0; i < n; i++) {
+                const float v = io[c][i];
+                const float vf = post ? v : pre == 3 ? svf.tick(c, v) : pre ? bq.tick(c, v) : v;
+                T.in[c][(size_t) i] = T.hpHz > 0.0f ? T.hp(c, vf) : vf;
+            }
+            T.os.up(c, T.in[c].data(), n, T.up[c].data());
+            for (int j = 0; j < 2 * n; j++) T.out[c][(size_t) j] = distTabEval(curve, g * T.up[c][(size_t) j]);
+            T.os.down(c, T.out[c].data(), n, T.wet[c].data());
+        }
+        const float dw = (target - cur) / (float) n;
+        const float dcA = 1.0f - std::exp(-2.0f * 3.14159265f * 8.0f / sr);
+        for (int i = 0; i < n; i++) {
+            cur += dw;
+            const float w = cur;
+            float y[2], dv[2];
+            for (int c = 0; c < 2; c++) {
+                float &slot = T.dry[c][T.dryPos & 63];
+                dv[c] = T.dry[c][(T.dryPos - DistOs2::H) & 63];
+                slot = io[c][i];
+                float f = T.wet[c][(size_t) i];
+                if (post) f = pre == 3 ? svf.tick(c, f) : pre ? bq.tick(c, f) : f;
+                const float o = lv * (dryK * dv[c] + s * k * f);
+                dc[c] += dcA * (o - dc[c]);
+                y[c] = o - dc[c];
+            }
+            T.dryPos++;
+            L[i] = dv[0] + w * (y[0] - dv[0]);
+            R[i] = dv[1] + w * (y[1] - dv[1]);
+        }
+        cur = target;
+    }
+
     void processDistCal(float *L, float *R, int n)
     {
+        if (st.distTab) { processDistTab(0, L, R, n); return; }
         const float s = std::min(std::max(st.distMix, 0.0f), 1.0f), dry = 1.0f - s * s;
         const float g = st.distGain, k = st.distOut, lv = st.distLevel, bias = 0.004f, biasOut = std::tanh(g * bias);
         const float dw = (distTarget - distCur) / (float) n;
@@ -1755,15 +1867,17 @@ private:
             float x[2] = { L[i], R[i] }, y[2];
             for (int c = 0; c < 2; c++) {
                 const float v = x[c];
-                const float vf = st.distPre == 3 ? distPreSvf.tick(c, v) : st.distPre ? distPreBq.tick(c, v) : v;          /* the wet part sees the filtered signal, the dry part does not */
+                const float vf = st.distPost ? v : st.distPre == 3 ? distPreSvf.tick(c, v) : st.distPre ? distPreBq.tick(c, v) : v;          /* the wet part sees the filtered signal, the dry part does not */
                 float f;
-                switch (st.distMode) {
+                if (st.distTab) f = distTabEval(distCurve[0], g * vf);
+                else switch (st.distMode) {
                 case 1:  f = std::tanh(g * (vf + bias)) - biasOut; break;
                 case 2:  f = std::min(std::max(g * vf, -1.0f), 1.0f); break;
                 case 3:  f = std::sin(g * vf); break;
                 case 4:  if (dsCount == 0) dsHold[c] = vf; f = dsHold[c]; break;      /* Serum's Downsample: the sample at the start of each hold, repeated */
                 default: f = std::tanh(g * vf); break;
                 }
+                if (st.distPost) f = st.distPre == 3 ? distPreSvf.tick(c, f) : st.distPre ? distPreBq.tick(c, f) : f;
                 float o = lv * (dry * v + s * k * f);
                 distDc[c] += dcA * (o - distDc[c]);              /* every curve can leave a DC term on a loud or lopsided input (the bias, a sine fold of an offset): taken out of the sum */
                 y[c] = o - distDc[c];
@@ -1778,6 +1892,7 @@ private:
     /* The second distortion: the calibrated law of processDistCal (Soft / Asym / Hard / Sine) on its own settings, filter and state. */
     void processDist2(float *L, float *R, int n)
     {
+        if (st.dist2Tab) { processDistTab(1, L, R, n); return; }
         const float s = std::min(std::max(st.dist2Mix, 0.0f), 1.0f), dry = 1.0f - s * s;
         const float g = st.dist2Gain, k = st.dist2Out, lv = st.dist2Level, bias = 0.004f, biasOut = std::tanh(g * bias);
         const float dw = (dist2Target - dist2Cur) / (float) n;
@@ -1788,15 +1903,17 @@ private:
             float x[2] = { L[i], R[i] }, y[2];
             for (int c = 0; c < 2; c++) {
                 const float v = x[c];
-                const float vf = st.dist2Pre == 3 ? dist2PreSvf.tick(c, v) : st.dist2Pre ? dist2PreBq.tick(c, v) : v;
+                const float vf = st.dist2Post ? v : st.dist2Pre == 3 ? dist2PreSvf.tick(c, v) : st.dist2Pre ? dist2PreBq.tick(c, v) : v;
                 float f;
-                switch (st.dist2Mode) {
+                if (st.dist2Tab) f = distTabEval(distCurve[1], g * vf);
+                else switch (st.dist2Mode) {
                 case 1:  f = std::tanh(g * (vf + bias)) - biasOut; break;
                 case 2:  f = std::min(std::max(g * vf, -1.0f), 1.0f); break;
                 case 3:  f = std::sin(g * vf); break;
                 case 4:  if (ds2Count == 0) ds2Hold[c] = vf; f = ds2Hold[c]; break;
                 default: f = std::tanh(g * vf); break;
                 }
+                if (st.dist2Post) f = st.dist2Pre == 3 ? dist2PreSvf.tick(c, f) : st.dist2Pre ? dist2PreBq.tick(c, f) : f;
                 const float o = lv * (dry * v + s * k * f);
                 dist2Dc[c] += dcA * (o - dist2Dc[c]);
                 y[c] = o - dist2Dc[c];

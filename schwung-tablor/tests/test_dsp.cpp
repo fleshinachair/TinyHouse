@@ -673,10 +673,10 @@ static void testXwarp()
     Wavetable wt;
     buildSineTable(wt);
     const double sr = 44100.0, f0 = 130.8128, fm = f0 * std::pow(2.0, 7.0 / 12.0);
-    auto render = [&](float note, int xw, float a, std::vector<float> &out, int xsrc = 0, int xw2 = 0, float a2 = 0.0f) {
+    auto render = [&](float note, int xw, float a, std::vector<float> &out, int xsrc = 0, int xw2 = 0, float a2 = 0.0f, float bm = 1.0f) {
         VoicedWTOscillator o(kMaxUnison);
         o.setSampleRate(sr); o.setWavetable(&wt); o.noteOn(0.0f);
-        VoicedWTParams vp; vp.voices = 1; vp.xwarp = xw; vp.xamount = a; vp.xsrc = xsrc; vp.xwarp2 = xw2; vp.xamount2 = a2; vp.xsrc2 = xsrc;
+        VoicedWTParams vp; vp.voices = 1; vp.xwarp = xw; vp.xamount = a; vp.xsrc = xsrc; vp.xwarp2 = xw2; vp.xamount2 = a2; vp.xsrc2 = xsrc; vp.bendM = bm;
         out.clear();
         double ph = 0.0;
         for (int blk = 0; blk < 44100 / 128; blk++) {
@@ -737,6 +737,19 @@ static void testXwarp()
         render(48.0f, 7, 0.35f, x);
         const double h2b = 20.0 * std::log10(amp(x, 2 * f0) / a0);
         CHECK(std::fabs(h2b + 14.0) < 2.0, "SelfPD 0.35: 2nd harmonic %.1f dB (Serum -14.0)", h2b);
+    }
+    /* Serum's Bend+ / Bend- (voice.h turns warp kinds 8 / 9 into the slope; wt_oscillator.h serumBend). On a sine the two give the same harmonics: Bend 1.0 puts h2 at -9.3 dB and
+     * h3 at -12.7 re the unwarped fundamental, Bend 0.5 h2 -10.9 and h3 -21.3 (Serum, calibration/dev/validate_static_warps.py TABLE=sine CASES=bend) */
+    {
+        const float m1 = serumBendSlope(1.0f), m5 = serumBendSlope(0.5f);
+        CHECK(serumBendSlope(0.0f) == 1.0f && std::fabs(m1 - 0.112f) < 0.002f, "Bend slope: 1 at 0, %.3f at 1 (0.112)", m1);
+        const double want[4][3] = { { 1.0, -9.3, -12.7 }, { 1.0, -9.3, -12.7 }, { 0.5, -10.9, -21.3 }, { 0.5, -10.9, -21.3 } };
+        const float ms[4] = { 1.0f / m1, m1, 1.0f / m5, m5 };
+        for (int c = 0; c < 4; c++) {
+            render(48.0f, 0, 0.0f, x, 0, 0, 0.0f, ms[c]);
+            const double h2 = 20.0 * std::log10(amp(x, 2 * f0) / a0), h3 = 20.0 * std::log10(amp(x, 3 * f0) / a0);
+            CHECK(std::fabs(h2 - want[c][1]) < 1.0 && std::fabs(h3 - want[c][2]) < 1.0, "Bend%s %.1f: h2 %.1f dB (Serum %.1f), h3 %.1f (%.1f)", c % 2 ? "-" : "+", want[c][0], h2, want[c][1], h3, want[c][2]);
+        }
     }
     /* the Noise as the modulator (source 4): RM is (1 - a) x + 0.409 a^2 x n, so the carrier line is 1 - a; FM below 0.45 and PD below 0.55 do nothing; PD at 0.8 leaves the carrier
      * at -13.6 dB (Serum, calibration/dev/probe_noise_warp_law.py), FM at 0.5 at -0.9 dB */

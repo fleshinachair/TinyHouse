@@ -83,6 +83,7 @@ public:
          * sample (a frequency deviation). Both are already scaled by the warp's depth, one value per sample of the block. */
         const float *pmod = nullptr, *fmod = nullptr;
         float selfPd = 0.0f;      /* Serum's SelfPD: the phase pushed by the wave's own value, read at p + selfPd x(p + selfPd x(...)) (cycles per table peak; 0 off) */
+        float bendM = 1.0f;       /* Serum's Bend+ / Bend- (serumBend): the symmetric phase map's slope at the middle of the cycle; 1 off, above 1 Bend+, below 1 Bend- */
     };
 
     void setSampleRate(double sr)
@@ -112,6 +113,7 @@ public:
     {
         if (!wt || wt->size() == 0) return;
         if (params.shape == 5) prepareCurve(params.curveMode, params.curveAmt);
+        bendM = params.bendM;
 
         /* The shaper (postProcess) is a function of each sample alone, so the paths below write the raw samples to a block buffer and finish() shapes them
          * and adds them in with the gains in one pass: the same arithmetic per sample, without a call and four branches per sample (output-identical).
@@ -129,7 +131,7 @@ public:
                     processStepped(note, params, raw, k);
                 else if (tableIndex != lastTableIndex && lastTableIndex >= 0)
                     processCrossfade(note, params, raw, k);
-                else if (params.bend == 0.0f && params.formant == 0.0f)
+                else if (params.bend == 0.0f && params.formant == 0.0f && params.bendM == 1.0f)
                     processSimple(note, params, raw, k);
                 else
                     processComplex(note, params, raw, k);
@@ -283,9 +285,22 @@ private:
         }
     }
 
-    /* gin's bendDistortion + formantDistortion, formant exp hoisted. */
+    /* Serum's Bend+ / Bend- (calibration/dev/probe_bend_map.py): symmetric about the middle of the cycle. With u = |2p - 1| the distance from the middle, the phase read
+     * sits at v = m u / (1 - (1 - m) u) from it, m the slope at the middle; 1 / m is the inverse map, and two in a row are one map with the product of the slopes. In the
+     * table's own phase Bend+ has m > 1 (it stretches the table's start and end over the cycle) and Bend- m < 1: the probe reads phase from the saw's wrap, half a cycle
+     * on, where the same maps have the slopes the other way round (1 - f_m(1 - u) = f_1/m(u)). Fits Serum's phase map to 0.002-0.02 of a cycle at every amount. */
+    static inline float serumBend(float ph, float m)
+    {
+        const float x = 2.0f * ph - 1.0f, u = std::fabs(x);
+        const float v = m * u / (1.0f - (1.0f - m) * u);
+        return std::min(kAlmostOne, 0.5f + 0.5f * std::copysign(v, x));
+    }
+
+    /* gin's bendDistortion + formantDistortion, formant exp hoisted; Serum's Bend first when it is on. */
     inline float distort(float ph, float bend, float formantMul) const
     {
+        if (bendM != 1.0f)
+            ph = serumBend(ph, bendM);
         if (bend != 0.0f) {
             const float addDist = std::clamp(bend, 0.0f, 1.0f);
             const float subDist = std::clamp(bend, -1.0f, 0.0f);
@@ -314,9 +329,16 @@ private:
     }
 
     /* distort() on four phases. */
-    static inline float32x4_t distort4(float32x4_t ph, float bend, float formantMul)
+    inline float32x4_t distort4(float32x4_t ph, float bend, float formantMul) const
     {
         const float32x4_t vone = vdupq_n_f32(1.0f), vmax = vdupq_n_f32(kAlmostOne);
+        if (bendM != 1.0f) {                                   /* serumBend */
+            const float32x4_t x = vsubq_f32(vaddq_f32(ph, ph), vone), u = vabsq_f32(x);
+            const float32x4_t v = vdivq_f32(vmulq_f32(vdupq_n_f32(bendM), u), vsubq_f32(vone, vmulq_f32(vdupq_n_f32(1.0f - bendM), u)));
+            const uint32x4_t sgn = vandq_u32(vreinterpretq_u32_f32(x), vdupq_n_u32(0x80000000u));
+            const float32x4_t sv = vreinterpretq_f32_u32(vorrq_u32(vreinterpretq_u32_f32(v), sgn));
+            ph = vminq_f32(vmax, vfmaq_f32(vdupq_n_f32(0.5f), vdupq_n_f32(0.5f), sv));
+        }
         if (bend != 0.0f) {
             const float addDist = std::clamp(bend, 0.0f, 1.0f), subDist = std::clamp(bend, -1.0f, 0.0f);
             const float32x4_t s2 = vmulq_f32(ph, ph), s4 = vmulq_f32(s2, s2), sub = vmulq_f32(s4, s4);
@@ -387,7 +409,7 @@ private:
         posToFrames(p.position, fa, fb, frac);
         const MipLevel &la = fa->levelRef(note), &lb = fb->levelRef(note);
         if (!(p.selfPd > 0.0f)) {                      /* the common case, as a loop specialised on what is on (output-identical: an absent term is + 0) */
-            const bool pm = p.pmod != nullptr, fm = p.fmod != nullptr, fr = frac > 0.0f, ds = p.bend != 0.0f || formantMul != 1.0f;
+            const bool pm = p.pmod != nullptr, fm = p.fmod != nullptr, fr = frac > 0.0f, ds = p.bend != 0.0f || formantMul != 1.0f || p.bendM != 1.0f;
             const int sel = (pm ? 8 : 0) | (fm ? 4 : 0) | (fr ? 2 : 0) | (ds ? 1 : 0);
             switch (sel) {
 #define TB_MODCASE(k) case k: modLoop<(k & 8) != 0, (k & 4) != 0, (k & 2) != 0, (k & 1) != 0>(p, la, lb, frac, delta, formantMul, o, n); break;
@@ -648,6 +670,7 @@ private:
     int tableIndex = -1, lastTableIndex = -1, steppedIdx = -1;
     bool blockDC = true;
     float curve[kWarpCurvePts] = {};
+    float bendM = 1.0f;                     /* this block's Params::bendM, read by distort() */
     int   curveModeC = -1;
     float curveAmtC = -1.0f;
     DCBlocker blockerL, blockerR;
@@ -755,7 +778,18 @@ struct VoicedWTParams {
     float xamount2 = 0.0f;
     int   xsrc2 = 0;
     bool  xvital = false;                 /* Warp Chain: ring modulation by an oscillator at Vital's depth (a unit table gives a modulator of amplitude 1) */
+    float bendM = 1.0f;                   /* Serum's Bend+ / Bend- (warp kinds 8 / 9): WTOscillator::Params::bendM, the product over both warp slots */
 };
+
+/* Serum's Bend amount -> m, the slope of its phase map (WTOscillator::serumBend) as the probe reads it: the table's own Bend+ is 1 / m, Bend- m. ln(1 / m) at amount 0, 0.1 .. 1,
+ * the mean of the Bend+ and Bend- fits (calibration/dev/probe_bend_map.py; the two agree to 0.01). */
+inline float serumBendSlope(float a)
+{
+    static const float L[11] = { 0.0f, 0.161f, 0.3235f, 0.4905f, 0.663f, 0.8495f, 1.0465f, 1.269f, 1.520f, 1.8115f, 2.189f };
+    const float pos = std::min(std::max(a, 0.0f), 1.0f) * 10.0f;
+    const int i = std::min((int) pos, 9);
+    return std::exp(-(L[i] + (L[i + 1] - L[i]) * (pos - (float) i)));
+}
 
 /* What each warp does at an amount, from Serum:
  *  - Filter LP / HP: a first-order filter whose corner is an ABSOLUTE frequency (it does not follow the note): log2(Hz) by amount below. LP is open at 1, HP is shut.
@@ -939,7 +973,7 @@ private:
     void renderStack(float note, const VoicedWTParams &vp, float *l, float *r, int n, const float *pmod, const float *fmod, float selfPd = 0.0f)
     {
         WTOscillator::Params p;
-        p.position = vp.position; p.bend = vp.bend; p.formant = vp.formant;
+        p.position = vp.position; p.bend = vp.bend; p.formant = vp.formant; p.bendM = vp.bendM;
         p.asym = vp.asym; p.fold = vp.fold; p.sync = vp.sync;
         p.shape = vp.shape; p.shapeGain = vp.shapeGain; p.shapeOut = vp.shapeOut; p.curveMode = vp.curveMode; p.curveAmt = vp.curveAmt;
         p.pmod = pmod; p.fmod = fmod; p.selfPd = selfPd;

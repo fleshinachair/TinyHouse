@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.16"
+VERSION = "0.9.17"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being
@@ -102,10 +102,10 @@ def osc(n):
         shape  = enum(f"wt{n}_wshape", f"SHP{n}",  f"WT{n} Warp Shaper", ["Off", "-", "Clip", "Softsign", "Cubic", "Curve"], 0),
         sgain  = pot(f"wt{n}_sgain",   f"SGN{n}",  f"WT{n} Shaper Gain", 64),
         sout   = pot(f"wt{n}_sout",    f"SOT{n}",  f"WT{n} Shaper Out", 64),
-        xw     = enum(f"wt{n}_xw",     f"XW{n}",   f"WT{n} Warp", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM", "SelfPD"], 0),
+        xw     = enum(f"wt{n}_xw",     f"XW{n}",   f"WT{n} Warp", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM", "SelfPD", "Bend+", "Bend-"], 0),
         xa     = num(f"wt{n}_xa",      f"XA{n}",   f"WT{n} Warp Amount", 0, 1000, 0),
         xs     = enum(f"wt{n}_xs",     f"XS{n}",   f"WT{n} Warp From", ["Sub", "Osc A", "Osc B", "Osc C", "Noise"], 0),
-        xw2    = enum(f"wt{n}_xw2",    f"XV{n}",   f"WT{n} Warp 2", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM", "SelfPD"], 0),
+        xw2    = enum(f"wt{n}_xw2",    f"XV{n}",   f"WT{n} Warp 2", ["Off", "Filter LP", "Filter HP", "FM", "PD", "RM", "AM", "SelfPD", "Bend+", "Bend-"], 0),
         xa2    = num(f"wt{n}_xa2",     f"XB{n}",   f"WT{n} Warp 2 Amount", 0, 1000, 0),
         xs2    = enum(f"wt{n}_xs2",    f"XU{n}",   f"WT{n} Warp 2 From", ["Sub", "Osc A", "Osc B", "Osc C", "Noise"], 0),
     )
@@ -116,7 +116,7 @@ def osc(n):
 O1, O2, O3 = osc(1), osc(2), osc(3)
 
 # The voice filters' types: the eight biquads, then Serum's comb and flanger models (comb.h: a feedback comb tuned to the cutoff, Reso its feedback), then Serum's three Formant models (formant.h: parallel band-pass resonators from measured tables, Freq and the hidden Var move them).
-FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB", "Reverb"]
+FILTER_TYPES_V = FILTER_TYPES + ["Comb +", "Comb -", "Flange +", "Flange -", "Phase 12 +", "Phase 24 +", "Phase 36 +", "Phase 48 +", "Formant ONE", "Formant TWO", "Formant TWB", "Reverb", "LP 6", "HP 6"]
 
 FILTER = dict(
     freq = pot("flt_freq", "FREQ", "Filter Freq", 127),
@@ -131,7 +131,7 @@ FILTER = dict(
 # filter envelope (the loudest voice's). No page on the device, the converter sets it.
 FILTER2 = dict(
     on   = enum("fxf_on",   "F2ON", "FX Filter Enable", ONOFF, 0),
-    type = enum("fxf_type", "F2TY", "FX Filter Type", FILTER_TYPES, 0),
+    type = enum("fxf_type", "F2TY", "FX Filter Type", FILTER_TYPES + ["LP 6", "HP 6"], 0),
     freq = pot("fxf_freq",  "F2FQ", "FX Filter Freq", 127),
     res  = pot("fxf_res",   "F2RS", "FX Filter Res", 0),
     env  = pot("fxf_env",   "F2EN", "FX Filter EG Amt", 64),
@@ -852,6 +852,10 @@ BANKS = [
         [enum(f"lfo{n}_hr", f"H{n}R", f"LFO{n} Hi-Res", ["Off", "On"], 0)] + [num(f"lfo{n}_h{k}", f"H{n}{k:02X}", f"LFO{n} Hi-Res {k}", 0, 127, 64) for k in range(64)])]),
     # After LFO Hi-Res, for the same reason. Osc Phase (modulators / synth_oscillator.cpp: a voice starts at random x Random Phase of a cycle, and the Phase knob is added as a constant offset): Random Phase 127 (the default) is the engine's
     # free-running start, 0 starts every voice at the Phase offset (0..127 over one cycle). Two oscillators at the same pitch then keep a fixed phase to each other, so their harmonics add or cancel the same way on every note.
+    # Phase Draw: Per Osc (Vital: every oscillator has its own random generator) or Per Voice (Serum, calibration/dev/probe_osc_phase.py: one random draw per note shifts every
+    # oscillator, each by its own Random amount, so oscillators at one pitch keep the phase their Phase knobs give; a unison stack's other voices keep their own draws).
+    # Sub Phase: where the Sub starts, 0..127 over one cycle (Serum's Sub Initial Phase / 360: it takes no random draw).
+    # Voice Limit: 0 none; else at most that many notes sound, the oldest giving way to a new one (Serum's Polyphony). Voices above only shares out the CPU budget.
     ("Osc Phase", False, [row(num("wt1_rph", "RP1", "Osc A Random Phase", 0, 127, 127), num("wt2_rph", "RP2", "Osc B Random Phase", 0, 127, 127), num("wt3_rph", "RP3", "Osc C Random Phase", 0, 127, 127)),
                           row(num("wt1_phs", "PS1", "Osc A Phase", 0, 127, 0), num("wt2_phs", "PS2", "Osc B Phase", 0, 127, 0), num("wt3_phs", "PS3", "Osc C Phase", 0, 127, 0))]),
     # After Osc Phase, for the same reason. Vital's Formant voice filter (Filter Blend Mode = Formant, derived from filters/formant_filter.cpp, formant.h): four band-pass resonators placed between the vowels of the style by X / Y
@@ -910,6 +914,28 @@ BANKS = [
     # Serum's Reverb1 voice-filter model (filter type "Reverb", comb.h processReverb1): its Stereo knob, 0..127 for Serum's 0..100 %, 64 = 50 % = both sides alike (Serum's default);
     # away from it the two sides' delays stretch apart, +-2.62 d^3 octaves, d = (50 - Stereo %) / 50 (calibration/dev/probe_reverb1.py)
     ("Serum Reverb Filter", False, [row(num("flt_rvst", "RST1", "Filter Stereo", 0, 127, 64), num("flt2_rvst", "RST2", "Filter 2 Stereo", 0, 127, 64))]),
+    # Appended last (2026-11-23), so no earlier parameter's number moves. Osc Phase Draw, Sub Phase and Voice Limit belong with Osc Phase above (its comment describes them).
+    ("Osc Phase 2", False, [row(enum("osc_phd", "PHD", "Osc Phase Draw", ["Per Osc", "Per Voice"], 0), num("sub_phs", "PS4", "Sub Phase", 0, 127, 0),
+                                num("poly_max", "PMAX", "Voice Limit", 0, 8, 0))]),
+    # A voice filter's Level Out (Serum's, calibration/dev/probe_vfilter_levelout.py): the filter's output times (pot / 64)^2, so 64 is unity, 0 silent and
+    # 127 +12 dB, exactly Serum's 40 log10(2 x) dB for its 0..1 knob (x = pot / 128), whatever the model.
+    ("Filter Level", False, [row(num("flt_lvl", "FLV1", "Filter Level", 0, 127, 64), num("flt2_lvl", "FLV2", "Filter 2 Level", 0, 127, 64))]),
+    # Serum's multiband compressor crossovers (XoverLow / XoverHi, calibration/dev/probe_mbcomp_params.py: XoverHi 1000 compresses the mids
+    # 3 dB more, 6000 leaves the highs nearly alone): 0 keeps the engine's 120 Hz / 2.4 kHz, 1..127 is 20 Hz x 1000^(pot / 127). Set by the Serum converter.
+    ("Comp Crossover", False, [row(num("comp_xlo", "CXLO", "Comp X-over Low", 0, 127, 0), num("comp_xhi", "CXHI", "Comp X-over High", 0, 127, 0))]),
+    # Serum's multiband per-band Ratio0..2 and RatioBelow0..2 (calibration/dev/probe_mbcomp_params.py CASES=ratios): each scales the shared knob for its band, 1 (127) by default and doing
+    # nothing alone; Ratio2 0 leaves the high band uncompressed, RatioBelow 0.75 with RatioBelow0 0 lifts every band but the low one. Here pot / 127 scales the band's downward slope
+    # (1 - 1 / Ratio) and its upward slope (Comp Below). Set by the Serum converter.
+    ("Comp Band Scales", False, [row(*[num(f"comp_rs{b}", f"CRS{b}", f"Comp Ratio Scale {b}", 0, 127, 127) for b in (1, 2, 3)],
+                                     *[num(f"comp_bs{b}", f"CBS{b}", f"Comp Below Scale {b}", 0, 127, 127) for b in (1, 2, 3)])]),
+    # Where a distortion's own filter sits (Serum's PrePost: 2 before the curve, 1 after it, on the distorted part only; calibration/dev/probe_dist_prepost.py): the filter pots above
+    # (Distortion Pre-Filter ...) run before the curve, or after it with After. A filter after the distortion used to go to the master EQ, after every later effect. Set by the Serum converter.
+    ("Distortion Filter Place", False, [row(enum("dist_ppos", "DPP1", "Distortion Filter Place", ["Before", "After"], 0), enum("dist2_ppos", "DPP2", "Distortion 2 Filter Place", ["Before", "After"], 0))]),
+    # Serum's own distortion curves (calibration/dev/probe_dist_fxtable.py: every mode but Overdrive / Downsample is a static shaper, measured over -4..4 of its table units at
+    # Drive 0..100): Table 0 keeps the Soft / Asym / Hard / Sine fit above, 1.. picks a measured mode (src/dsp/dist_tables.h), Table Drive is Serum's Drive in percent.
+    # The curve's input and output scale are then the table's own; Distortion Drive / Wet Gain are not used. Set by the Serum converter.
+    ("Distortion Table", False, [row(num("dist_tab", "DTB1", "Distortion Table", 0, 32, 0), num("dist_tamt", "DTA1", "Distortion Table Drive", 0, 100, 0),
+                                     num("dist2_tab", "DTB2", "Distortion 2 Table", 0, 32, 0), num("dist2_tamt", "DTA2", "Distortion 2 Table Drive", 0, 100, 0))]),
 ]
 
 # Main: the page you land on, and the only one you should need while playing.

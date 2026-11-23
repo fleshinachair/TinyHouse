@@ -336,18 +336,27 @@ public:
         /* oscillator phases: free-running (the old retrig-off default —
          * the retrig switch was cut from the surface) */
         static_assert(TB_P_WT2_RPH == TB_P_WT1_RPH + 1 && TB_P_WT3_RPH == TB_P_WT1_RPH + 2 && TB_P_WT1_PHS == TB_P_WT1_RPH + 3 && TB_P_WT3_PHS == TB_P_WT1_PHS + 2, "Osc Phase layout");
-        /* Vital: a voice starts at random x Random Phase of a cycle plus the Phase offset; Random Phase 127 and Phase 0 are the free-running start above */
+        /* Vital: a voice starts at random x Random Phase of a cycle plus the Phase offset; Random Phase 127 and Phase 0 are the free-running start above.
+         * Phase Draw Per Voice (Serum): the first voice of every oscillator's stack takes ONE draw for the note, so the oscillators keep their Phase offsets to each other; the
+         * stack's other voices start anywhere (Serum's are not random, but how it lays them out is not measured, and the unison gain law is for voices that do not add in phase:
+         * a 10-voice stack at no detune started in phase came out 10 dB loud) */
+        const bool sharedDraw = P[TB_P_OSC_PHD] >= 0.5f;
+        const float voiceDraw = sharedDraw ? (float) rand() / (float) RAND_MAX : 0.0f;
         for (int oi = 0; oi < kOscs; oi++) {
             float phases[kMaxUnison];
             const float rph = pot01(P[TB_P_WT1_RPH + oi]), phs = pot01(P[TB_P_WT1_PHS + oi]);
-            for (auto &ph : phases) {
-                ph = (float) rand() / (float) RAND_MAX * rph + phs;
+            for (int s = 0; s < kMaxUnison; s++) {
+                float &ph = phases[s];
+                if (sharedDraw)
+                    ph = s == 0 ? voiceDraw * rph + phs : (float) rand() / (float) RAND_MAX;
+                else
+                    ph = (float) rand() / (float) RAND_MAX * rph + phs;
                 ph -= std::floor(ph);
             }
             osc[oi].noteOn(phases, kMaxUnison);
         }
         for (auto &m : modOsc) m.noteOn(0.0f);
-        sub.noteOn(0.0f);
+        { const float sp = pot01(P[TB_P_SUB_PHS]); sub.noteOn(sp >= 1.0f ? 0.0f : sp); }     /* Serum's Sub Initial Phase: a fixed start, no random part (calibration/dev/probe_osc_phase.py) */
         noise.noteOn(0.0f);
         /* Serum's noise is mono with a random left/right level imbalance per note (2.3 dB on average, calibration/noise_stereo: correlation 1.000, side/mid -13..-29 dB) */
         noisePan = ((float) rand() / (float) RAND_MAX * 2.0f - 1.0f) * 0.27f;
@@ -719,6 +728,7 @@ public:
                 for (int i = 0; i < n; i++) { pre2L[i] *= g; pre2R[i] *= g; }
             }
             if (mixing2) for (int i = 0; i < n; i++) { pre2L[i] = dryBL[i] + (pre2L[i] - dryBL[i]) * mixB; pre2R[i] = dryBR[i] + (pre2R[i] - dryBR[i]) * mixB; }
+            if (P[TB_P_FLT2_LVL] != 64.0f) { const float q = P[TB_P_FLT2_LVL] * (1.0f / 64.0f), g = q * q; for (int i = 0; i < n; i++) { pre2L[i] *= g; pre2R[i] *= g; } }     /* Serum's Level Out: (pot / 64)^2 */
         };
         if (f2First) {
             usesF2 = true;
@@ -749,6 +759,7 @@ public:
             for (int i = 0; i < n; i++) { preL[i] *= g; preR[i] *= g; }
         }
         if (mixing) for (int i = 0; i < n; i++) { preL[i] = dryAL[i] + (preL[i] - dryAL[i]) * mixA; preR[i] = dryAR[i] + (preR[i] - dryAR[i]) * mixA; }
+        if (P[TB_P_FLT_LVL] != 64.0f) { const float q = P[TB_P_FLT_LVL] * (1.0f / 64.0f), g = q * q; for (int i = 0; i < n; i++) { preL[i] *= g; preR[i] *= g; } }        /* Serum's Level Out: (pot / 64)^2 */
         driveGain = driveGainTarget;
         driveMix = driveMixTarget;
 
@@ -900,9 +911,9 @@ private:
                 lfoOut[ol] = lfoShapeAt(P, l, ph, lfoIsOneShot(P, l));                             // 0..1
                 const float tau = potLfoSmoothTau(P[lfoKeys(l).smooth]);
                 const float fadeSec = lfoFadeSec(P, l);
-                if (fadeSec > 0.0f && tau <= 0.0f) {                 /* Fade In blends from the LFO's start value to its running value (Vital ignores it while the LFO is smoothed) */
+                if (fadeSec > 0.0f && (tau <= 0.0f || P[TB_P_LFO_VLAW] < 0.5f)) {                 /* Fade In blends from the LFO's start value to its running value (Vital ignores it while the LFO is smoothed) */
                     lfoFadeAmp[l] = std::min(1.0f, lfoFadeAmp[l] + adv / std::max(adv, fadeSec));
-                    const float start = lfoShapeAt(P, l, phOff, lfoIsOneShot(P, l));
+                    const float start = P[TB_P_LFO_VLAW] >= 0.5f ? lfoShapeAt(P, l, phOff, lfoIsOneShot(P, l)) : 0.0f;     /* Serum's Rise scales the LFO up from 0 (calibration/dev/probe_lfo_rise.py), Vital's Fade In from its start value */
                     lfoOut[ol] = start + (lfoOut[ol] - start) * lfoFadeAmp[l];
                 }
                 if (tau > 0.0f) {
@@ -1011,12 +1022,16 @@ private:
             /* shape 5: a measured Serum waveshaper (warp_curves.h) - Gain is its index, Out its amount over 0..127 */
             v.curveMode = std::clamp((int) P[k.sgain], 0, 63);
             v.curveAmt = std::clamp(P[k.sout] / 127.0f, 0.0f, 1.0f);
-            v.xwarp = std::clamp((int) P[k.xw], 0, 7);                   /* Serum's filter / FM / PD / RM / AM warps (wt_oscillator.h), the amount in thousandths */
+            v.xwarp = std::clamp((int) P[k.xw], 0, 9);                   /* Serum's filter / FM / PD / RM / AM / SelfPD / Bend warps (wt_oscillator.h), the amount in thousandths */
             v.xamount = std::clamp(P[k.xa] * 0.001f + modOff[k.dXa], 0.0f, 1.0f);
             v.xsrc = std::clamp((int) P[k.xs], 0, 4);
-            v.xwarp2 = std::clamp((int) P[k.xw2], 0, 7);
+            v.xwarp2 = std::clamp((int) P[k.xw2], 0, 9);
             v.xamount2 = std::clamp(P[k.xa2] * 0.001f, 0.0f, 1.0f);
             v.xsrc2 = std::clamp((int) P[k.xs2], 0, 4);
+            /* Bend+ / Bend- (8 / 9) are a phase map on the table read, not a stage after it: they become the oscillator's bend slope, and the slot is off for the rest */
+            v.bendM = 1.0f;
+            if (v.xwarp >= 8) { const float m = serumBendSlope(v.xamount); v.bendM *= v.xwarp == 8 ? 1.0f / m : m; v.xwarp = 0; }
+            if (v.xwarp2 >= 8) { const float m = serumBendSlope(v.xamount2); v.bendM *= v.xwarp2 == 8 ? 1.0f / m : m; v.xwarp2 = 0; }
             v.xvital = P[TB_P_XCHAIN] > 0.5f;
             oscGain[o] = v.gain;
 
@@ -1103,7 +1118,7 @@ private:
             n += env * sens * potBipolar(P[TB_P_FLT_ENV]) * filterWidth;
             n += modOff[MD_FLT_FREQ] * filterWidth;
 
-            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 19);
+            const int ft = std::clamp((int) P[TB_P_FLT_TYPE], 0, 21);
             combType = ft >= 8 && ft < 16 ? ft - 7 : 0;                                  /* 1 Comb +, 2 Comb -, 3 Flange +, 4 Flange - */
             combLoop = combType && combType <= 4 ? std::clamp((int) P[TB_P_FLT_LOOP], 0, 3) : 0;                     /* the L6 / H6 / HL6 loop filter of Serum's comb and flange models, its pole set by x = Var % + 50 x the Freq knob (HL6: by Var % alone, comb.h) */
             combLx = P[TB_P_FLT_VAR] * (100.0f / 127.0f) + (combLoop == 3 ? 0.0f : 50.0f * n / 136.766f);
@@ -1123,8 +1138,8 @@ private:
             combRes = res;
             vcMode = (int) P[TB_P_VCOMB]; vcBlend = blendOf(P[TB_P_CBLEND], MD_FLT_BLEND); vcTrans = ctransOf(P[TB_P_CTRANS], MD_FLT_CTRANS);   /* the Vital comb's blend and transpose (comb.h processVital) */
             int t = ft >= 8 ? 1 : ft & 7;
-            filter.setType(kTypes[t]);
-            filter.setSlope((t & 1) ? Filter::db24 : Filter::db12);
+            filter.setType(ft == 20 ? Filter::lowpass : ft == 21 ? Filter::highpass : kTypes[t]);          /* 20 / 21: LP 6 / HP 6, one pole */
+            filter.setSlope(ft >= 20 ? Filter::db6 : (t & 1) ? Filter::db24 : Filter::db12);
             vph1.on = P[TB_P_FLT_VB] >= 1.5f && P[TB_P_FLT_VB] < 2.5f; vph1Blend = blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND); vph1Inv = (ft & 1) != 0;   /* Vital's Phaser filter: the type's low bit is its Style */
             vb1.on = P[TB_P_FLT_VB] >= 0.5f && P[TB_P_FLT_VB] < 1.5f && !combType && ft < 8;             /* Vital's Blend knob: a crossfade of the low / band / high outputs (see VBlend) */
             if (vb1.on) vb1.set(blendOf(P[TB_P_FLT_BLEND], MD_FLT_BLEND), (t & 1) != 0, q, P[TB_P_FLT_VBG] * (20.0f / 127.0f));
@@ -1151,7 +1166,7 @@ private:
             n2 += ((float) midiNote - 60.0f) * pot01(P[TB_P_FLT2_KEY]);
             n2 += env * sens * potBipolar(P[TB_P_FLT2_ENV]) * filterWidth;
             n2 += modOff[MD_FLT2_FREQ] * filterWidth;
-            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 19);
+            const int ft2 = std::clamp((int) P[TB_P_FLT2_TYPE], 0, 21);
             combType2 = ft2 >= 8 && ft2 < 16 ? ft2 - 7 : 0;
             combLoop2 = combType2 && combType2 <= 4 ? std::clamp((int) P[TB_P_FLT2_LOOP], 0, 3) : 0;
             combLx2 = P[TB_P_FLT2_VAR] * (100.0f / 127.0f) + (combLoop2 == 3 ? 0.0f : 50.0f * n2 / 136.766f);
@@ -1162,8 +1177,8 @@ private:
             fltQ2 = kFilterQ / (1.0f - std::clamp(pot01(P[TB_P_FLT2_RES]), 0.0f, 1.0f) * 0.99f);
             if (P[TB_P_FLT_VDL] >= 0.5f) fltQ2 = vitalFilterDriveQ(fltQ2, pot01(P[TB_P_FLT2_DRIVE]));
             const int t2 = ft2 >= 8 ? 1 : ft2 & 7;
-            filter2.setType(kTypes[t2]);
-            filter2.setSlope((t2 & 1) ? Filter::db24 : Filter::db12);
+            filter2.setType(ft2 == 20 ? Filter::lowpass : ft2 == 21 ? Filter::highpass : kTypes[t2]);
+            filter2.setSlope(ft2 >= 20 ? Filter::db6 : (t2 & 1) ? Filter::db24 : Filter::db12);
             vph2.on = P[TB_P_FLT2_VB] >= 1.5f && P[TB_P_FLT2_VB] < 2.5f; vph2Blend = blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND); vph2Inv = (ft2 & 1) != 0;
             vb2.on = P[TB_P_FLT2_VB] >= 0.5f && P[TB_P_FLT2_VB] < 1.5f && !combType2 && ft2 < 8;
             if (vb2.on) vb2.set(blendOf(P[TB_P_FLT2_BLEND], MD_FLT2_BLEND), (t2 & 1) != 0, fltQ2, P[TB_P_FLT2_VBG] * (20.0f / 127.0f));

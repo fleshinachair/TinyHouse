@@ -225,11 +225,25 @@ def foldable_source(m: dict, macros: list) -> bool:
     return (25 <= s <= 32 and bool(macros)) or s in (1, 16, 17)
 
 
+def curve_in(x: float, c: float) -> float:
+    """A route's Curve In (kParamCurveIn, percent): the source bent before the depth, v = (e^(a x) - 1) / (e^a - 1) with a = -10.2 atanh(c / 100), so +100 is a step up at once and
+    -100 holds 0 until the end (calibration/dev/probe_main_curve.py CURVEIN=1: a macro route's value at 0.1 .. 0.9 for c = -97 .. +50 fits to a few hundredths)."""
+    if abs(c) < 0.5 or x <= 0.0 or x >= 1.0:
+        return min(max(x, 0.0), 1.0)
+    if c >= 99.9:
+        return 1.0
+    if c <= -99.9:
+        return 0.0
+    a = -10.2 * math.atanh(c / 100.0)
+    return math.expm1(a * x) / math.expm1(a)
+
+
 def macro_value(m: dict, macros: list) -> float:
     """The value 0..1 a macro (or velocity / the note, at their nominal values) gives a route: the source's position, through the route's own curve when it has one."""
     s = m["source"]
     x = macros[s - 25] / 100.0 if 25 <= s <= 32 else VELOCITY_NOMINAL / 127.0 if s == 16 else (macros[8] / 100.0 if len(macros) > 8 else 0.0) if s == 1 else NOTE_NOMINAL / 127.0
     lut = m.get("curve")
+    x = curve_in(x, m.get("curve_in", 0.0))
     return float(np.interp(x, np.linspace(0.0, 1.0, len(lut)), lut)) if lut else x
 
 
@@ -957,6 +971,8 @@ def dist_filter_bands(nodes: list[dict]) -> tuple[list[dict], list[str]]:
             why.append("Distortion filter before the distortion (a second distortion)")
         if pre_post != 1 or pp.get("kParamWet", 100.0) < 1.0:
             continue
+        if float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) > 0.5 and i in (dist_chosen(nodes), dist2_chosen(nodes)) and dist_params(nodes, pick=0 if i == dist_chosen(nodes) else 1)[0].get("dist_ppos"):
+            continue                                          # the engine's distortion stage runs this filter after its curve (dist_pre_params), in place, not as an EQ after every later effect
         t = float(pp.get("kParamLPHP", 0.0)) / 100.0
         fc = serum_filter_hz(float(pp.get("kParamFreq", 0.5)))
         q = DIST_FILTER_Q_BASE + DIST_FILTER_Q_PER_BW * float(pp.get("kParamBW", DIST_FILTER_BW_DEFAULT))
@@ -1002,6 +1018,10 @@ DIST_CURVES_FILE = ROOT / "calibration/dist_curves.json"
 DIST_PROBE_GAIN = 10 ** (-2.4186 / 20)
 DOWNSAMPLE_HOLD_PER_DRIVE2 = 0.0088          # Serum's Downsample: hold length = 1 + 0.0088 Drive^2 samples (Drive in percent)
 DIST_LEVELOUT_DEFAULT = 0.5
+# Serum's own curves for the modes that are static shapers (calibration/dev/probe_dist_fxtable.py; the engine's dist_tables.h, made by tools/gen_dist_tables.py): the engine's
+# Distortion Table runs the mode's measured curve at Serum's Drive, in place of the Soft / Asym / Hard / Sine fit of dist_curves.json (which several modes only had through
+# the default's entry). Overdrive is in with its input high-pass (it has memory; NumStages 1 only), the folds and Downsample are not in the table and keep the fit.
+DIST_TABLE_FILE = ROOT / "calibration/dist_table_modes.json"
 
 
 def smoothstep(w: float) -> float:
@@ -1089,7 +1109,8 @@ def dist_pre_params(n: dict) -> dict:
     """The engine's pre-filter pots for a Distortion whose own filter sits before the distorting (PrePost 2): the 12 dB/octave state-variable filter of dist_filter_bands (cutoff
     serum_filter_hz, Q 0.5 + 0.55 BW), low-pass or high-pass at the ends of LPHP and, between them, the engine's Morph (the filter's low-pass, band-pass and high-pass outputs weighted as measured)."""
     pp = plain(n)
-    if int(round(pp.get("kParamPrePost", 0.0))) != 2:
+    place = int(round(pp.get("kParamPrePost", 0.0)))
+    if place not in (1, 2):
         return {}
     t = float(pp.get("kParamLPHP", 0.0)) / 100.0
     morph = DIST_MORPH_EDGE < t < 1.0 - DIST_MORPH_EDGE
@@ -1102,6 +1123,8 @@ def dist_pre_params(n: dict) -> dict:
     P = {"dist_pre": 3 if morph else 1 if kind == "lp" else 2, "dist_pre_freq": pot(fc, DIST_PRE_FREQ_LO, DIST_PRE_FREQ_HI), "dist_pre_q": pot(q, 0.3, 3.0)}
     if morph:
         P["dist_pre_morph"] = int(round(min(max(127.0 * t, 0.0), 127.0)))
+    if place == 1:
+        P["dist_ppos"] = 1                                # PrePost 1: after the curve, on the distorted part (Distortion Filter Place = After), right where Serum has it
     return P
 
 
@@ -1143,6 +1166,9 @@ def dist_params(nodes: list[dict], pick: int = 0) -> tuple[dict, list[str]]:
                  "dist_out": int(round(min(max((k_db + 36.0) * 127.0 / 48.0, 0), 127))),
                  "dist_level": int(round(min(max(64.0 + lv_db * 64.0 / 24.0, 0), 127))),
                  "dist_mix": int(round(min(max(127.0 * smoothstep(wet / 100.0), 0), 127)))}
+            tab = json.loads(DIST_TABLE_FILE.read_text(encoding="utf-8"))["modes"] if DIST_TABLE_FILE.exists() else []
+            if mode in tab and not (mode == "kOverdrive" and int(round(float(pp.get("kParamNumStages", 1.0)))) != 1):      # Overdrive with more stages is not one curve (probe_dist_od_stages.py)
+                P.update({"dist_tab": tab.index(mode) + 1, "dist_tamt": int(round(min(max(drive, 0.0), 100.0)))})
             if float(pp.get("kParamDrive", DIST_DEFAULT_DRIVE)) > 0.5:
                 P.update(dist_pre_params(n))
             return P, [f"Distortion carried: Serum {mode} drive {drive:.0f} %, wet {wet:.0f} %, level out {lo:.2f} -> engine {('soft', 'asym', 'hard', 'sine')[P['dist_mode']]} "
@@ -1159,6 +1185,8 @@ def dist_params(nodes: list[dict], pick: int = 0) -> tuple[dict, list[str]]:
 # parameters are Serum's defaults: threshold 0.5, ratio 4, attack 90, release 90, makeup 1 (unity, a linear factor), wet 100.
 COMP_THRESH_DB = [(0.0, -1.0), (0.3, -3.0), (0.4, -7.0), (0.5, -12.0), (0.6, -17.0), (0.7, -24.0), (0.8, -34.0), (0.85, -41.5), (0.9, -52.0), (0.95, -70.0), (1.0, -90.0)]
 COMP_THRESH_LIMIT_DB = [(0.0, -8.0), (0.4, -14.5), (0.5, -19.0), (0.6, -24.5), (0.7, -32.0), (0.8, -43.0), (0.9, -58.0), (1.0, -80.0)]   # at an infinite ratio
+MB_THRESH_DB_PER_T2 = 123.6                                   # Serum's multiband Thresh: the band thresholds and floor at -123.6 Thresh^2 dB + const (probe_mbcomp_floor.py)
+MB_BOOST_CAP_DB = 36                                          # Serum's multiband upward lift stops at about +36 dB (probe_mbcomp_floor.py, probe_mbcomp_params.py CASES=upward)
 COMP_ATTACK_K, COMP_RELEASE_K = 0.75, 0.45                # fitted on the gain-reduction trajectory (calibration/dev/fit_comp_time.py)
 COMP_ATTACK_LAG_MS = 15.0                                     # the engine's 20 ms detector adds its own lag                    # Serum's Attack / Release setting (ms) -> the engine's time constant
 
@@ -1212,7 +1240,11 @@ def comp_params(nodes: list[dict], dyn_i: int | None = None) -> tuple[dict, list
             # threshold, about -21 - 0.24 (143 - UD) dB (the default is 100); Ratio Below is the slope of the upward compression under a floor
             # 11 dB lower (0 = none); Gain0..2 are the bands' gains in dB. Omitted: UD 100, gains 0, Below 0, ratio 4.
             ud = [float(pp.get(f"kParamThreshUD{b}", 100.0)) for b in range(3)]
-            t_band = [-21.0 - 0.24 * (143.0 - u) for u in ud]
+            # the main Thresh moves all three band thresholds (and the upward floor under them) by -123.6 (Thresh^2 - 0.25) dB from the default 0.5 at which the ThreshUD law above
+            # was measured (calibration/dev/probe_mbcomp_floor.py: noise with RatioBelow 1, the floor within 0.2 dB of that from Thresh 0 to 0.6, the downward part following it to 0.8);
+            # Serum's upward lift stops at about +36 dB (the engine's Comp Boost Cap) and its reduction at about -40 dB
+            t_shift = -MB_THRESH_DB_PER_T2 * (min(max(thresh, 0.0), 1.0) ** 2 - 0.25)
+            t_band = [-21.0 - 0.24 * (143.0 - u) + t_shift for u in ud]
             gains = [float(pp.get(f"kParamGain{b}", 0.0)) for b in range(3)]
             below = min(max(float(pp.get("kParamRatioBelow", 0.0)), 0.0), 1.0)
             knee_db = 2.0                                      # the band curves have a hard knee (fitted)
@@ -1225,7 +1257,14 @@ def comp_params(nodes: list[dict], dyn_i: int | None = None) -> tuple[dict, list
                  "comp_release": int(round(min(max(math.log(max(rel * COMP_RELEASE_K, 10.0) / 10.0) / math.log(300.0), 0.0), 1.0) * 127)),
                  "comp_makeup": int(round(min(max(20.0 * math.log10(max(mk, 1.0)) / 24.0, 0.0), 1.0) * 127)),
                  "comp_mix": int(round(min(max(wet / 100.0, 0.0), 1.0) * 127)),
-                 "comp_knee": int(round(min(max(knee_db / 48.0, 0.0), 1.0) * 127))}
+                 "comp_knee": int(round(min(max(knee_db / 48.0, 0.0), 1.0) * 127)), "comp_boost": MB_BOOST_CAP_DB}
+            for bnd in range(3):                                # per band, Ratio{b} / RatioBelow{b} scale the shared knob's slope for that band (probe_mbcomp_params.py CASES=ratios; default 1)
+                for key, pk in ((f"kParamRatio{bnd}", f"comp_rs{bnd + 1}"), (f"kParamRatioBelow{bnd}", f"comp_bs{bnd + 1}")):
+                    if key in pp:
+                        P[pk] = int(round(min(max(float(pp[key]), 0.0), 1.0) * 127))
+            for key, pk in (("kParamXoverLow", "comp_xlo"), ("kParamXoverHi", "comp_xhi")):      # the crossovers (probe_mbcomp_params.py); unwritten = the engine's 120 Hz / 2.4 kHz, Serum's defaults
+                if key in pp:
+                    P[pk] = int(round(min(max(127.0 * math.log(max(float(pp[key]), 20.0) / 20.0) / math.log(1000.0), 1.0), 127.0)))
             return P, [f"Comp carried (multiband): thresholds UD {ud[0]:.0f}/{ud[1]:.0f}/{ud[2]:.0f}, gains {gains[0]:.1f}/{gains[1]:.1f}/{gains[2]:.1f} dB, below {below:.2f}"]
         P = {"comp_on": 1,
              "comp_thresh_out_db": t_db,                  # a level at Serum's output: the converter turns it into the stage's input level (pre master gain)
@@ -2062,6 +2101,8 @@ _cache: dict | None = None
 
 def fingerprint_for(name: str) -> dict | None:
     global _fingerprints
+    if os.environ.get("TH_NO_FINGERPRINTS"):           # (dev) map as the Move / browser importer does: no Serum fingerprints, the static laws
+        return None
     if _fingerprints is None:
         _fingerprints = {norm_name(k): v for k, v in json.loads(FINGERPRINTS.read_text(encoding="utf-8")).items()} if FINGERPRINTS.exists() else {}
     return _fingerprints.get(norm_name(name))

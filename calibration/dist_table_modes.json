@@ -1,0 +1,45 @@
+{
+ "modes": [
+  "default",
+  "kSoftClip",
+  "kHardClip",
+  "kDiode1",
+  "kDiode2",
+  "kAsym",
+  "kZeroSquare",
+  "kRectify",
+  "kStompBox",
+  "kSoftSat",
+  "kTapeSat",
+  "kOverdrive"
+ ],
+ "blend": [
+  false,
+  true,
+  true,
+  false,
+  false,
+  false,
+  true,
+  false,
+  false,
+  true,
+  false,
+  false
+ ],
+ "pre_hp_hz": [
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  35.0
+ ],
+ "rows": 21
+}

@@ -1473,6 +1473,30 @@ int main()
     testLfo();
     testFxOrder();
     testVitalDist();
+    printf("== distortion tables ==\n");
+    {
+        /* Serum's measured curves (dist_tables.h): table 2 is SoftClip, 11 TapeSat, 12 Overdrive (calibration/dist_table_modes.json) */
+        auto tabRun = [&](int tab, float drive, double hz, float amp) {
+            FxSettings s;
+            s.distCal = true; s.distTab = tab; s.distTabAmt = drive; s.distGain = kDistTabIn; s.distOut = kDistTabOut; s.distLevel = 1.0f; s.distMix = 1.0f;
+            Fx fx(SR);
+            fx.set(s);
+            const int n = (int) SR * 2;
+            std::vector<float> L((size_t) n), R((size_t) n);
+            for (int i = 0; i < n; i++) L[(size_t) i] = R[(size_t) i] = (float) (amp * std::sin(6.283185307 * hz * i / SR));
+            run(fx, L, R);
+            return std::vector<float>(L.begin() + n / 2, L.end());
+        };
+        /* a quiet tone sits on the curve's straight part: twice the input is twice the output */
+        const double lin = goertzelDb(tabRun(2, 0.0f, 440.0, 0.02f), 440.0) - goertzelDb(tabRun(2, 0.0f, 440.0, 0.01f), 440.0);
+        CHECK(std::fabs(lin - 6.02) < 0.2, "a quiet tone through a table curve is linear (x2 in: %+.2f dB out)", lin);
+        const auto loud = tabRun(11, 60.0f, 220.0, 0.6f);
+        CHECK(goertzelDb(loud, 660.0) > goertzelDb(loud, 220.0) - 30.0, "a loud tone through TapeSat at Drive 60 makes odd harmonics (3rd %.1f dB down)", goertzelDb(loud, 220.0) - goertzelDb(loud, 660.0));
+        CHECK(goertzelDb(loud, 440.0) < goertzelDb(loud, 220.0) - 60.0, "and no even ones (a symmetric curve; 2nd %.1f dB down)", goertzelDb(loud, 220.0) - goertzelDb(loud, 440.0));
+        /* Overdrive runs its 3rd-order 35 Hz high-pass ahead of the curve: a quiet 20 Hz tone is ~15 dB under a 1 kHz one */
+        const double cut = goertzelDb(tabRun(12, 0.0f, 20.0, 0.005f), 20.0) - goertzelDb(tabRun(12, 0.0f, 1000.0, 0.005f), 1000.0);
+        CHECK(cut < -12.0 && cut > -18.0, "Overdrive's input high-pass cuts 20 Hz by %.1f dB", cut);
+    }
     printf("== distortion Wet route ==\n");
     {
         auto wetRun = [&](float mod) {

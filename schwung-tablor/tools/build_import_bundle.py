@@ -23,7 +23,7 @@ REPO = HERE.parent.parent
 PY = ["import_web.py", "reconvert.py", "conv_deps.py", "deephouse2move.py", "fxmap.py", "fxmetrics.py", "sample_export.py", "serum_paths.py"]
 VITAL = ["vital_import.py", "vital_morph.py", "vital_wtmod.py", "vital_pd_table.npz"]     # the Vital import: GPL-3.0-or-later, so the bundle carries the licence text and the notice with it (--no-vital leaves it out)
 VITAL_DOCS = ["LICENSE-GPL-3.0", "THIRD-PARTY.md"]
-DATA = ["dist_curves", "dist_scales", "filter_models", "filter_res", "fxfilter_drive_probe2", "fxfilter_models_probe", "fx_laws", "fxf_cutoff", "level_law", "lfo_scales", "warp_curve_modes", "warp_dist_curves"]
+DATA = ["dist_curves", "dist_scales", "dist_table_modes", "filter_models", "filter_res", "fxfilter_drive_probe2", "fxfilter_models_probe", "fx_laws", "fxf_cutoff", "level_law", "lfo_scales", "warp_curve_modes", "warp_dist_curves"]
 
 
 def main() -> None:

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.17
+
+**Serum presets sound closer.** Measured over Serum 2's 626 factory presets: 188 now sound closer to Serum (typically 26 % closer, up to 97 %) and 120 a little further. The average distance from Serum went from 6.8 to 6.4 dB, and 585 presets now pass the import's sound check, up from 583. Presets you imported through the Remote UI convert again in the background after the update (only the ones these fixes change). Every new control is added at the end of the parameter list, so saved presets, Sets and macros keep their numbers.
+
+- **Distortion.** The Distortion effect's curves are now Serum's own, measured from the effect itself (the fold modes are not carried yet). The distortion filter's "After" position runs after the curve instead of at the end of the chain. 283 presets with a distortion moved closer on average.
+- **Multiband compressor.** The three bands now take Serum's crossover frequencies and per-band ratios, the main Threshold moves every band's threshold the way Serum's does, and the upward lift under the floor follows Serum's measured law. 170 presets use it.
+- **Bend+ and Bend-.** The two Bend warps now follow Serum's curve exactly (a saw is within 1.4 dB of Serum, it was up to 16 dB off). BA - Eighty is much closer.
+- **Oscillator start phase.** Serum draws one random start per voice for all oscillators, each scaled by its Random Phase, and its Sub starts at a fixed phase. TinyHouse now does the same (new Per Osc / Per Voice switch). OR - House Organ, where two oscillators cancel the fundamental, is close to Serum.
+- **Voice Limit.** Serum's Voices limit now drops the oldest note when it is reached (BA - Goa Pepper was 13.7 dB off, now 0.4).
+- **Filters.** Two new one-pole filter types (LP 6 and HP 6) replace the closest two-pole guess for Serum's 6 dB filters, the drive of every filter model follows what Serum does, and a voice filter's Level Out is now carried.
+- **Unison Range, Pitch plus Coarse, Note routes.** Unison Range scales the detune spread; Serum's Pitch and legacy Coarse pitch add together; a Note route into an oscillator's volume now follows the note, not only middle C.
+- **Routes and LFOs.** A macro route's Curve In shape is carried. An LFO's Rise fades the LFO in, a synced LFO's Dotted option plays three quarters of the division, and an LFO into an oscillator's Pitch is carried.
+
+Presets that moved further from Serum mostly sit on a gap this release exposed (a distortion or filter that is now right, with an effect further down the chain still wrong): SEQ - Night Raider, DR - Kick Generator, BA - Club - Candy, LOOP - Funk Practice.
+
 ## 0.9.16
 
 **Serum presets sound closer.** Measured over Serum 2's 626 factory presets: 39 now sound closer to Serum (typically 39 % closer, up to 92 %) and 21 a little further. The average distance from Serum went from 7.1 to 6.8 dB, and 583 presets now pass the import's sound check, up from 575. Presets you imported through the Remote UI convert again in the background after the update (only the ones these fixes change).

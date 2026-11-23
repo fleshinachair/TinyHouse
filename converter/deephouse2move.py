@@ -337,17 +337,20 @@ def physical(tree: dict, header: dict) -> dict:
             "octave": 0.0 if p.get("kParamPitchMode") == "Ratio" else p.get("kParamOctave", 0.0),
             "harm": p.get("kParamPitchMode") == "Harmonics",        # Harmonics pitch mode: the Pitch knob picks a harmonic (harmonics_semitones)
             "semitone": (ratio_semitones(p) if p.get("kParamPitchMode") == "Ratio" else harmonics_semitones(p) if p.get("kParamPitchMode") == "Harmonics"
-                         else p.get("kParamPitch", p.get("kParamCoarsePit", 0.0))),
+                         else float(p.get("kParamPitch", 0.0)) + float(p.get("kParamCoarsePit", 0.0))),      # Pitch and the legacy Coarse ADD (calibration/dev/probe_coarse_pitch.py: -7 and +12 play +5)
             "fine_cents": 0.0 if p.get("kParamPitchMode") == "Ratio" else p.get("kParamFine", 0.0),
             "pan": p.get("kParamPan", 0.0),
             "track": p.get("kParamPitchTrack", 1.0),
             "unison": int(p.get("kParamUnison", 1)),
             "detune": p.get("kParamDetune", DEFAULTS["detune"]),
             "detune_wid": p.get("kParamDetuneWid"),      # how far the stack spreads, not stereo
+            "uni_range": float(p.get("kParamUnisonRange", 2.0)),      # semitones: the detune spread scales with Range / 2 (calibration/dev/probe_unison_range.py: default 2; 1 halves it, 12 is 6x)
             "stereo_pct": p.get("kParamUnisonStereo"),
             "table": wt.get("relativePathToWT"),
             "embedded": wt.get("embeddedWTData") or None,        # a table stored in the preset itself: the only copy when it was edited in Serum, the fallback when the file named in table is not on this machine
             "table_pos": wtp.get("kParamTablePos", 1.0),            # 1..256
+            "init_phase": float(wtp.get("kParamInitialPhase", 180.0)),   # degrees, Serum's default 180 (calibration/dev/probe_osc_phase.py)
+            "rand_phase": float(wtp.get("kParamRandomPhase", 100.0)),    # percent of a cycle, ONE draw per voice shared by every oscillator
             "xfade": float(wtp.get("kParamXfadeMode", 0.0)),        # 1 / 2: frames sit 256 / N apart (table_pos_norm)
             "frames": (int(wt.get("numFrames", 0)) // 2048) if int(wt.get("numFrames", 0) or 0) % 2048 == 0 else 0,
             "warp": [{"mode": wtp.get(m), "amount": wtp.get(a, 0.0), "slot": si}
@@ -376,7 +379,7 @@ def physical(tree: dict, header: dict) -> dict:
                          # Out 38-46 routes render the same in Serum with or without it, and the scale made the engine's match worse).
                          "amount_pct": _pp(s).get("kParamAmount", 0.0) * (1.0 if (s["source"][1:] or [0])[0] in (16, 17) else _pp(s).get("kParamOut", 100.0) / 100.0),
                          "bipolar": bool(_pp(s).get("kParamBipolar", 0.0)),
-                         "curve": route_curve(s), "aux_curve": aux_curve(s),
+                         "curve": route_curve(s), "aux_curve": aux_curve(s), "curve_in": float(_pp(s).get("kParamCurveIn", 0.0)),
                          "aux_inverted": bool(_pp(s).get("kParamAuxInverted", 0.0))})
     macros = [_pp(tree.get(f"Macro{i}", {})).get("kParamValue", 0.0) for i in range(8)]
     # The mod wheel is stored in the preset (Global0 kParamModWheel, percent) and Serum plays the preset with it where it was saved (calibration scratch: BA - Donk's wheel at 97 % drives
@@ -454,7 +457,7 @@ def physical(tree: dict, header: dict) -> dict:
     for i in range(10):
         node = tree.get(f"LFO{i}", {}) or {}
         pp, cv = _pp(node), (node.get("curveData") or {})
-        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "smooth": pp.get("kParamSmooth"), "mode": pp.get("kParamDefaultMode"), "env": pp.get("kParamMode") == "Envelope", "type": pp.get("kParamType"),
+        lfos.append({"rate": pp.get("kParamRate"), "sync": pp.get("kParamBeatSync"), "triplets": pp.get("kParamTriplets"), "dotted": pp.get("kParamDotted"), "rise": pp.get("kParamRise"), "smooth": pp.get("kParamSmooth"), "mode": pp.get("kParamDefaultMode"), "env": pp.get("kParamMode") == "Envelope", "type": pp.get("kParamType"),
                      "x": cv.get("xVals"), "y": cv.get("yVals"), "c": cv.get("curveVals"), "name": node.get("curveDisplayName")})
     # A macro, velocity, note or mod-wheel route into an LFO's Rate is folded in at the saved macro position / nominal velocity and note. The stored Rate is the knob's value in Hz,
     # 100 x knob ** 4, and a route adds depth x source to the knob (calibration/dev/probe_lfo_rate_route.py: from Rate 0 a route of 30 / 50 / 70 / 100 % ran the LFO at 0.81 / 6.24 /
@@ -534,6 +537,7 @@ def physical(tree: dict, header: dict) -> dict:
         "name": header.get("presetName", ""), "tags": header.get("tags", []), "clip": clip_from_tree(tree), "arp": arp_from_tree(tree),
         "serum_version": header.get("productVersion"),
         "mono": bool(g.get("kParamMonoToggle", 0)) or g.get("kParamPolyCount") == 1.0, "legato": bool(g.get("kParamLegato", 0)),
+        "poly": int(g["kParamPolyCount"]) if isinstance(g.get("kParamPolyCount"), (int, float)) and g["kParamPolyCount"] >= 1 else None,
         "master": g.get("kParamMasterVolume"),
         "bus_vol": [g.get("kParamFXBus1Vol"), g.get("kParamFXBus2Vol")],
         "porta_s": g.get("kParamPortamentoTime") if (g.get("kParamPortaAlways") or g.get("kParamMonoToggle")) else None,
@@ -541,7 +545,8 @@ def physical(tree: dict, header: dict) -> dict:
         "sub": {"enabled": bool(_pp(sub_node).get("kParamEnable", 0)),
                 "level": _pp(sub_node).get("kParamVolume", DEFAULTS["osc_level"]),
                 "octave": _pp(sub_node).get("kParamOctave", 0.0) + gtr / 12.0,
-                "shape": _pp(sub_node.get("SubOsc4", {})).get("kParamShape", "kSine")},
+                "shape": _pp(sub_node.get("SubOsc4", {})).get("kParamShape", "kSine"),
+                "init_phase": float(_pp(sub_node.get("SubOsc4", {})).get("kParamInitialPhase", 0.0))},     # degrees, default 0, no random part (calibration/dev/probe_osc_phase.py)
         # A noise slot can hold any sample. One played once and shorter than a quarter of a second is a click (a kick attack), not a
         # noise: the engine's continuous noise at that level would drown the sound in hiss, so it is left out.
         "noise": {"enabled": bool(_pp(noise_node).get("kParamEnable", 0)) and not _noise_click(noise_node),
@@ -558,7 +563,7 @@ def physical(tree: dict, header: dict) -> dict:
                    "reso_pct": flt.get("kParamReso", DEFAULTS["reso"]),
                    "drive_pct": flt.get("kParamDrive", 0.0),
                    "keytrack": flt.get("kParamKeyTrack", 0.0),
-                   "var": flt.get("kParamVar"), "stereo": flt.get("kParamStereo", 50.0)},
+                   "var": flt.get("kParamVar"), "stereo": flt.get("kParamStereo", 50.0), "level_out": float(flt.get("kParamLevelOut", 0.5))},
         "filter2_enabled": bool(flt2.get("kParamEnable", 0)) and not off2,
         "filter2": {"enabled": bool(flt2.get("kParamEnable", 0)) and not off2, "wet": wet2,
                     "model": flt2.get("kParamType", DEFAULT_VOICE_FILTER),
@@ -566,7 +571,7 @@ def physical(tree: dict, header: dict) -> dict:
                     "reso_pct": flt2.get("kParamReso", DEFAULTS["reso"]),
                     "drive_pct": flt2.get("kParamDrive", 0.0),
                     "keytrack": flt2.get("kParamKeyTrack", 0.0),
-                    "var": flt2.get("kParamVar"), "stereo": flt2.get("kParamStereo", 50.0)},
+                    "var": flt2.get("kParamVar"), "stereo": flt2.get("kParamStereo", 50.0), "level_out": float(flt2.get("kParamLevelOut", 0.5))},
         "balance": balance,
         "envs": envs, "mods": mods, "macros": macros, "macro_names": [str(tree.get(f"Macro{i}", {}).get("name", "") or "") for i in range(8)],
         "lfos": lfos, "fx": fx, "routed": routed,
@@ -824,6 +829,37 @@ FILTER_DRIVE_GAIN_DB = [(0.0, 0.0), (10.0, 3.3), (25.0, 7.6), (50.0, 12.5), (75.
 FILTER_DRIVE_MAKEUP_DB = [(0.0, 0.0), (10.0, 2.8), (25.0, 5.7), (50.0, 10.6), (75.0, 11.1), (100.0, 11.1)]
 # Serum's drive makes no harmonics on a saw at 50-100 % (every harmonic moves by the same dB), so the engine's saturating pot stops at its 25 % value.
 FILTER_DRIVE_POT_USED = [(0.0, 0.0), (10.0, 4.0), (25.0, 8.0), (100.0, 8.0)]
+# Drive is not one law across the models (calibration/dev/probe_model_drive.py, a saw at cutoff 0.5, the gain of harmonics 1-3 re Drive 0, model_drive.json): the MG / standard
+# models stop near +13 dB (the tables above), the ladders and FormantTWO keep rising to +24 dB, DirtyMg stops near +5, Wsp and ExpBPF near +8..11. The engine's gain stage gives the
+# difference over the saturating pot's own gain, as FILTER_DRIVE_MAKEUP_DB does for the standard models. Models not measured keep the standard tables.
+FILTER_DRIVE_GAIN_BY_MODEL = {
+    "LadderAcid": [(0.0, 0.0), (25.0, 7.8), (50.0, 14.1), (75.0, 18.5), (100.0, 20.5)],
+    "LadderEMS": [(0.0, 0.0), (25.0, 7.8), (50.0, 14.1), (75.0, 19.4), (100.0, 24.1)],
+    "LadderMg": [(0.0, 0.0), (25.0, 7.8), (50.0, 14.1), (75.0, 19.4), (100.0, 24.1)],
+    "FormantTWO": [(0.0, 0.0), (25.0, 7.7), (50.0, 13.9), (75.0, 19.3), (100.0, 23.9)],
+    "DirtyMg": [(0.0, 0.0), (25.0, 3.1), (50.0, 4.4), (75.0, 4.6), (100.0, 4.1)],
+    "Wsp": [(0.0, 0.0), (25.0, 4.8), (50.0, 7.8), (75.0, 10.0), (100.0, 11.2)],
+    "ExpBPF": [(0.0, 0.0), (25.0, 4.9), (50.0, 7.8), (75.0, 8.4), (100.0, 7.9)],
+}
+
+
+# LadderAcid saturates above Drive 50 (harmonics 8-12 up 11 dB at 75, 17 at 100 against 1-3): the engine's saturating pot gives +4 / +7.5 / +8.6 dB of that tilt at pot 60 / 80 / 127
+# (the converted LadderAcid, the same saw), so it rises to the top there. ENGINE_DRIVE_POT_GAIN is that pot's own gain on harmonics 1-3.
+FILTER_DRIVE_POT_BY_MODEL = {"LadderAcid": [(0.0, 0.0), (25.0, 8.0), (50.0, 30.0), (62.5, 60.0), (75.0, 127.0), (100.0, 127.0)]}
+ENGINE_DRIVE_POT_GAIN = [(0.0, 0.0), (8.0, 1.4), (20.0, 3.8), (40.0, 7.2), (60.0, 9.4), (80.0, 10.1), (100.0, 9.5), (127.0, 8.9)]
+
+
+def filter_drive_pot(model: str, drive_pct: float) -> int:
+    return round(_clamp(interp(FILTER_DRIVE_POT_BY_MODEL.get(model, FILTER_DRIVE_POT_USED), drive_pct), 0, 127))
+
+
+def filter_drive_makeup_db(model: str, drive_pct: float) -> float:
+    """The engine gain stage's dB for a voice filter's Drive: the model's measured gain less the saturating pot's own (the standard tables' difference)."""
+    if model not in FILTER_DRIVE_GAIN_BY_MODEL:
+        return interp(FILTER_DRIVE_MAKEUP_DB, drive_pct)
+    pot_gain = (interp(ENGINE_DRIVE_POT_GAIN, filter_drive_pot(model, drive_pct)) if model in FILTER_DRIVE_POT_BY_MODEL
+                else interp(FILTER_DRIVE_GAIN_DB, drive_pct) - interp(FILTER_DRIVE_MAKEUP_DB, drive_pct))
+    return max(0.0, interp(FILTER_DRIVE_GAIN_BY_MODEL[model], drive_pct) - pot_gain)
 BEND_POT = [(0.0, 64.0), (0.03, 65.0), (0.12, 65.0), (0.2, 66.0), (0.3, 67.0), (0.4, 70.0), (0.5, 74.0), (0.7, 86.0), (0.85, 100.0), (1.0, 116.0)]
 BEND_WARPS = {"kBendPos": +1, "kBendNeg": -1, "kASYMPos": +1, "kASYMNeg": -1, "kPWM": +1}
 # The "PosNeg" warps are one bipolar knob (calibration/dev/probe_warp_phase.py: BendPosNeg 0.25 is BendPos 0.5 to the sample, 0.75 is BendNeg 0.5, 0.5 is the table as it is; the same for ASYMPosNeg):
@@ -841,6 +877,10 @@ WARP_DEADZONE = {"kFM_NOISE": 0.45, "kFMX_NOISE": 0.45, "kPD_NOISE": 0.55, "kFM_
 # Serum's Filter LP / HP warps and its FM / PD / RM warps from the Sub, which the engine carries as one more warp per oscillator (wtN_xw, wtN_xa = Serum's amount in
 # thousandths; the laws are in wt_oscillator.h: calibration/dev/probe_filterwarp.py, probe_warp_fm.py). One per oscillator: a second one stays unsupported.
 XWARP_MODES = {"kFilterLPF": 1, "kFilterHPF": 2, "kFM_SUB": 3, "kPD_SUB": 4, "kRM_SUB": 5, "kSelfPD": 7}
+# Serum's Bend+ / Bend- as the engine's warp kinds 8 / 9 (calibration/dev/probe_bend_map.py: a phase map symmetric about the middle of the cycle, Bend- the inverse of Bend+;
+# wt_oscillator.h serumBend). The engine's own Bend pot is gin's one-sided curve, whose + and - are mirror images: on a saw that gave Bend- the harmonics of Bend+ (the
+# fundamental 15 dB off at amount 1, calibration/dev/validate_static_warps.py CASES=bend). The pot stays the fallback when both warp slots are taken.
+SERUM_BEND_XW = {"kBendPos": 8, "kBendNeg": 9}
 SELFPD_LIMIT = 0.4          # SelfPD is the implicit y = x(p + z y), z = 0.62 a^2 cycles: fitted to a sine to 0.01 rms up to there (out/scratch/fit_selfpd.py), not beyond
 # The same warps with another oscillator as the modulator (calibration/dev/probe_warp_osc.py): the menu's "Osc" is the first of the other two oscillators (A for B and C, B for A),
 # "Osc 2" the second (C for A and B, B for C); a modulator that is switched off gives no modulation at all. PD_OSC was a Bend stand-in before this. {mode: (warp kind, which of the other two)}; the engine's xs value is that oscillator's index + 1. AM (kind 6) is the Osc-only one.
@@ -1320,12 +1360,15 @@ def lfo_smooth_pot(smooth) -> int:
 LFO_SYNC_BPM = 120.0       # the tempo of every other measurement here (the engine's LFO is free-running: it has no host tempo)
 
 
-def lfo_sync_hz(rate: float, triplets: bool) -> float | None:
-    """Hz at LFO_SYNC_BPM of a synced LFO with this stored Rate, or None below the swept range (the caller keeps the stored value)."""
+def lfo_sync_hz(rate: float, triplets: bool, dotted: bool = False) -> float | None:
+    """Hz at LFO_SYNC_BPM of a synced LFO with this stored Rate, or None below the swept range (the caller keeps the stored value). With Dotted on, the upper two thirds of
+    each band play 3/4 of its division (calibration/dev/probe_lfo_dotted.py: 1.00x up to 0.30 of the 1- and 1/2-beat bands, 0.74-0.76x from 0.35 to the top; the arp's Dotted splits its bands the same way)."""
     for lo, hi, beats in LFO_SYNC_BANDS:
         if lo <= rate < hi:
             if triplets and rate >= lo + 0.75 * (hi - lo) and hi < 1e8:
                 beats *= 2.0 / 3.0
+            elif dotted and rate >= lo + (hi - lo) / 3.0 and hi < 1e8:
+                beats *= 0.75
             return LFO_SYNC_BPM / 60.0 / beats
     return None
 
@@ -1507,7 +1550,7 @@ def lfo_shape_pots(l: dict) -> list:
     return [round(127 * curve_value(xs, ys, cs, k / (15 if one_shot else 16))) for k in range(16)]
 
 
-def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list, gslot: dict | None = None, sslot: dict | None = None) -> list:
+def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: list, gslot: dict | None = None, sslot: dict | None = None, note_routes: list | None = None) -> list:
     """Serum LFO routes onto the engine's four LFOs and eight routes. Returns the routes that were NOT carried. gslot: Serum id of a carried Granular oscillator -> sample slot. sslot: Serum id of every carried Sample / Granular oscillator -> sample slot."""
     eq_dest = fxmap.eq_mod_plan(ph.get("fx_nodes", []), ph["mods"], ph["macros"], 0)["dest"]
     def dest(key):
@@ -1530,7 +1573,7 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return ("Filter 2 Freq" if key[2] == 1 else "Filter Freq"), CUTOFF_NOTES / FILTER_WIDTH * CAL["flt_env_scale"]
         if key[0] == "WTOsc" and key[1] == "kParamTablePos" and slot:
             return f"WT{slot} Pos", 1.0
-        if key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and P.get(f"wt{slot}_xw"):          # an FM / PD / RM / AM / filter warp's amount: the warp knob moves by 1.0 x the depth
+        if key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and P.get(f"wt{slot}_xw") and f"wt{slot}" not in ph.get("xw_fixed", ()):          # an FM / PD / RM / AM / filter warp's amount: the warp knob moves by 1.0 x the depth
             return f"WT{slot} Warp", 1.0
         if key[0] == "Oscillator" and key[1] == "kParamVolume" and sslot and key[2] in sslot:        # a Sample / Granular oscillator's volume: the sample slot's level knob, moved by 1.0 x the depth like a wavetable's
             return f"Smp{sslot[key[2]]} Level", 1.0
@@ -1546,6 +1589,9 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
             return f"WT{slot} Tune", 120.0 / 12.0
         if key[0] == "Oscillator" and key[1] == "kParamPan" and slot in (1, 2):
             return f"WT{slot} Pan", 1.0
+        o = ph["oscs"].get(key[2], {}) if isinstance(ph.get("oscs"), dict) else (ph["oscs"][key[2]] if isinstance(key[2], int) and key[2] < len(ph.get("oscs", [])) else {})
+        if key[0] == "Oscillator" and slot and not o.get("ratio") and ((key[1] == "kParamPitch" and not o.get("harm")) or (slot == 3 and key[1] in ("kParamCoarsePit", "kParamOctave"))):
+            return f"WT{slot} Pitch", PITCH_ROUTE_ST[key[1]] / 48.0      # the Pitch knob (25 st per unit) and osc C's coarse knobs: the linear Pitch destination, 48 st per unit, as a pitch envelope's
         return None, 1.0
     routes, left = [], []
     for item in other:
@@ -1607,13 +1653,15 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         if d.get("rate") is not None:
             hz = d["rate"]
             if d.get("sync") is None or d.get("sync"):         # an unwritten BeatSync is ON: the Rate picks a note division (LFO_SYNC_BANDS)
-                sync_hz = lfo_sync_hz(d["rate"], bool(d.get("triplets")))
+                sync_hz = lfo_sync_hz(d["rate"], bool(d.get("triplets")), bool(d.get("dotted")))
                 if sync_hz:
                     hz = sync_hz
                     P[f"lfo{n}_tempo"] = 1                     # that is the rate at 120 BPM; the engine scales it by the host tempo
         P[f"lfo{n}_rate"] = round(_clamp(127 * math.log(max(hz, 0.05) / 0.05) / math.log(2400), 0, 127))
         P[f"lfo{n}_mode"] = 2 if d.get("env") else 0 if d.get("mode") in (None, 0, 0.0) else 1          # Envelope: plays the shape once and holds its end (calibration/dev/probe_lfo_env.py)
         P[f"lfo{n}_smooth"] = lfo_smooth_pot(d.get("smooth"))
+        if d.get("rise"):
+            P[f"lfo{n}_fade"] = int(round(_clamp(float(d["rise"]) / 8.0 * 127.0, 0, 127)))      # Rise: the LFO scaled up from 0 over that many seconds (calibration/dev/probe_lfo_rise.py; the engine's Fade In, 8 s over the pot)
         # a Random S&H LFO has no period, so a sine table puts a tone on its destination that Serum does not have (Lead - Other Side:
         # its 26 Hz Random S&H into an oscillator's level was a steady tremolo against Serum's flute-like note). Built flat at its mid level instead: a
         # bipolar route then adds nothing and a unipolar one a steady half-depth offset, the random LFO's average.
@@ -1629,6 +1677,30 @@ def map_lfos(ph: dict, P: dict, other: list, slot_of: dict, appr: list, note: li
         P[f"lr{r}_bip"] = 1 if bip else 0
     if taken:
         note.append(f"{len(taken)} LFO route(s) carried from {len(chosen)} LFO(s), each with Serum's own polarity")
+    # A note-number route into an oscillator's volume (BA - Goa Pepper fades oscillator B out above middle C through a curved route): the base already holds its value at middle C,
+    # so a spare LFO in Key mode (the engine reads point note / 2 of its Hi-Res table) adds the rest, value(note) - value(60), through a bipolar route (2u - 1 times the amount).
+    nl, nr = len(chosen), len(taken)
+    for key, a, bip, m in (note_routes or []):
+        if nl >= 4 or nr >= 8:
+            break
+        d, k = dest(key)
+        if d not in ME_DST or lfo_class(d) != "level":
+            continue
+        k *= LFO_SCALE.get("level", 1.0)
+        lut = m.get("curve")
+        val = (lambda x: interp([(i / (len(lut) - 1), v) for i, v in enumerate(lut)], x)) if lut else (lambda x: x)
+        v0 = val(fxmap.NOTE_NOMINAL / 127.0)
+        dev = [a * k * (val(min(2 * j + 0.5, 127.0) / 127.0) - v0) for j in range(64)]
+        peak = max(abs(x) for x in dev)
+        if peak < 0.02:
+            continue
+        nl += 1; nr += 1
+        P[f"lfo{nl}_mode"] = 3
+        P[f"lfo{nl}_hr"] = 1
+        for j, x in enumerate(dev):
+            P[f"lfo{nl}_h{j}"] = int(round(127 * (0.5 + 0.5 * x / peak)))
+        P[f"lr{nr}_src"], P[f"lr{nr}_dst"], P[f"lr{nr}_amt"], P[f"lr{nr}_bip"] = nl, ME_DST[d], round(_clamp(64 + 63 * peak, 0, 127)), 1
+        note.append(f"note route into {d} carried by the keyboard (a Key-mode LFO)")
     return left
 
 
@@ -1647,7 +1719,7 @@ def map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir, _macros: bo
 MAP_MACROS = True
 MACRO_POT = re.compile(
     r"^(wt[123]_(pos|level|tune|detune|spread|pan|bend|formant|sync|sgain|sout|bal|bus[12])|sub_(level|bal|bus[12])|noise_(level|hp|lp|bal|bus[12])|smp[23]?_(level|tune|fine|bal|bus[12])"
-    r"|flt[12]?_(freq|res|drive|env|key|gain|bus[12])|vca_[adsr]|flt_[adsr]|me[12]_[adsr]|me[12]_amt|vca_vel|flt_vel|fxf_(freq|res|env)|lr[1-8]_amt"
+    r"|flt[12]?_(freq|res|drive|env|key|gain|lvl|bus[12])|vca_[adsr]|flt_[adsr]|me[12]_[adsr]|me[12]_amt|vca_vel|flt_vel|fxf_(freq|res|env)|lr[1-8]_amt"
     r"|dly2?_(mix|time|timer|fb|lo|hi)|rev_(mix|decay|damp|width|lo)|fx_(space|wide|wrate|wdepth)|dist_(drive|mix|out|level|pre_freq|pre_q)"
     r"|comp_(thresh|thresh2|thresh3|ratio|attack|release|makeup|mix|knee|gain[123]|below)|chor_(mix|rate|depth|d1|d2|fb|filt)|flan_(mix|rate|depth|fb|phase)"
     r"|phas_(mix|rate|depth|depth2|freq|fb|phase)|hyd_(det|rate|wet)|eq[1-4]_(freq|gain|q)|eq[ms][1-4]_(freq|gain|q)|glide|mwidth|monohz|lo_shelf|hi_shelf)$")
@@ -1746,6 +1818,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     bipfold = Counter()                          # an oscillator id -> semitones its base sits lower for a bipolar envelope route into its coarse pitch (the envelope minus a half)
     keyfold = Counter()                          # a note-number route to a filter's cutoff, as semitones of cutoff per semitone of pitch
     routes = []                                  # envelope routes
+    note_routes = []                             # note-number routes into an oscillator's volume (a key lookup carries them live)
     other = []                                   # LFO/velocity/etc: not representable
     mod_wheel_idle = 0
     bip_env = 0
@@ -1807,12 +1880,14 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             # oscillators' volumes; read straight, the main layer folded to silence and a layer the curve shuts at velocity 100 played.
             x = fxmap.macro_value(m, ph["macros"])
             fold[key] += a * ((x - 0.5) if m.get("bipolar") else x)
+            if src == 17 and key[:2] == ("Oscillator", "kParamVolume") and not m.get("aux"):
+                note_routes.append((key, a, bool(m.get("bipolar")), m))     # folded at middle C here; map_lfos adds the rest live when an LFO slot is free
             if src == 17 and key[:2] == ("VoiceFilter", "kParamFreq"):
                 keyfold[key[2]] += a / 127.0 * CUTOFF_NOTES          # notes of cutoff per semitone of pitch (the same slope unipolar or bipolar)
         elif src == 1:
             # The mod wheel sits where the preset saved it (ph["macros"][8], percent; 0 when unwritten, the wheel at rest): a unipolar route adds depth x wheel, a bipolar one
             # depth x (wheel - 0.5). The Move has none, so the saved position is folded in like a macro.
-            w = ph["macros"][8] / 100.0 if len(ph["macros"]) > 8 else 0.0
+            w = fxmap.curve_in(ph["macros"][8] / 100.0 if len(ph["macros"]) > 8 else 0.0, m.get("curve_in", 0.0))
             fold[key] += a * ((w - 0.5) if m.get("bipolar") else w)
             mod_wheel_idle += 1
         elif 2 <= src <= 5:                      # measured: modulation source ids 2..5 are Env1..Env4 (probe in the notes of calibration/dev/probe_venv.py)
@@ -1917,6 +1992,9 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P["legato"] = int(ph["legato"])
     elif wanted:
         P["voices"] = _clamp(STREAM_BUDGET // max(sum(wanted), 1), MIN_POLY_VOICES, 8)
+        if ph.get("poly") and ph["poly"] < 8:
+            P["poly_max"] = int(ph["poly"])               # Serum's Polyphony: a chord of more notes drops its oldest (BA - Goa Pepper plays 3 of a 4-note chord); the engine holds 8
+            P["voices"] = min(P["voices"], int(ph["poly"]))
     fitted = fit_unison(wanted, STREAM_BUDGET // P["voices"])
     for o, got in zip(keep, fitted):
         if got < o["unison"]:
@@ -1940,18 +2018,27 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         detune = _clamp(o["detune"] + fold[("Oscillator", "kParamDetune", o["id"])], 0.0, 1.0) ** CAL["detune_exp"] * CAL["detune_scale"]     # macro-driven detune at the saved position
         if CAL["detune_wid"] and o["detune_wid"] is not None:
             detune *= interp(CAL["detune_wid"], o["detune_wid"])
+        detune *= o["uni_range"] / 2.0                   # the detune law is calibrated at Serum's default Range of 2 semitones; the engine's knob stops at one semitone across the stack
         P[f"{k}_detune"] = round(_clamp(detune, 0, 1) * 127)
         stereo = o["stereo_pct"] if o["stereo_pct"] is not None else CAL["stereo_default"]
         P[f"{k}_spread"] = (round(_clamp(stereo / 100 * CAL["width_scale"], 0, 1) * 127)
                             if P[f"{k}_uni"] > 1 else 0)
         P[f"{k}_pan"] = round(_clamp(64 + 63 * serum_pan_balance(o["pan"]), 0, 127))
-        flip_rev = None                   # the Flip warp at 0.5: the table is read backwards (reverse_table, once the table's path is known)
+        # Start phase (calibration/dev/probe_osc_phase.py): Serum draws the random start ONCE per voice and shifts every oscillator by it times its own Random amount, so two
+        # oscillators at one pitch keep the phase their Initial Phase knobs give (A at 0 and B at 180 degrees cancel on every note; OR - House Organ cancels its fundamental 30 dB
+        # that way). The engine's Phase Draw Per Voice does the same (a stack's other unison voices keep their own draws); the engine's Phase pot is Serum's Initial Phase / 360
+        # (a saw at IP 180 against the engine at 64 / 127: correlation +0.997 at lag 0).
+        P["osc_phd"] = 1
+        P[f"{k}_rph"] = int(round(_clamp(o["rand_phase"] / 100.0, 0.0, 1.0) * 127.0))
+        P[f"{k}_phs"] = int(round((o["init_phase"] % 360.0) / 360.0 * 127.0)) % 127
+        flip_rev = None                  # the Flip warp at 0.5: the table is read backwards (reverse_table, once the table's path is known)
         eo_bake = None                    # the Even/Odd warp: baked into a copy of the table (evenodd_table)
         curves = WARP_CURVES()
         # An LFO / envelope route into a warp's amount (the engine's "WTn Warp" destination moves the FM / PD / RM / AM / filter warps' amount): its base amount stays even when it is 0
         w_moved = {m["dest_param"] for m in ph["mods"] if m["dest_type"] == "WTOsc" and m["dest_id"] == o["id"] and m["dest_param"] in ("kParamWarp", "kParamWarp2")
                    and 2 <= m["source"] <= 15 and abs(m["amount_pct"]) >= 5.0}
         for wi, w in enumerate(o["warp"]):
+            bipolar_menu = w["mode"] in BIPOLAR_WARPS
             if w["mode"] in BIPOLAR_WARPS:
                 w = {**w, "mode": BIPOLAR_WARPS[w["mode"]][0 if w["amount"] < 0.5 else 1], "amount": abs(1.0 - 2.0 * w["amount"])}
             if w["mode"] == "kFlip" and w["amount"] >= 1 - FLIP_TOLERANCE:
@@ -1963,7 +2050,8 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
                 if curves["noop_below"].get(w["mode"]) is not None and w["amount"] <= curves["noop_below"][w["mode"]]:
                     continue              # the measured curve is the identity there
             elif (w["mode"] != "kEvenOdd" and w["amount"] < WARP_NOISE_FLOOR
-                  and not (w.get("slot", wi) == 0 and "kParamWarp" in w_moved and (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES or w["mode"] in XWARP_NOISE_MODES))):
+                  and not (w.get("slot", wi) == 0 and "kParamWarp" in w_moved and (w["mode"] in XWARP_MODES or w["mode"] in XWARP_OSC_MODES or w["mode"] in XWARP_NOISE_MODES
+                                                                                   or (w["mode"] in SERUM_BEND_XW and not bipolar_menu)))):
                 continue                  # (the measured waveshapers and Even/Odd act at amount 0 too: Rectify is a full-wave rectifier there, Even/Odd keeps only the odd harmonics)
             if w["mode"] == "kFlip" and abs(w["amount"] - 0.5) <= FLIP_TOLERANCE and not any(
                     v["amount"] >= WARP_NOISE_FLOOR for v in o["warp"][:wi]):       # only as the first warp: a warp after it reads the reversed table, as it does in Serum
@@ -2007,6 +2095,12 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
                     kind = XWARP_MODES[w["mode"]]
                 P[f"{k}_{slot}"] = kind
                 P[f"{k}_xa{sfx}"] = int(round(_clamp(w["amount"], 0, 1) * 1000))
+            elif w["mode"] in SERUM_BEND_XW and not (P.get(f"{k}_xw") and P.get(f"{k}_xw2")):
+                slot = "xw2" if P.get(f"{k}_xw") else "xw"
+                P[f"{k}_{slot}"] = SERUM_BEND_XW[w["mode"]]
+                P[f"{k}_xa{'2' if slot == 'xw2' else ''}"] = int(round(_clamp(w["amount"], 0, 1) * 1000))
+                if slot == "xw" and (bipolar_menu or w.get("slot", wi) != 0):
+                    ph.setdefault("xw_fixed", set()).add(k)          # a route into Serum's Warp 1 knob is not this bend's amount (another warp's, or a Bend+/- knob that crosses the middle)
             elif w["mode"] == "kSync":
                 P[f"{k}_sync"] = round(interp(SYNC_POT, _clamp(w["amount"], 0, 1)))
             elif w["mode"] in BEND_WARPS and n == 3:
@@ -2055,6 +2149,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         P["sub_level"] = round(_clamp(pot_level(level_of(4, sub["level"])) * CAL["sub_scale"], 0, 127))
         P["sub_wave"] = SUB_WAVE.get(sub["shape"], 0)
         P["sub_tune"] = round(_clamp(sub["octave"] * 12, -48, 48))
+        P["sub_phs"] = int(round(((sub["init_phase"] + 180.0) % 360.0) / 360.0 * 127.0)) % 127          # the Sub's start: Serum's Initial Phase / 360, half a cycle on from the engine's 0 (measured against the oscillators)
     nz = ph["noise"]
     if nz.get("click"):
         if any(s[0].get("noise") for s in smps):
@@ -2165,6 +2260,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             sdet = _clamp(so["detune"] + fold[("Oscillator", "kParamDetune", so["id"])], 0.0, 1.0) ** CAL["detune_exp"] * CAL["detune_scale"]
             if CAL["detune_wid"] and so["detune_wid"] is not None:
                 sdet *= interp(CAL["detune_wid"], so["detune_wid"])
+            sdet *= so.get("uni_range", 2.0) / 2.0
             P[f"{sk}_det"] = round(_clamp(sdet, 0, 1) * 127)
             sst = so["stereo_pct"] if so["stereo_pct"] is not None else CAL["stereo_default"]
             P[f"{sk}_spread"] = round(_clamp(sst / 100 * CAL["width_scale"], 0, 1) * 127)
@@ -2209,6 +2305,9 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
     flat_filters = set()                                          # voice filters (by key id) whose model leaves the harmonics' levels alone: left open
     def voice_filter_pots(fl, key_id, prefix, label):
         """The engine pots for one Serum voice filter (cutoff law, model, resonance, drive, key tracking)."""
+        # Level Out (calibration/dev/probe_vfilter_levelout.py): 40 log10(2 x) dB, 0.5 unity, the engine pot x 128 squared; macro / velocity / note routes folded in
+        lo = _clamp(float(fl.get("level_out", 0.5)) + fold[("VoiceFilter", "kParamLevelOut", key_id)], 0.0, 1.0)
+        P[f"{prefix}_lvl"] = int(round(_clamp(lo * 128.0, 0, 127)))
         idx, exact = FILTER_MAP.get(fl["model"], (None, False))
         fkey = None if fl["model"] in COMB_LOOP_MODELS else filter_model_key(fl["model"], fl.get("var"))          # the engine's own L6 / H6 comb replaces the older nearest-filter entries
         if fkey in FILTER_MODELS and FILTER_MODELS[fkey].get("bypass_rms_db", 99.0) <= FLAT_FILTER_DB:
@@ -2257,7 +2356,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
             P[f"{prefix}_var"] = round(_clamp(float(fl.get("var") or 0.0) / 100.0 * 127.0, 0, 127))          # Serum's default Var is 0 (measured)
             P[f"{prefix}_rvst"] = round(_clamp(float(fl.get("stereo", 50.0)) / 100.0 * 127.0, 0, 127))
-        elif idx >= 16:
+        elif 16 <= idx < 19:
             # Serum's Formant models (engine types 16..18, formant.h): the resonators sit where the measured Freq x Var tables put them and Reso narrows them (bandwidth / (1 + 2 Reso)); the knob's note exactly,
             # like a comb (no calibration offset; the pot is whole semitones, so the rest goes to the cents pot)
             note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
@@ -2265,7 +2364,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             P[f"{prefix}_cfine"] = int(_clamp(64 + round((note_pot - round(note_pot)) * 100), 0, 127))
             P[f"{prefix}_var"] = round(_clamp(float(fl.get("var") or 0.0) / 100.0 * 127.0, 0, 127))
             P[f"{prefix}_res"] = round(reso_pct / 100.0 * 127)
-        elif idx >= 8:
+        elif 8 <= idx < 16:
             # a comb is tuned to the cutoff itself: the knob's note, no calibration offset; the pot is whole semitones, so the rest goes to the cents pot (64 = 0)
             note_pot = _clamp(cut * CUTOFF_NOTES + pivot - 8, 0, 127)
             P[f"{prefix}_freq"] = int(round(note_pot))          # to the nearest semitone: the cents pot spans -64..+63 only (the remainder was up to 99 cents and clamped, a comb up to 36 cents out of tune)
@@ -2277,12 +2376,14 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
         else:
             P[f"{prefix}_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] + pivot - 8 + filter_cutoff_delta(fkey, cut, reso_pct), 0, 127))
             P[f"{prefix}_res"] = filter_res_pot(fl["model"], reso_pct)
+            if idx >= 20 and reso_pct > 20.0:
+                appr.append(f"{label} {fl['model']}: carried by the engine's one-pole LP 6 / HP 6 (the shape to 0.2 dB without resonance); its resonance ({reso_pct:.0f} %) is not carried")
         P[f"{prefix}_key"] = round(_clamp(key + keyfold[key_id], 0, 1) * 127)
         if fl["keytrack"] < 0:
             note.append(f"negative {label} key tracking not representable")
         drive_pct = _clamp(fl["drive_pct"] + 100.0 * fold[("VoiceFilter", "kParamDrive", key_id)], 0, 100)      # macro, velocity and note routes at their nominal value
-        P[f"{prefix}_drive"] = 0 if idx == 19 else round(_clamp(interp(FILTER_DRIVE_POT_USED, drive_pct), 0, 127))
-        P[f"{prefix}_gain"] = round(_clamp(interp(REVERB1_DRIVE_DB if idx == 19 else FILTER_DRIVE_MAKEUP_DB, drive_pct) / 24.0 * 127.0, 0, 127))
+        P[f"{prefix}_drive"] = 0 if idx == 19 else filter_drive_pot(fl["model"], drive_pct)
+        P[f"{prefix}_gain"] = round(_clamp((interp(REVERB1_DRIVE_DB, drive_pct) if idx == 19 else filter_drive_makeup_db(fl["model"], drive_pct)) / 24.0 * 127.0, 0, 127))
 
     if f["enabled"] and not bypassed:
         voice_filter_pots(f, 0, "flt", "filter")
@@ -2380,7 +2481,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             dest = f"WT{slot} Pos"
         elif key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and key[2] in synced:
             dest = f"WT{slot} Sync"
-        elif key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and P.get(f"wt{slot}_xw"):
+        elif key[0] == "WTOsc" and key[1] == "kParamWarp" and slot and P.get(f"wt{slot}_xw") and f"wt{slot}" not in ph.get("xw_fixed", ()):
             dest = f"WT{slot} Warp"
         elif key[0] == "Oscillator" and key[1] == "kParamVolume" and key[2] in sslot:
             dest = f"Smp{sslot[key[2]]} Level"
@@ -2439,7 +2540,7 @@ def _map_to_tablor(wrapped: dict, pack, serum_tables, wt_out, subdir) -> dict:
             if a > 0 and level_pot(dest) and P[level_pot(dest)] == 0:
                 P[level_pot(dest)] = round(127 * _clamp(a * MOD_LEVEL_HOLD, 0, 1))
 
-    other = map_lfos(ph, P, other, slot_of, appr, note, gslot, sslot)   # the LFO routes the engine's LFOs can carry
+    other = map_lfos(ph, P, other, slot_of, appr, note, gslot, sslot, note_routes)   # the LFO routes the engine's LFOs can carry
     audible = [o for o in other if abs(o[2]) >= 0.25 and o[1][0] in ("VoiceFilter", "WTOsc", "Oscillator")]
     if audible:
         appr.append(f"{len(audible)} velocity/LFO route(s) >=25% not carried (an LFO beyond the engine's four, or a destination it lacks)")
@@ -2634,7 +2735,7 @@ def apply_filter2(P: dict, dyn: dict, ph: dict, feg1) -> list[str]:
         P["fxf_res"] = round(_clamp(dyn["reso"], 0.0, 100.0) / 100.0 * 127)
         P["fxf_drive"] = round(_clamp(dyn.get("drive", 0.0), 0.0, 100.0) / 100.0 * 127)       # a plain gain on these models (fx.h serumModelGain)
     else:
-        P["fxf_type"] = idx
+        P["fxf_type"] = {20: 8, 21: 9}.get(idx, min(idx, 7))    # the one-pole LP 6 / HP 6 are the FX filter's types 8 / 9; a voice comb index (8..19) is clamped to 7 as the 8-type enum always did
         corr = interp([tuple(x) for x in fit["corr"]], cut) if fit else 0.0
         P["fxf_freq"] = round(_clamp(cut * CUTOFF_NOTES * CAL["cutoff_scale"] + CAL["cutoff_offset"] - 8 + filter_cutoff_delta(fkey, cut) + corr, 0, 127))
         P["fxf_res"] = filter_res_pot(model, dyn["reso"])

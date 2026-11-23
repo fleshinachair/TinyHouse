@@ -174,6 +174,15 @@ void Engine::noteOn(int note, float vel)
             if (!vv.isActive()) { v = &vv; break; }
         if (!v || activeCount >= maxVoices)
             v = findVoiceToSteal();
+        /* Voice Limit (Serum's Polyphony): at most that many notes; the oldest sounding one gives way. Voices above only shares out the stream budget (findVoiceToSteal
+         * hands back an idle voice whenever there is one), so a chord of more notes than Voices still sounds whole. */
+        const int limit = (int) pots[TB_P_POLY_MAX];
+        if (limit > 0 && activeCount >= limit) {
+            Voice *oldest = nullptr;
+            for (auto &vv : voices)
+                if (vv.isActive() && (!oldest || vv.serialNumber() < oldest->serialNumber())) oldest = &vv;
+            if (oldest) v = oldest;
+        }
         if (!v) return;
 
         float from = glideOn && glideNow ? lastPlayedNote : -1.0f;
@@ -797,9 +806,13 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.dist2Out = std::pow(10.0f, (-36.0f + pots[TB_P_DIST2_OUT] * (48.0f / 127.0f)) / 20.0f);
         s.dist2Level = std::pow(10.0f, (pots[TB_P_DIST2_LEVEL] - 64.0f) * (24.0f / 64.0f) / 20.0f);
         s.dist2Pre = std::clamp((int) pots[TB_P_DIST2_PRE], 0, 3);
+        s.dist2Post = pots[TB_P_DIST2_PPOS] >= 0.5f;
         s.dist2PreHz = 20.0f * std::pow(1000.0f, pots[TB_P_DIST2_PRE_FREQ] / 127.0f);
         s.dist2PreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST2_PRE_Q] / 127.0f);
         s.dist2PreMorph = pot01(pots[TB_P_DIST2_PRE_MORPH]);
+        s.dist2Tab = std::clamp((int) pots[TB_P_DIST2_TAB], 0, kDistTabModes);
+        s.dist2TabAmt = pots[TB_P_DIST2_TAMT];
+        if (s.dist2Tab) { s.dist2Gain = kDistTabIn; s.dist2Out = kDistTabOut; }      /* the table's own scale: Serum's curve in its table units (dist_tables.h) */
     }
     if (s.distCal) {
         /* Drive is the pre-gain in dB (-16..+54), Wet Gain the curve's output gain (-36..+12 dB), Level a gain on the sum (-24..+24 dB). Off with FX Enable. */
@@ -809,9 +822,13 @@ FxSettings Engine::fxSettings(const float *pots) const
         if (!all) s.distMix = 0.0f;
         /* the filter ahead of the curve: 0 off, 1 low-pass, 2 high-pass; Freq 20 Hz..20 kHz and Q 0.3..3, both log */
         s.distPre = std::clamp((int) pots[TB_P_DIST_PRE], 0, 3);
+        s.distPost = pots[TB_P_DIST_PPOS] >= 0.5f;
         s.distPreMorph = pot01(pots[TB_P_DIST_PRE_MORPH]);
         s.distPreHz = 20.0f * std::pow(1000.0f, pots[TB_P_DIST_PRE_FREQ] / 127.0f);
         s.distPreQ = 0.3f * std::pow(10.0f, pots[TB_P_DIST_PRE_Q] / 127.0f);
+        s.distTab = std::clamp((int) pots[TB_P_DIST_TAB], 0, kDistTabModes);
+        s.distTabAmt = pots[TB_P_DIST_TAMT];
+        if (s.distTab) { s.distGain = kDistTabIn; s.distOut = kDistTabOut; }          /* Distortion Table: Serum's measured curve; Drive / Wet Gain pots are not used */
     }
     s.splitBand = all ? std::clamp((int) pots[TB_P_SPLIT_BAND], 0, 4) : 0;
     s.splitStages = (int) pots[TB_P_SPLIT_STAGES] & 255;
@@ -821,7 +838,11 @@ FxSettings Engine::fxSettings(const float *pots) const
     s.compRatio = std::pow(100.0f, pot01(pots[TB_P_COMP_RATIO]));
     s.compKneeDb = 48.0f * pot01(pots[TB_P_COMP_KNEE]);
     s.compMulti = pots[TB_P_COMP_MULTI] >= 1.0f;
-    s.compVital = pots[TB_P_COMP_MULTI] >= 2.0f;                       /* Comp Multiband = Vital: the Vital compressor's law (fx.h processCompVital) */
+    s.compVital = pots[TB_P_COMP_MULTI] >= 2.0f;
+    /* Comp X-over Low / High: 0 keeps 120 Hz / 2.4 kHz, else 20 Hz x 1000^(pot / 127) (Serum's XoverLow / XoverHi); the high one kept above the low one */
+    s.compXloHz = pots[TB_P_COMP_XLO] >= 1.0f ? std::min(20.0f * std::pow(1000.0f, pots[TB_P_COMP_XLO] / 127.0f), 16000.0f) : 120.0f;
+    s.compXhiHz = pots[TB_P_COMP_XHI] >= 1.0f ? std::min(20.0f * std::pow(1000.0f, pots[TB_P_COMP_XHI] / 127.0f), 18000.0f) : 2400.0f;
+    s.compXhiHz = std::max(s.compXhiHz, s.compXloHz * 1.12f);                       /* Comp Multiband = Vital: the Vital compressor's law (fx.h processCompVital) */
     if (s.compVital) {
         s.vcBands = std::clamp((int) pots[TB_P_VC_BANDS], 0, 3);
         const int ut[3] = { TB_P_VC_UT1, TB_P_VC_UT2, TB_P_VC_UT3 }, lt[3] = { TB_P_VC_LT1, TB_P_VC_LT2, TB_P_VC_LT3 };
@@ -845,6 +866,10 @@ FxSettings Engine::fxSettings(const float *pots) const
         s.compBandGainDb[b] = g >= 64.0f ? (g - 64.0f) / 63.0f * 24.0f : (g - 64.0f) / 64.0f * 24.0f;
     }
     s.compBelow = pot01(pots[TB_P_COMP_BELOW]);
+    {
+        const int rs[3] = { TB_P_COMP_RS1, TB_P_COMP_RS2, TB_P_COMP_RS3 }, bs[3] = { TB_P_COMP_BS1, TB_P_COMP_BS2, TB_P_COMP_BS3 };
+        for (int b = 0; b < 3; b++) { s.compRatioScale[b] = pot01(pots[rs[b]]); s.compBelowScale[b] = pot01(pots[bs[b]]); }
+    }
     s.fxOrder = std::clamp((int) pots[TB_P_FX_ORDER], 0, 5039);
     s.compBoostDb = std::clamp(pots[TB_P_COMP_BOOST], 0.0f, 48.0f);
     s.compAttackMs = 0.1f * std::pow(1000.0f, pot01(pots[TB_P_COMP_ATTACK]));
@@ -972,7 +997,8 @@ void Engine::refreshFx()
     if (fxSeenValid && tempoSeen == tempoNow && std::memcmp(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen) == 0 &&
         std::memcmp(distSeen, pots + TB_P_DIST_DRIVE, sizeof distSeen) == 0 && compOnSeen == pots[TB_P_COMP_ON] &&
         std::memcmp(modSeen, pots + TB_P_CHOR_ON, sizeof modSeen) == 0 && std::memcmp(hydSeen, pots + TB_P_HYD_UNI, sizeof hydSeen) == 0 && std::memcmp(dly2Seen, pots + TB_P_DLY2_MIX, sizeof dly2Seen) == 0 && std::memcmp(distPreSeen, pots + TB_P_DIST_PRE, sizeof distPreSeen) == 0 && std::memcmp(dist2Seen, pots + TB_P_DIST_PRE_MORPH, sizeof dist2Seen) == 0 &&
-        std::memcmp(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen) == 0 && std::memcmp(vdistSeen, pots + TB_P_FX_ORDER, sizeof vdistSeen) == 0 && std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX] && std::memcmp(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen) == 0) return;
+        std::memcmp(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen) == 0 && std::memcmp(vdistSeen, pots + TB_P_FX_ORDER, sizeof vdistSeen) == 0 && std::memcmp(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen) == 0 && convSeen == pots[TB_P_CONV_MIX] && std::memcmp(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen) == 0 &&
+        std::memcmp(fxTailSeen, pots + TB_P_COMP_XLO, sizeof fxTailSeen) == 0) return;
     convSeen = pots[TB_P_CONV_MIX];
     tempoSeen = tempoNow;
     std::memcpy(fxSeen, pots + TB_P_DLY_MIX, sizeof fxSeen);
@@ -987,6 +1013,7 @@ void Engine::refreshFx()
     std::memcpy(vitalFxSeen, pots + TB_P_VC_UT1, sizeof vitalFxSeen);
     std::memcpy(msSeen, pots + TB_P_EQM1_TYPE, sizeof msSeen);
     std::memcpy(splitSeen, pots + TB_P_SPLIT_BAND, sizeof splitSeen);
+    std::memcpy(fxTailSeen, pots + TB_P_COMP_XLO, sizeof fxTailSeen);
     fxSeenValid = true;
     fx.set(fxSettings(pots));
 }

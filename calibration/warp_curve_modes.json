@@ -10,7 +10,11 @@
   "kDistHardClip",
   "kDistSinFold",
   "kDistStompBox",
-  "kDistLinFold"
+  "kDistLinFold",
+  "kDistTube",
+  "kDistSoftSat",
+  "kDistTapeSat",
+  "kDistDiode1"
  ],
  "limit": {
   "kDistSoftClip": 1.0,
@@ -23,7 +27,11 @@
   "kDistHardClip": 1.0,
   "kDistSinFold": 0.275,
   "kDistStompBox": 1.0,
-  "kDistLinFold": 0.2
+  "kDistLinFold": 0.2,
+  "kDistTube": 1.0,
+  "kDistSoftSat": 1.0,
+  "kDistTapeSat": 1.0,
+  "kDistDiode1": 1.0
  },
  "noop_below": {
   "kDistSoftClip": null,
@@ -36,7 +44,11 @@
   "kDistHardClip": 0.1,
   "kDistSinFold": 0.0,
   "kDistStompBox": 0.0,
-  "kDistLinFold": null
+  "kDistLinFold": null,
+  "kDistTube": 0.0,
+  "kDistSoftSat": null,
+  "kDistTapeSat": 0.0,
+  "kDistDiode1": 0.0
  },
  "amounts": [
   0.0,

@@ -32,7 +32,7 @@ class Filter {
 public:
     enum Type  { none = 0, lowpass, highpass, bandpass, notch,
                  lowshelf, highshelf, peak, allpass };
-    enum Slope { db12 = 0, db24 };
+    enum Slope { db12 = 0, db24, db6 };            /* db6: a one-pole (trapezoidal) low- or high-pass at freq, no resonance: Serum's 6 dB models (MgL6, L6, H6) */
 
     Filter()
         : biquad1(1), biquad2(1),
@@ -51,6 +51,7 @@ public:
     {
         inst1.clear();
         inst2.clear();
+        z6[0] = z6[1] = 0.0f;
     }
 
     /* The coefficients are a pure function of (type, freq, gain, Q, sample rate), so a call that repeats the last one (a steady cutoff across the block's pieces, the next
@@ -60,6 +61,11 @@ public:
     {
         freq = freq_; q = q_; g = g_;
         if (type == none) return;
+        if (slope == db6) {
+            const float k = std::tan(3.14159265f * std::min(freq_, 0.49f * (float) sampleRate) / (float) sampleRate);
+            G6 = k / (1.0f + k);
+            return;
+        }
 
         if (!(ok1 && freq_ == d1f && q_ == d1q && g_ == d1g)) {
             AudioFilter::ParametricCreator::createMZTiStage(
@@ -78,6 +84,19 @@ public:
         float *chans[2] = { l, r };
         const float *inChans[2] = { l, r };
         switch (slope) {
+        case db6: {
+            const bool hp = type == highpass;
+            for (int c = 0; c < 2; c++) {
+                float *x = chans[c], s = z6[c];
+                for (int i = 0; i < n; i++) {
+                    const float v = (x[i] - s) * G6, y = v + s;
+                    s = y + v;
+                    x[i] = hp ? x[i] - y : y;
+                }
+                z6[c] = s;
+            }
+            break;
+        }
         case db12:
             inst1.processBlock(chans, inChans, n);
             break;
@@ -120,6 +139,7 @@ private:
     Slope slope = db12;
     double sampleRate = 44100.0;
     float freq = 2000.0f, q = kFilterQ, g = 0.0f;
+    float G6 = 0.5f, z6[2] = { 0.0f, 0.0f };
     bool ok1 = false, ok2 = false;                            /* the stages hold the design for d1* / d2* */
     float d1f = 0, d1q = 0, d1g = 0, d2f = 0, d2g = 0;
 

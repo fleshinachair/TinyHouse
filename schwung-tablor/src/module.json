@@ -2,7 +2,7 @@
   "id": "tinyhouse",
   "name": "TinyHouse",
   "abbrev": "TINYH",
-  "version": "0.9.16",
+  "version": "0.9.17",
   "description": "3-oscillator wavetable synth - 8-voice poly, unison to 16, hard sync, sub, noise, multimode filter, four envelopes (two routable). Serum/Vital/Ableton wavetables via Move Manager.",
   "author": "athousanddetails; after Wavetable (Roland Rabien / FigBug, BSD-3)",
   "dsp": "dsp.so",

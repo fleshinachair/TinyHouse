@@ -1719,7 +1719,7 @@ static void apply_pending(tablor_instance *inst, const char *why = "?")
 /* ---- convert on load (reconvert.h) ----------------------------------------------------------
  * The module's converter (<module>/converter, the same code as the remote UI's import bundle) is stamped in conv_version.json: the release and a hash of
  * the converter. A store preset whose file names its original ("src") and another converter ("conv") is converted again from that original: at once when it
- * is chosen (the header reads "Upgrading to v..." meanwhile and the new sound replaces the old when it lands), and in the background after the store is scanned.
+ * is chosen (the header reads "Upgrade v..." meanwhile and the new sound replaces the old when it lands), and in the background after the store is scanned.
  * A preset that could not be converted is left as it is and not tried again until the module is loaded again. */
 static constexpr const char *kSourcesDir = "/data/UserData/UserLibrary/TinyHouse Sources";     /* import_web.MOVE_SRC_ROOT */
 struct ConvStamp { std::string hash, ver; std::atomic<bool> loaded { false }; };      /* hash and ver are written once, before loaded */
@@ -2511,7 +2511,7 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
         if (i >= 0 && i < (int) ps->items.size()) {           /* the chosen preset is being converted again (convert on load): the header says so until it lands */
             std::lock_guard<std::mutex> lk(inst->up_mu);
             if (!inst->up_path.empty() && inst->up_path == ps->items[(size_t) i].path)
-                return write_str(buf, buf_len, ("Upgrading to v" + g_conv.ver).c_str());
+                return write_str(buf, buf_len, ("Upgrade v" + g_conv.ver).c_str());      /* short: the Move's header cuts at about 17 characters, and "Upgrading to v0.9.17" lost the version */
         }
         if (inst->hint_until.load() > 0 && steady_ms() < inst->hint_until.load())     /* the once-per-update reminder (reimport_hint) */
             return write_str(buf, buf_len, kHintText);

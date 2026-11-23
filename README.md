@@ -60,7 +60,7 @@ Your presets go nowhere but your Move: the converter runs inside the browser pag
 
 Each preset you import keeps its original Serum or Vital file on the Move (in `UserLibrary/TinyHouse Sources/<bank>`), with a note of which parts of the converter
 it went through. When an update brings a better converter, the Move converts again the presets that update can change, in the background at low priority, and leaves
-the rest as they are. A preset that has not been done yet when you choose it is converted at once (the header reads "Upgrading to v..." for a moment). Nothing needs
+the rest as they are. A preset that has not been done yet when you choose it is converted at once (the header reads "Upgrade v..." for a moment). Nothing needs
 your computer or the remote UI, and you can play meanwhile.
 
 Presets imported before version 0.9.13 kept no original, so they cannot be upgraded: import them once more through the remote UI, with the same bank name (the

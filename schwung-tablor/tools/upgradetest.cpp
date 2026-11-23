@@ -7,7 +7,7 @@
  *   1. the background run converts every one of them (the stamp becomes the module's),
  *   2. the helper runs at SCHED_OTHER, nice 19, off core 3 (the SPI callback's), though the instance was made on a SCHED_FIFO thread,
  *   3. render blocks keep their time meanwhile (the longest block, and how many took longer than a block lasts),
- *   4. a stale preset chosen from the page reads "Upgrading to v..." in the header, then its name again, and its file is upgraded,
+ *   4. a stale preset chosen from the page reads "Upgrade v..." in the header, then its name again, and its file is upgraded,
  *   5. destroying the instance while a conversion runs returns at once and leaves no helper behind.
  * The test makes its presets stale again itself (it rewrites their "conv"); it touches no other bank. */
 
@@ -226,10 +226,10 @@ int main(int argc, char **argv)
     while (now_us() - t1 < 60000000LL) {
         R.block();
         api->get_param(inst, "preset_name", b, sizeof b);
-        if (!strncmp(b, "Upgrading to v", 14)) saw = true;
+        if (!strncmp(b, "Upgrade v", 9)) saw = true;
         else if (saw) { t_up = now_us() - t1; name = b; break; }
     }
-    CHECK(saw, "the header read \"Upgrading to v%s\" while it converted", ver.c_str());
+    CHECK(saw, "the header read \"Upgrade v%s\" while it converted", ver.c_str());
     CHECK(t_up > 0, "then the preset's name again (\"%s\") after %.2f s", name.c_str(), t_up / 1e6);
     CHECK(field(slurp(last), "conv") == hash, "the chosen preset's file was upgraded");
     printf("  (%d of %d test presets upgraded when the chosen one landed: it went first)\n", count_current(files, hash), (int) files.size());

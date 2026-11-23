@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.16
+
+**Serum presets sound closer.** Measured over Serum 2's 626 factory presets: 39 now sound closer to Serum (typically 39 % closer, up to 92 %) and 21 a little further. The average distance from Serum went from 7.1 to 6.8 dB, and 583 presets now pass the import's sound check, up from 575. Presets you imported through the Remote UI convert again in the background after the update (only the ones these fixes change).
+
+- **Kicks and drums.** Envelope Hold is now carried (Serum's kicks hold their body for 80-90 ms before decaying). Ratio-mode oscillators take their Hz Offset, and with Pitch Track off they play at a fixed pitch as in Serum. A bipolar envelope into an oscillator's Pitch or Octave knob now leaves the pitch where Serum does. DR - Kick Synth 1 and 2, 808 - Diesel, DR - 909 Snare and DR - Shake are much closer.
+- **Wavetable position.** Oscillators with Xfade Mode 1 or 2 now play the frame Serum plays at their position.
+- **Low filter cutoffs.** The MG Ladder and Dirty MG filters were placed far too low near the bottom of their range, which muted the BA - Club basses. Fixed.
+- **Reverb1 voice filter and Utils Balance.** Both are now carried: Reverb1 as a new filter type built from Serum's measured behaviour, Balance as a stereo balance on each effects rack.
+- **Macros that move an LFO's speed.** A macro, velocity, note or mod-wheel route into an LFO's Rate was ignored. It now sets the rate the LFO has at the macro's saved position (FX - Meow, PL - Resonant Pluck).
+- **Two Filter effects in one rack.** Each one took the other's macro routes as well as its own. SY - Tomb Beneath Petra and MDL - Slimy Swaying had a high-pass filter that Serum does not have; both are now close to Serum.
+- **A macro that switches the EQ on.** The EQ was left on all the time with the macro's far-end settings. It now stays off at the macro's saved position, as in Serum.
+- **Remote UI import.** A factory SFZ found in two places no longer fails to match, and a missing reverb impulse is no longer listed as a missing sample.
+
+A few presets moved further from Serum because an old mistake had been hiding another gap: BA - Gnarly Reese (its DJ Mixer filter is not carried), BA - Super 8 and DR - Snared.
+
 ## 0.9.15
 
 **Sets keep their presets.** Importing through the Remote UI while a Set was open could move its slots off their presets: each slot remembered its place in the preset list rather than the preset, so when an import changed the list, a slot pointed at another preset or at the bank's first one. The sound stayed, but the Set saved the wrong preset, and after a restart the slots showed the first preset. Slots now stay on their preset by name. If a slot's preset is missing for a while (while its bank is being rewritten, or removed by an update), the slot keeps its sound and keeps naming that preset, and goes back to it when it returns. Only choosing another preset moves a slot.

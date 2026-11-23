@@ -717,8 +717,8 @@ def filter_bands(nodes: list[dict], ctx: dict | None, handled: set | None = None
             why.append("Filter moved by an envelope/LFO/velocity")
             continue
         norm = float(pp.get("kParamFreq", 0.5))
-        for m in fmods:
-            if m.get("dest_param") == "kParamFreq" and foldable_source(m, macros):
+        for m in node_mods(fmods, i, (ctx or {}).get("rack", 0)):      # this node's routes only: every Filter FX route used to be added to every Filter FX node (SY - Tomb Beneath Petra's
+            if m.get("dest_param") == "kParamFreq" and foldable_source(m, macros):    # idle H12 took the other Filter's +77 % macro route and became a 3.7 kHz high-pass, 14 dB off)
                 mv = macro_value(m, macros)
                 norm += m["amount_pct"] / 100.0 * ((mv - 0.5) if m.get("bipolar") else mv)
         if dynamic:

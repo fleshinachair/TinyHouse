@@ -93,6 +93,16 @@ def convert_kept(orig: Path, name: str, subdir: str) -> dict:
     return W.convert_one(orig, name, subdir, tables if tables.is_dir() else None, pack, WT_ROOT)
 
 
+def _drop_work() -> None:
+    """Remove import_web's scratch folder: a conversion makes one (th_import_* under the temp folder) and nothing else removes it, so each preset an update
+    reconverted used to leave one behind on the Move. (import_web.reset() does more: in the page's mode it also forgets the audio found for the bank.)"""
+    import shutil                                            # here, not at the top: a changed module-level line changes the converter's global hash and every kept record with it (conv_deps.py)
+    w = W._root
+    W._root = None
+    if w is not None:
+        shutil.rmtree(w, ignore_errors=True)
+
+
 def reconvert(path: Path) -> dict:
     t = time.perf_counter()
     res = {"path": str(path), "status": "error", "ms": 0, "error": ""}
@@ -134,6 +144,7 @@ def reconvert(path: Path) -> dict:
     except Exception as e:                                       # one bad file must not stop the rest
         res["error"] = f"{type(e).__name__}: {e}"[:300]
     finally:
+        _drop_work()                                             # the conversion's scratch folder (th_import_*): nothing in it is read after this call
         res["ms"] = round((time.perf_counter() - t) * 1000)
     return res
 
@@ -185,6 +196,7 @@ def retry_waiting(bank_src: Path) -> dict:
     except Exception as e:
         res.update(status="error", error=f"{type(e).__name__}: {e}"[:300])
     finally:
+        _drop_work()
         res["ms"] = round((time.perf_counter() - t) * 1000)
     return res
 

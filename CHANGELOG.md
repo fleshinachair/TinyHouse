@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.18
+
+**Aftertouch.** The Move's pad pressure now moves the sound in Serum presets that use aftertouch. Serum's Aftertouch source (channel pressure or poly pressure, which is what the Move's pads send) is carried as a live route into whatever it controls: filter cutoff, volume, pitch, wavetable position and the other places the converter already carries. 102 factory presets use it; 61 of them get live routes. Nothing changes at rest, so presets sound the same until you press. Presets you imported through the Remote UI convert again in the background after the update, and only the ones this changes are rewritten.
+
+- **Upgrade message.** The Move's header now reads "Upgrade v0.9.18" while presets convert after an update. The old text ("Upgrading to v0.9.18") was cut off before the version number.
+- **Converting after an update leaves nothing behind.** Each preset converted in the background used to leave a small work folder in the Move's temporary folder. It is now removed as soon as the preset is done.
+
 ## 0.9.17
 
 **Serum presets sound closer.** Measured over Serum 2's 626 factory presets: 188 now sound closer to Serum (typically 26 % closer, up to 97 %) and 120 a little further. The average distance from Serum went from 6.8 to 6.4 dB, and 585 presets now pass the import's sound check, up from 583. Presets you imported through the Remote UI convert again in the background after the update (only the ones these fixes change). Every new control is added at the end of the parameter list, so saved presets, Sets and macros keep their numbers.

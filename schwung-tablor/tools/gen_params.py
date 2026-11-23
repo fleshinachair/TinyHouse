@@ -14,7 +14,7 @@ Run: python3 tools/gen_params.py     (from the repo root)
 import json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-VERSION = "0.9.17"
+VERSION = "0.9.18"
 
 # This fork installs beside stock Tablor rather than over it: a Schwung store
 # update looks modules up by id, so a different id is what keeps it from being

@@ -229,6 +229,7 @@ The engine is a fork of [Tablor](https://github.com/athousanddetails/schwung-tab
 under BSD-3-Clause (see `schwung-tablor/LICENSE`). The rest of TinyHouse (the converter, the remote page, the scripts and the docs) is also BSD-3-Clause: see [LICENSE](LICENSE), **except the Vital import** (`converter/vital_*.py`), which is derived from [Vital](https://github.com/mtytel/vital) and is GPL-3.0-or-later: see [THIRD-PARTY.md](THIRD-PARTY.md) and [LICENSE-GPL-3.0](LICENSE-GPL-3.0). Parts of the engine are also ports of Vital's algorithms, so the **built engine (`dsp.so`) in a release is GPL-3.0-or-later as a whole**; the source files keep their own licences.
 
 This repository contains **no Serum presets, packs, wavetables, samples or renders**, and no presets converted from them: those belong to Xfer and the preset
-authors. You convert your own. Check a pack's licence before sharing presets you converted from it.
+authors. You convert your own. Check a pack's licence before sharing presets you converted from it. No Serum code or data is included: the Serum import is tuned to
+sound like Serum, using measurements of its audio output, and is implemented independently.
 
 TinyHouse is not affiliated with or endorsed by Xfer Records, Ableton or the Schwung project. "Serum" is a trademark of Xfer Records; "Move" is a trademark of Ableton AG.

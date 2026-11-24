@@ -4,7 +4,7 @@
 #ifndef TABLOR_PARAMS_H
 #define TABLOR_PARAMS_H
 
-#define TB_VERSION "0.9.18"
+#define TB_VERSION "0.9.19"
 #define TB_MODULE_ID "tinyhouse"
 #define TB_PARAM_COUNT 1406
 

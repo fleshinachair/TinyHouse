@@ -34,6 +34,7 @@ arm)
     $CXX $SRC "$ROOT/tools/tailbench.cpp" -ldl -lm -o "$OUT/tailbench"
     $CXX $SRC "$ROOT/tools/soak.cpp" -ldl -lm -o "$OUT/tablor_soak"
     $CXX $SRC "$ROOT/tools/asynccheck.cpp" -ldl -lm -o "$OUT/tablor_asynccheck"
+    $CXX $SRC "$ROOT/tools/asyncstall.cpp" -lpthread -o "$OUT/tablor_asyncstall"
     $CXX $SRC "$ROOT/tests/test_dsp.cpp" "$ROOT/src/ported/wavetable.cpp" "$ROOT/src/ported/audiofilter/ParametricCreator.cpp" -lm -o "$OUT/tablor_test"
     $CXX $SRC "$ROOT/tests/test_engine.cpp" $ENGINE -lm -o "$OUT/tablor_engine_test"
     $CXX $SRC "$ROOT/tests/test_fx.cpp" $ENGINE -lm -o "$OUT/tablor_fx_test"

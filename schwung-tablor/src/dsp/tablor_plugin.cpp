@@ -2528,8 +2528,8 @@ static int tb_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (!strcmp(key, "async")) {                  /* the render thread: on, its FIFO priority (0 SCHED_OTHER, -1 none), blocks, waits, the longest wait and block */
         char tmp[160];
-        snprintf(tmp, sizeof tmp, "on=%d prio=%d stuck=%d blocks=%ld late=%ld waitmax_us=%lld rendermax_us=%lld", inst->async.on() ? 1 : 0, inst->async.prio(),
-                 inst->async.wasStuck() ? 1 : 0, inst->async.blocks(), inst->async.lateCount(), inst->async.waitMaxUs(), inst->async.renderMaxUs());
+        snprintf(tmp, sizeof tmp, "on=%d prio=%d stuck=%d blocks=%ld late=%ld waitmax_us=%lld rendermax_us=%lld skipped=%ld", inst->async.on() ? 1 : 0, inst->async.prio(),
+                 inst->async.wasStuck() ? 1 : 0, inst->async.blocks(), inst->async.lateCount(), inst->async.waitMaxUs(), inst->async.renderMaxUs(), inst->async.skippedCount());
         return write_str(buf, buf_len, tmp);
     }
 
@@ -2629,8 +2629,12 @@ static void tb_render_block(void *instance, int16_t *out_lr, int frames)
     }
     const bool async = inst->async.on() && frames <= tb::AsyncRender::kMaxFrames;
     if (inst->async.on()) {
-        /* The block the thread rendered during the last period goes out now; the engine is ours until the next launch. */
-        inst->async.quiesce();
+        /* The block the thread rendered during the last period goes out now; the engine is ours until the next launch. A thread
+         * still rendering after 50 ms keeps the engine: this period is silent and nothing here touches it (async_render.h). */
+        if (!inst->async.settle(50000)) {
+            memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
+            return;
+        }
         if (!async || !inst->async.collect(out_lr, frames))
             memset(out_lr, 0, (size_t) frames * 2 * sizeof(int16_t));
         inst->async.drainMidi([inst](const uint8_t *m, int n) { inst->engine.onMidi(m, n); });

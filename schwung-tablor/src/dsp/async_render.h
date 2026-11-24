@@ -94,22 +94,38 @@ public:
     bool on() const { return running; }
     bool busy() const { return running && done.load(std::memory_order_acquire) != kick.load(std::memory_order_relaxed); }
 
-    /* Wait for the block in flight. Callback thread. A thread that has not finished after 50 ms is taken for stuck: the module
-     * goes back to rendering on the callback rather than hold the device's audio for ever. */
-    void quiesce()
+    /* Wait for the block in flight, however long it takes. Callback thread. Used before anything changes what the render reads
+     * (a parameter, a preset, MIDI): the engine is the thread's until its block is done.
+     *
+     * It used to give up after 50 ms, mark the thread stuck and let the callback render the engine itself, while the thread was
+     * still inside renderBlock. Two threads then ran the same engine: at a busy Move start-up one of them made a Vital delay's
+     * memory while the other read it, and the Move app died (SIGSEGV in Fx::processDelayVital, 2026-11-24). A late thread is
+     * only held off by busier ones; it always finishes, so waiting is safe. */
+    void quiesce() { settle(-1); }
+
+    /* render_block's wait: at most limitUs (-1 = no limit). False: the block is still being rendered. The caller then plays
+     * silence for this period and leaves the engine alone; the next period asks again. */
+    bool settle(int64_t limitUs)
     {
-        if (!running) return;
+        if (!running) return true;
         const uint32_t k = kick.load(std::memory_order_relaxed);
-        if (done.load(std::memory_order_acquire) == k) return;
+        if (done.load(std::memory_order_acquire) == k) return true;
         const int64_t t0 = nowUs();
         unsigned spins = 0;
+        bool ok = true;
         while (done.load(std::memory_order_acquire) != k) {
             relax();
-            if ((++spins & 255u) == 0 && nowUs() - t0 > 50000) { running = false; stuck = true; break; }
+            if ((++spins & 255u) == 0) {
+                const int64_t w = nowUs() - t0;
+                if (w > 50000) stuck = true;                        /* for the "async" key: a block held up past 50 ms */
+                if (limitUs >= 0 && w > limitUs) { ok = false; break; }
+            }
         }
         const int64_t w = nowUs() - t0;
         late.fetch_add(1, std::memory_order_relaxed);
+        if (!ok) skipped.fetch_add(1, std::memory_order_relaxed);
         if (w > waitMax.load(std::memory_order_relaxed)) waitMax.store(w, std::memory_order_relaxed);
+        return ok;
     }
 
     /* The block the thread finished (call after quiesce). False when there is none of this size yet. */
@@ -148,6 +164,7 @@ public:
     int prio() const { return prio_; }
     bool wasStuck() const { return stuck; }
     long lateCount() const { return late.load(std::memory_order_relaxed); }
+    long skippedCount() const { return skipped.load(std::memory_order_relaxed); }
     long long waitMaxUs() const { return (long long) waitMax.load(std::memory_order_relaxed); }
     long long renderMaxUs() const { return (long long) renderMax.load(std::memory_order_relaxed); }
     long blocks() const { return (long) done.load(std::memory_order_relaxed); }
@@ -216,7 +233,7 @@ private:
     alignas(64) int16_t buf[kMaxFrames * 2] = {};
     Msg midi[kMidiCap];
     int nMidi = 0;
-    std::atomic<long> late { 0 };
+    std::atomic<long> late { 0 }, skipped { 0 };
     std::atomic<int64_t> waitMax { 0 }, renderMax { 0 };
 };
 

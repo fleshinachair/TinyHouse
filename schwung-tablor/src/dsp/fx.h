@@ -947,8 +947,8 @@ public:
         if (s.splitBand == 1 || s.splitBand == 2) {
             for (int i = 0; i < 2; i++) { spLp[i].set(false, s.splitHz, sr); spHp[i].set(true, s.splitHz, sr); }
         }
-        if (s.delayVital && vdly.buf[0].empty()) { vdly.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); vdly.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }      /* Vital's delay / reverb memory is made when the preset is set, not on the first note */
-        if (s.revVital && vr.fb[0].empty()) { for (auto &b : vr.fb) b.assign(1 << 15, 0.0f); for (auto &b : vr.ap) b.assign(1024 * 4, 0.0f); for (auto &b : vr.pd) b.assign(1 << 14, 0.0f); }
+        if (s.delayVital && vdly.buf[1].empty()) { vdly.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); vdly.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }      /* Vital's delay / reverb memory is made when the preset is set, not on the first note */
+        if (s.revVital && vr.pd[1].empty()) { for (auto &b : vr.fb) b.assign(1 << 15, 0.0f); for (auto &b : vr.ap) b.assign(1024 * 4, 0.0f); for (auto &b : vr.pd) b.assign(1 << 14, 0.0f); }
         eqTarget = s.eqEnable ? 1.0f : 0.0f;
         distTarget = s.distVital ? (s.distMix > 0.0f ? 1.0f : 0.0f) : s.distCal ? (s.distMix > 0.0f || std::fabs(s.distLevel - 1.0f) > 1e-3f ? 1.0f : 0.0f) : (s.distDrive > 0.0f ? s.distMix : 0.0f);
         compTarget = (s.compRatio > 1.001f || s.compMulti) ? s.compMix : 0.0f;
@@ -2044,7 +2044,7 @@ private:
     {
         slice.finish();
         auto &u = vdly;
-        if (u.buf[0].empty()) { u.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); u.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }
+        if (u.buf[1].empty()) { u.buf[0].assign((size_t) VitalDelayState::kMax, 0.0f); u.buf[1].assign((size_t) VitalDelayState::kMax, 0.0f); }
         const int style = std::min(std::max(st.delayStyle, 0), 3);
         float tgtF[2] = { 1000.0f / std::max(st.delayMs, 1.0f), 1000.0f / std::max(st.delayMs, 1.0f) };
         if (style >= 1) tgtF[1] = 1000.0f / std::max(st.delayRMs, 1.0f);
@@ -2195,7 +2195,8 @@ private:
         static const int kAD[4][4] = { { 1001, 799, 933, 876 }, { 895, 807, 907, 853 }, { 957, 1019, 711, 567 }, { 833, 779, 663, 997 } };
         static const float kFD[4][4] = { { 6753.2f, 9278.4f, 7704.5f, 11328.5f }, { 9701.12f, 5512.5f, 8480.45f, 5638.65f }, { 3120.73f, 3429.5f, 3626.37f, 7713.52f }, { 4521.54f, 6518.97f, 5265.56f, 5630.25f } };
         constexpr int FB = 1 << 15, FM = FB - 1, AN = 1024, AM = AN - 1, PN = 1 << 14, PM = PN - 1;
-        if (vr.fb[0].empty()) { for (auto &b : vr.fb) b.assign(FB, 0.0f); for (auto &b : vr.ap) b.assign(AN * 4, 0.0f); for (auto &b : vr.pd) b.assign(PN, 0.0f); }
+        /* pd[1] is the last buffer made, so testing it (not fb[0]) means all of them are there */
+        if (vr.pd[1].empty()) { for (auto &b : vr.fb) b.assign(FB, 0.0f); for (auto &b : vr.ap) b.assign(AN * 4, 0.0f); for (auto &b : vr.pd) b.assign(PN, 0.0f); }
         const float w01 = std::min(std::max(st.revMix, 0.0f), 1.0f);
         const float tgtWet = std::sin(w01 * 1.5707963f), tgtDry = std::cos(w01 * 1.5707963f);
         const float dw = (tgtWet - revWetCur) / (float) n, dd = (tgtDry - revDryCur) / (float) n;

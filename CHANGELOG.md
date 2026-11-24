@@ -4,6 +4,8 @@
 
 **Fixes a rare crash at Move start-up.** Every so often (about 2 starts in 100) the Move app froze as it started: the pads stayed lit, the screen went dark, and only a restart brought it back. TinyHouse renders each slot's audio on a thread of its own. When the Move was busy loading and that thread fell behind, TinyHouse gave up waiting after 50 ms and rendered the same slot a second time on the Move's audio thread. With two renders inside one slot at once, a Vital delay or reverb could be read while it was still being set up, and the Move app crashed. Now a slot whose render is late plays silence for that moment and lets the render finish, so only one render ever runs per slot. Presets and sound are unchanged, and nothing is converted again after this update.
 
+## 0.9.18
+
 **Aftertouch.** The Move's pad pressure now moves the sound in Serum presets that use aftertouch. Serum's Aftertouch source (channel pressure or poly pressure, which is what the Move's pads send) is carried as a live route into whatever it controls: filter cutoff, volume, pitch, wavetable position and the other places the converter already carries. 102 factory presets use it; 61 of them get live routes. Nothing changes at rest, so presets sound the same until you press. Presets you imported through the Remote UI convert again in the background after the update, and only the ones this changes are rewritten.
 
 - **Upgrade message.** The Move's header now reads "Upgrade v0.9.18" while presets convert after an update. The old text ("Upgrading to v0.9.18") was cut off before the version number.

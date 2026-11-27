@@ -32,6 +32,7 @@
 #include "partjoin.h"
 #include "async_render.h"
 #include "preset_digest.h"
+#include "chain_params.h"
 #include "reconvert.h"
 #include <set>
 
@@ -1010,17 +1011,8 @@ static std::string tb_leaf_of(const std::string &name)
     return slash == std::string::npos ? name : name.substr(slash + 1);
 }
 
-/* JSON-escape into a std::string. The option names are filenames, so a
- * quote or a backslash is unlikely but entirely legal on disk -- and one
- * unescaped byte turns the whole contract into a failed read. */
-static void tb_json_append(std::string &out, const std::string &in)
-{
-    for (char c : in) {
-        if (c == '"' || c == '\\') { out += '\\'; out += c; }
-        else if ((unsigned char) c < 0x20) continue;
-        else out += c;
-    }
-}
+static void tb_json_append(std::string &out, const std::string &in) { tb::jsonAppendName(out, in); }
+static void diag_log(const tablor_instance *inst, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 /* Everything below runs ON THE WORKER: it walks the scan, copies it and
  * formats ~24 KB of JSON. The audio thread only ever reads the finished
@@ -1101,124 +1093,28 @@ static void tb_publish_selection(tablor_instance *inst)
     }
     pl2 += "]";
 
-    /* chain_params: the static head plus the three dynamic entries */
+    /* chain_params: the static head plus the entries whose options are on the Move (chain_params.h, which also shortens their names if the list
+     * would be too long for the Remote UI) */
     std::string &out = snap->chain_params;
-    out.assign(tb_chain_params_json);
-    if (out.size() < 2 || out.back() != ']')
-        return;                              /* not the shape we expect */
-    out.pop_back();                          /* drop the closing ] */
-
-    /* The keys the Move turns (the wavetable selects, bank, the demo switch, pack and part, preset) go in `hand` and are inserted right after the
-     * page keys at the end, not appended: the host caches only the first 256 declared keys, and a set of one past that makes it re-fetch and re-parse
-     * this whole list on the SPI callback (23 ms, four times a second). See tools/gen_params.py. */
-    std::string hand;
-
-    out += ",{\"key\":\"wt_pack\",\"name\":\"WT Pack\",\"type\":\"enum\",\"options\":[";
-    for (size_t i = 0; i < snap->packs.size(); i++) {
-        if (i) out += ",";
-        out += "\""; tb_json_append(out, snap->packs[i]); out += "\"";
-    }
-    out += "]}";
-
-    for (int osc = 0; osc < TB_WT_SLOTS; osc++) {
-        char head[96];
-        snprintf(head, sizeof head,
-                 ",{\"key\":\"wt%d_select\",\"name\":\"WT%d Table\",\"type\":\"enum\",\"options\":[",
-                 osc + 1, osc + 1);
-        hand += head;
+    {
+        tb::ChainParamLists lists;
+        lists.packs = snap->packs;
         for (size_t i = 0; i < snap->filtered.size(); i++) {
             int g = snap->filtered[i];
-            if (i) hand += ",";
-            hand += "\"";
-            tb_json_append(hand, g == 0 ? std::string("Init")
-                                        : tb_leaf_of(l[(size_t) g].name));
-            hand += "\"";
+            lists.tables.push_back(g == 0 ? std::string("Init") : tb_leaf_of(l[(size_t) g].name));
         }
-        hand += "]}";
-    }
-
-    /* The Bank knob: one option per preset folder in the store (scanned before the second publish). */
-    {
-        auto ps = inst->storeList();
-        hand += ",{\"key\":\"bank\",\"name\":\"Bank\",\"type\":\"enum\",\"options\":[";
-        if (ps->banks.empty()) hand += "\"User\"";
-        for (size_t i = 0; i < ps->banks.size(); i++) {
-            if (i) hand += ",";
-            hand += "\""; tb_json_append(hand, ps->banks[i]); hand += "\"";
-        }
-        hand += "]}";
-    }
-
-    /* The demo mode: the switch, the pack and the part inside it (enums whose options are what the scan found), and the list and the current pick for the web panel. */
-    {
+        lists.banks = inst->storeList()->banks;
         auto dl = inst->demoList();
-        hand += ",{\"key\":\"demo_on\",\"name\":\"Demo\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"default\":\"Off\"}";
-        hand += ",{\"key\":\"demo_pack\",\"name\":\"Demo Pack\",\"type\":\"enum\",\"options\":[";
-        if (dl->packs.empty()) hand += "\"None\"";
-        for (size_t i = 0; i < dl->packs.size(); i++) {
-            if (i) hand += ",";
-            hand += "\""; tb_json_append(hand, dl->packs[i]); hand += "\"";
-        }
-        hand += "]},{\"key\":\"demo_part\",\"name\":\"Demo Part\",\"type\":\"enum\",\"options\":[";
+        lists.demoPacks = dl->packs;
         const int dp = inst->demo_pack.load();
         const int dn = dp >= 0 && dp < (int) dl->packs.size() ? dl->pack_n[(size_t) dp] : 0;
-        if (dn <= 0) hand += "\"None\"";
-        for (int i = 0; i < dn; i++) {
-            if (i) hand += ",";
-            hand += "\""; tb_json_append(hand, dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]); hand += "\"";
-        }
-        hand += "]}";
-        out += ",{\"key\":\"demo_now\",\"name\":\"Demo Now\",\"type\":\"string\",\"access\":\"read\"}";
-        /* The Macros page cells read macro_names on every redraw, and the Tone and Grain pages read the shapes below: keys the Move reads belong
-         * inside the host's 256-key cache (a key past it makes the host parse this whole list again, ~20 ms, on every read: the Move UI ran at
-         * 5-10 fps while the Macros page was open, and a preset scroll hung for over a minute). */
-        hand += ",{\"key\":\"macro_names\",\"name\":\"Macro Names\",\"type\":\"string\",\"access\":\"read\"}"
-                ",{\"key\":\"macro_routes\",\"name\":\"Macro Routes\",\"type\":\"string\",\"access\":\"read\"}"
-                /* the Grain pages' moving head: each sample slot's End, Loop, Loop start, Loop end, Manual position and Position in one short string ("100,1,22,81,0,0") */
-                ",{\"key\":\"smp_gv\",\"name\":\"Sample 1 Grain View\",\"type\":\"string\",\"access\":\"read\"}"
-                ",{\"key\":\"smp2_gv\",\"name\":\"Sample 2 Grain View\",\"type\":\"string\",\"access\":\"read\"}"
-                ",{\"key\":\"smp3_gv\",\"name\":\"Sample 3 Grain View\",\"type\":\"string\",\"access\":\"read\"}";
+        for (int i = 0; i < dn; i++)
+            lists.demoParts.push_back(dl->names[(size_t) (dl->pack_first[(size_t) dp] + i)]);
+        tb::LabelFit fit { 0, 0 };
+        out = tb::chainParams(tb_chain_params_json, tb_chain_params_prio_len, TB_WT_SLOTS, lists, tb::kChainParamsMax, &fit);
+        if (out.empty()) return;                             /* the static head is not the shape we expect */
+        if (fit.chars) diag_log(inst, "chain_params too long for the Remote UI: option names cut to %d characters (%d bytes)", (int) fit.chars, (int) out.size());
     }
-
-    /* The shape digests are DECLARED here so they reach a browser at all:
-     * schwung-manager only streams values for keys chain_params declares
-     * (its standalone getParam answers from that cache and never asks the
-     * device), so an undeclared key reads as undefined forever.
-     *
-     * They are STRINGS -- a shape digest reads "24,64,Wjvx..." and wt_paths
-     * is a path list -- and they are READ-ONLY, so that is what they now say.
-     * They were declared as an int with min==max==0, which was an invented
-     * way to mean "no knob can turn this" from before `access` existed. It
-     * described them wrongly twice over: not integers, and an empty numeric
-     * range is a defect in anything that really is a number, which is what
-     * Schwung's contract checker correctly flagged (issue #2).
-     *
-     * They remain on no ui_hierarchy page deliberately: they are a data
-     * channel for the web panel, not a control. */
-    hand += ",{\"key\":\"wt1_shape\",\"name\":\"WT1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"wt2_shape\",\"name\":\"WT2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"wt3_shape\",\"name\":\"WT3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"smp_shape\",\"name\":\"Sample 1 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"smp2_shape\",\"name\":\"Sample 2 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"smp3_shape\",\"name\":\"Sample 3 Shape\",\"type\":\"string\",\"access\":\"read\"}"
-           ",{\"key\":\"wt_on\",\"name\":\"WT On\",\"type\":\"string\",\"access\":\"read\"}";
-    /* The web panel's preset browser: the store's banks and preset names (read-only, built when the store is scanned), the
-     * current bank and index, and the index to load. `bank` is declared above; `preset` is the index within the current bank. */
-    /* ORDER MATTERS. The manager's initial value fetch sends in batches of 8 and flushes the last partial batch only when the LAST declared key
-     * reads back fine: if it does not, the tail of the list is dropped. So the list ends on a key that always reads (preset_now); `preset` moved up with the other keys the Move turns (see `hand`). */
-    out += ",{\"key\":\"rescan\",\"name\":\"Rescan\",\"type\":\"int\",\"min\":0,\"max\":1,\"default\":0}"
-           ",{\"key\":\"macro_edit\",\"name\":\"Macro Edit\",\"type\":\"string\"}"
-           /* THE BIG LISTS THE WEB PANEL READS (preset_list, demo_list, wt_paths) ARE NOT DECLARED. The page only sees what the manager pushes into its cache, and the manager pushes a
-            * module's JSON state (which leaves these out on purpose: they are tens of kilobytes) plus its viz `extra_keys`, and it leaves an extra key out when the key is also declared (it
-            * expects the main loop to fetch it). So since the state became JSON (5daf5ed) a declared list never reached the page: the preset bar, the Demo packs and the wavetable list stayed empty,
-            * and so did a sample's shape. An undeclared key named as an extra key IS read by the manager (on subscribe, on a preset change and every 500 ms while the panel is open, sending only
-            * what moved). `data_feed` is the declared key that carries that list; it sits on no page, so the Move's own screen never reads the keys (an undeclared key read by the host
-            * re-parses chain_params). */
-           ",{\"key\":\"data_feed\",\"name\":\"Data Feed\",\"type\":\"string\",\"access\":\"read\",\"viz\":{\"kind\":\"custom:tinyhouse_data\",\"group\":\"data\",\"role\":\"a\",\"extra_keys\":[\"preset_list\",\"demo_list\",\"wt_paths\",\"live_vals\"]}}"
-           ",{\"key\":\"preset_now\",\"name\":\"Preset Now\",\"type\":\"string\",\"access\":\"read\"}";
-    hand += ",{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":4095,\"default\":0}";
-    out.insert(tb_chain_params_prio_len, hand);      /* right after the page keys: inside the host's 256-key cache */
-    out += "]";
 
     /* The macro knobs could carry the preset's macro names as their `unit`: the cell label stays "MCR 1", and touching a knob shows the
      * value with the name beside it ("64 More Delay") in the top bar. A macro the preset does not use gets no unit. The key's entry

@@ -24,6 +24,7 @@
 #include <initializer_list>
 #include <vector>
 #include "../src/dsp/params.h"      /* tb_device_keys */
+#include "../src/dsp/chain_params.h" /* kChainParamsMax */
 #include <dirent.h>
 #include <unistd.h>
 #include <sched.h>
@@ -734,10 +735,9 @@ int main(int argc, char **argv)
     CHECK(n > 1000 && strstr(big, "\"filepath\"") &&
           strstr(big, "/data/UserData/UserLibrary/Wavetables"),
           "chain_params exposes the filepath browser (%d bytes)", n);
-    /* The host reads this into a SHADOW_PARAM_VALUE_LEN (64 KB) buffer and
-     * REFUSES to load the synth if it does not fit (chain_host.c:481). The
-     * dynamic option lists live in here now, so watch the headroom. */
-    CHECK(n < 60000, "chain_params fits the host's 64 KB buffer (%d bytes)", n);
+    /* The Remote UI's manager reads this into 65536 bytes; cut off there it is not JSON and the page gets an empty list. chain_params.h shortens the
+     * option names to stay under kChainParamsMax. */
+    CHECK(n <= (int) tb::kChainParamsMax, "chain_params fits the Remote UI's 64 KB buffer (%d bytes)", n);
 
     /* ---- turnable selection: pack list + per-osc enum ---- */
     CHECK(strstr(big, "\"wt_pack\"") && strstr(big, "\"wt1_select\"") &&

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.20
+
+**Fixes the Remote UI coming up empty with a large library.** The Remote UI can read at most 64 KB of a module's list of parameters. TinyHouse's list holds the names of your wavetables, preset banks and demo parts, so with long names or many banks it could pass that limit, and the page then showed no controls and no preset bar ("0 parameters" at the top right). Now, when the list would be too long, long names are shortened until it fits, keeping the start and the end ("Vocal Fo~er 07"). They are shown shortened in the Remote UI and on the Move, and choosing them works as before. A list that already fits is unchanged. Presets and sound are unchanged, and nothing is converted again after this update. Restart the Move after updating.
+
 ## 0.9.19
 
 **Fixes a rare crash at Move start-up.** Every so often (about 2 starts in 100) the Move app froze as it started: the pads stayed lit, the screen went dark, and only a restart brought it back. TinyHouse renders each slot's audio on a thread of its own. When the Move was busy loading and that thread fell behind, TinyHouse gave up waiting after 50 ms and rendered the same slot a second time on the Move's audio thread. With two renders inside one slot at once, a Vital delay or reverb could be read while it was still being set up, and the Move app crashed. Now a slot whose render is late plays silence for that moment and lets the render finish, so only one render ever runs per slot. Presets and sound are unchanged, and nothing is converted again after this update.

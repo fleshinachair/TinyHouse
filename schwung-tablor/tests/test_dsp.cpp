@@ -21,6 +21,8 @@
 #include "../src/ported/wav.h"
 #include "../src/dsp/sample.h"
 #include "../src/dsp/preset_digest.h"
+#include "../src/dsp/chain_params.h"
+#include "../src/dsp/params.h"
 
 using namespace tb;
 
@@ -1185,6 +1187,54 @@ static void testVitalTableCompensation()
           "the pre-emphasis raises a table's top harmonics (x%.2f at 160) and leaves the low ones (x%.3f at 5)", harm(b, 160) / harm(a, 160), harm(b, 5) / harm(a, 5));
 }
 
+/* The Remote UI reads chain_params into 65536 bytes and shows an empty page when it does not fit: a library with long names or many banks must still fit. */
+static void testChainParams()
+{
+    printf("== chain_params fits the Remote UI ==\n");
+    using tb::shortLabel;
+    CHECK(shortLabel("Basic Saw", 10) == "Basic Saw" && shortLabel("Basic Saw", 0) == "Basic Saw", "a name that fits is untouched");
+    const std::string s = shortLabel("Vocal Formant Growl Layer 07", 14);
+    CHECK(s.size() == 14 && s.compare(0, 8, "Vocal Fo") == 0 && s.find('~') != std::string::npos && s.substr(s.size() - 2) == "07", "a long name keeps its start and end (\"%s\")", s.c_str());
+    std::string acc;
+    for (int i = 0; i < 20; i++) acc += "\xc3\xa9";                    /* 20 two-byte characters */
+    const std::string u = shortLabel(acc, 7);
+    CHECK(u.size() == 13 && u.find('~') % 2 == 0, "cut between UTF-8 characters, 7 of them (%zu bytes)", u.size());
+
+    auto names = [](const char *stem, int n, size_t len) {
+        std::vector<std::string> v;
+        for (int i = 0; i < n; i++) {
+            std::string x = std::string(stem) + " " + std::to_string(i);
+            if (x.size() < len) x.insert(x.find(' '), len - x.size(), 'x');
+            v.push_back(x);
+        }
+        return v;
+    };
+    auto publish = [](const tb::ChainParamLists &l, tb::LabelFit *fit) {
+        return tb::chainParams(tb_chain_params_json, tb_chain_params_prio_len, 3, l, tb::kChainParamsMax, fit);
+    };
+    auto whole = [](const std::string &o) {
+        return o.size() <= tb::kChainParamsMax && o.front() == '[' && o.back() == ']' && o.find("\"key\":\"data_feed\"") != std::string::npos
+               && o.find("\"key\":\"preset_now\"") != std::string::npos && o.find("\"key\":\"wt3_select\"") != std::string::npos;
+    };
+    CHECK(strlen(tb_chain_params_json) <= 60000, "the fixed part (new parameters grow it) leaves room for the lists: %zu of %zu bytes", strlen(tb_chain_params_json), tb::kChainParamsMax);
+
+    tb::ChainParamLists l;
+    l.packs = names("Pack", 8, 10); l.tables = names("Table", 128, 14); l.banks = names("Bank", 5, 12);
+    l.demoPacks = names("Demo", 2, 10); l.demoParts = names("Part", 20, 14);
+    tb::LabelFit fit { 9, 9 };
+    std::string o = publish(l, &fit);
+    CHECK(whole(o) && fit.chars == 0 && fit.count == 0 && o.find(l.tables[127]) != std::string::npos, "an ordinary library keeps whole names (%zu bytes)", o.size());
+
+    l.tables = names("Long wavetable", 128, 48);
+    o = publish(l, &fit);
+    CHECK(whole(o) && fit.chars > 0 && fit.count == 0, "long wavetable names are shortened until the list fits (%zu bytes, %zu characters)", o.size(), fit.chars);
+    CHECK(o.find("127\"") != std::string::npos, "every wavetable is still listed");
+
+    l.packs = names("A wavetable pack with a long name", 900, 60); l.banks = names("A preset bank", 600, 40); l.demoParts = names("A demo part", 3000, 40);
+    o = publish(l, &fit);
+    CHECK(whole(o), "thousands of banks, packs and demo parts still fit (%zu bytes, %zu characters, %zu options)", o.size(), fit.chars, fit.count);
+}
+
 int main()
 {
     testVitalTableCompensation();
@@ -1206,6 +1256,7 @@ int main()
     testSampleSetOutlivesItsEngineShare();
     testSampleVelocityLayers();
     testPresetDigest();
+    testChainParams();
     printf("\n%s (%d failures)\n", g_fail ? "DSP TESTS FAILED" : "DSP TESTS PASSED", g_fail);
     return g_fail ? 1 : 0;
 }
